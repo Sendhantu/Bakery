@@ -1,0 +1,27 @@
+{% if pagination and pagination.pages > 1 %}
+<nav class="pagination" aria-label="Pagination">
+  {% if pagination.has_prev %}
+  <a href="{{ page_url(pagination.prev_num) }}" class="btn btn-outline btn-sm">← Prev</a>
+  {% else %}
+  <span class="btn btn-outline btn-sm" style="pointer-events:none;opacity:0.45">← Prev</span>
+  {% endif %}
+
+  {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+    {% if page_num %}
+      {% if page_num == pagination.page %}
+      <span class="btn btn-primary btn-sm">{{ page_num }}</span>
+      {% else %}
+      <a href="{{ page_url(page_num) }}" class="btn btn-ghost btn-sm">{{ page_num }}</a>
+      {% endif %}
+    {% else %}
+    <span class="btn btn-ghost btn-sm" style="pointer-events:none;opacity:0.55">…</span>
+    {% endif %}
+  {% endfor %}
+
+  {% if pagination.has_next %}
+  <a href="{{ page_url(pagination.next_num) }}" class="btn btn-outline btn-sm">Next →</a>
+  {% else %}
+  <span class="btn btn-outline btn-sm" style="pointer-events:none;opacity:0.45">Next →</span>
+  {% endif %}
+</nav>
+{% endif %}

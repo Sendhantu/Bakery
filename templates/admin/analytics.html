@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Analytics — SweetCrumbs Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --brown:        #5C3D2E;
+  --brown-mid:    #7B4F2E;
+  --brown-light:  #C8873A;
+  --brown-pale:   #E8C99A;
+  --green:        #3D7A55;
+  --green-pale:   #C8E6D4;
+  --cream:        #FBF5ED;
+  --cream-dark:   #F0E3D0;
+  --border:       #E6D3BC;
+  --text:         #2A1A0E;
+  --text-mid:     #5C4030;
+  --text-muted:   #A08060;
+  --white:        #FFFFFF;
+  --sidebar-w:    248px;
+  --topbar-h:     60px;
+  --font-display: 'Playfair Display', serif;
+  --font-body:    'DM Sans', sans-serif;
+  --r:            12px;
+  --r-lg:         18px;
+  --shadow-sm:    0 1px 4px rgba(92,61,46,.06);
+  --shadow:       0 4px 16px rgba(92,61,46,.10);
+  --shadow-md:    0 8px 32px rgba(92,61,46,.14);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-body);background:var(--cream);color:var(--text);min-height:100vh;display:flex;font-size:14.5px;line-height:1.5}
+a{text-decoration:none;color:inherit}
+button{border:none;background:none;cursor:pointer;font-family:inherit}
+
+/* SIDEBAR */
+.sidebar{
+  width:var(--sidebar-w);min-height:100vh;
+  background:var(--brown);
+  position:fixed;top:0;left:0;bottom:0;z-index:300;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.sidebar::before{
+  content:'';position:absolute;inset:0;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E");
+  pointer-events:none;opacity:.6;
+}
+.sidebar-inner{position:relative;z-index:1;display:flex;flex-direction:column;height:100%}
+.sb-brand{padding:1.5rem 1.4rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.1)}
+.sb-brand-logo{font-family:var(--font-display);font-size:1.25rem;color:#fff;display:flex;align-items:center;gap:.5rem}
+.sb-brand-sub{font-size:.7rem;font-weight:400;color:rgba(255,255,255,.45);letter-spacing:.06em;text-transform:uppercase;margin-top:.25rem;padding-left:1.75rem}
+.sb-section{padding:.9rem 0 .3rem}
+.sb-label{font-size:.65rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3);padding:.3rem 1.4rem .5rem}
+.sb-link{display:flex;align-items:center;gap:.75rem;padding:.6rem 1.4rem;color:rgba(255,255,255,.65);font-size:.855rem;font-weight:500;border-left:3px solid transparent;transition:all .18s;position:relative}
+.sb-link:hover{background:rgba(255,255,255,.08);color:#fff}
+.sb-link.active{background:rgba(255,255,255,.13);color:#fff;border-left-color:var(--brown-light)}
+.sb-icon{width:18px;text-align:center;font-size:.9rem;flex-shrink:0}
+.sb-badge{margin-left:auto;background:var(--brown-light);color:#fff;font-size:.65rem;font-weight:700;padding:.15rem .45rem;border-radius:20px;min-width:20px;text-align:center}
+.sb-footer{margin-top:auto;padding:1rem 1.4rem;border-top:1px solid rgba(255,255,255,.1)}
+.sb-user{display:flex;align-items:center;gap:.75rem}
+.sb-avatar{width:34px;height:34px;border-radius:50%;background:var(--brown-light);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;flex-shrink:0}
+.sb-user-name{font-size:.82rem;font-weight:600;color:#fff;line-height:1.2}
+.sb-user-role{font-size:.7rem;color:rgba(255,255,255,.45)}
+
+/* TOPBAR */
+.topbar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:var(--topbar-h);background:rgba(251,245,237,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 2rem;z-index:200}
+.topbar-breadcrumb{display:flex;align-items:center;gap:.5rem;font-size:.82rem;color:var(--text-muted)}
+.topbar-breadcrumb strong{color:var(--text);font-weight:600}
+.topbar-right{display:flex;align-items:center;gap:.75rem}
+.topbar-pill{background:var(--white);border:1px solid var(--border);border-radius:20px;padding:.35rem .9rem;font-size:.78rem;color:var(--text-mid);font-weight:500;display:flex;align-items:center;gap:.4rem;box-shadow:var(--shadow-sm)}
+.topbar-icon-btn{width:36px;height:36px;border-radius:10px;background:var(--white);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:.9rem;color:var(--text-mid);box-shadow:var(--shadow-sm);transition:all .15s;cursor:pointer}
+.topbar-icon-btn:hover{background:var(--cream-dark);color:var(--brown)}
+
+/* MAIN */
+.main{margin-left:var(--sidebar-w);padding:calc(var(--topbar-h) + 2rem) 2.25rem 3rem;flex:1;min-width:0}
+
+/* PAGE HEADER */
+.page-header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:2rem}
+.page-title{font-family:var(--font-display);font-size:2rem;color:var(--brown);line-height:1}
+.page-title span{display:block;font-family:var(--font-body);font-size:.78rem;font-weight:500;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;margin-bottom:.4rem}
+.period-tabs{display:flex;background:var(--white);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow-sm)}
+.period-tab{padding:.45rem .9rem;font-size:.8rem;font-weight:500;color:var(--text-muted);cursor:pointer;transition:all .15s}
+.period-tab.active{background:var(--brown);color:#fff}
+.period-tab:hover:not(.active){background:var(--cream-dark)}
+
+/* KPI CARDS */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1.25rem;margin-bottom:1.75rem}
+.kpi-card{background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.4rem 1.5rem;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s;animation:fadeUp .5s ease both}
+.kpi-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-md)}
+.kpi-card:nth-child(1){animation-delay:.05s}
+.kpi-card:nth-child(2){animation-delay:.1s}
+.kpi-card:nth-child(3){animation-delay:.15s}
+.kpi-card:nth-child(4){animation-delay:.2s}
+.kpi-card::before{content:'';position:absolute;bottom:0;left:0;right:0;height:3px}
+.kpi-card.c1::before{background:linear-gradient(90deg,var(--brown-light),var(--brown-pale))}
+.kpi-card.c2::before{background:linear-gradient(90deg,var(--green),#7EC8A0)}
+.kpi-card.c3::before{background:linear-gradient(90deg,#6B84A0,#9BB5CC)}
+.kpi-card.c4::before{background:linear-gradient(90deg,#9C6BA8,#C49ECC)}
+.kpi-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.9rem}
+.kpi-icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
+.kpi-card.c1 .kpi-icon{background:#FFF0DC}
+.kpi-card.c2 .kpi-icon{background:#DCEEE3}
+.kpi-card.c3 .kpi-icon{background:#DDEAF5}
+.kpi-card.c4 .kpi-icon{background:#EFE2F5}
+.kpi-trend{font-size:.72rem;font-weight:600;padding:.2rem .5rem;border-radius:20px;display:flex;align-items:center;gap:.2rem}
+.kpi-trend.up{background:#DCEEE3;color:var(--green)}
+.kpi-trend.down{background:#FDEAEA;color:#C0392B}
+.kpi-value{font-family:var(--font-display);font-size:1.85rem;color:var(--text);line-height:1;margin-bottom:.3rem}
+.kpi-label{font-size:.78rem;color:var(--text-muted);font-weight:500}
+
+/* GRIDS */
+.row-2-1{display:grid;grid-template-columns:1.75fr 1fr;gap:1.5rem;margin-bottom:1.5rem}
+.row-1-1{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1.5rem}
+
+/* CARD */
+.card{background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);overflow:hidden;animation:fadeUp .55s ease both}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 1.4rem;border-bottom:1px solid var(--border);background:linear-gradient(to right,var(--cream),var(--white))}
+.card-title{font-family:var(--font-display);font-size:1rem;color:var(--brown);display:flex;align-items:center;gap:.5rem}
+.card-subtitle{font-size:.74rem;color:var(--text-muted);font-weight:400;margin-top:.1rem}
+.card-body{padding:1.25rem}
+.card-body-flush{padding:0}
+.card-tag{font-size:.72rem;font-weight:600;color:var(--text-muted);background:var(--cream-dark);border:1px solid var(--border);padding:.2rem .6rem;border-radius:20px}
+
+/* TOP PRODUCTS */
+.prod-row{display:flex;align-items:center;gap:.9rem;padding:.8rem 1.4rem;border-bottom:1px solid var(--border);transition:background .12s}
+.prod-row:hover{background:var(--cream)}
+.prod-row:last-child{border-bottom:none}
+.prod-rank{width:24px;height:24px;border-radius:50%;background:var(--cream-dark);color:var(--text-mid);font-size:.72rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.prod-rank.gold{background:#FFF0DC;color:var(--brown-light)}
+.prod-name{flex:1;font-size:.855rem;font-weight:500;color:var(--text)}
+.prod-badges{display:flex;gap:.4rem;flex-shrink:0}
+
+/* CATEGORY BARS */
+.cat-row{display:flex;align-items:center;gap:1rem;padding:.8rem 1.4rem;border-bottom:1px solid var(--border)}
+.cat-row:last-child{border-bottom:none}
+.cat-name{min-width:100px;font-size:.835rem;font-weight:500;color:var(--text-mid)}
+.cat-bar-wrap{flex:1;height:8px;background:var(--cream-dark);border-radius:4px;overflow:hidden}
+.cat-bar{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--brown-mid),var(--brown-light));transform-origin:left;animation:barGrow .9s cubic-bezier(.22,1,.36,1) both}
+.cat-rev{min-width:82px;text-align:right;font-size:.8rem;font-weight:600;color:var(--brown)}
+
+/* BADGES */
+.badge{display:inline-flex;align-items:center;font-size:.72rem;font-weight:600;padding:.2rem .55rem;border-radius:20px}
+.badge-warm{background:#FFF0DC;color:var(--brown-mid)}
+.badge-green{background:#DCEEE3;color:var(--green)}
+
+/* SECTION DIVIDER */
+.section-divider{display:flex;align-items:center;gap:1rem;margin:2rem 0 1.5rem}
+.section-divider-label{font-family:var(--font-display);font-size:.95rem;color:var(--brown);white-space:nowrap}
+.section-divider-line{flex:1;height:1px;background:var(--border)}
+
+/* ANIMATIONS */
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes barGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-inner">
+    <div class="sb-brand">
+      <div class="sb-brand-logo">🎂 SweetCrumbs</div>
+      <div class="sb-brand-sub">Admin Portal</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Overview</div>
+      <a href="#" class="sb-link"><span class="sb-icon">🏠</span> Dashboard</a>
+      <a href="#" class="sb-link active"><span class="sb-icon">📈</span> Analytics</a>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Manage</div>
+      <a href="#" class="sb-link"><span class="sb-icon">📦</span> Orders <span class="sb-badge">12</span></a>
+      <a href="#" class="sb-link"><span class="sb-icon">🛍️</span> Products</a>
+      <a href="#" class="sb-link"><span class="sb-icon">🗂️</span> Categories</a>
+      <a href="#" class="sb-link"><span class="sb-icon">👥</span> Customers</a>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">Operations</div>
+      <a href="#" class="sb-link"><span class="sb-icon">🚚</span> Delivery</a>
+      <a href="#" class="sb-link"><span class="sb-icon">🏷️</span> Coupons</a>
+      <a href="#" class="sb-link"><span class="sb-icon">🧾</span> Raw Materials</a>
+      <a href="#" class="sb-link"><span class="sb-icon">🔔</span> Notifications</a>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">System</div>
+      <a href="#" class="sb-link"><span class="sb-icon">⚙️</span> Settings</a>
+      <a href="#" class="sb-link"><span class="sb-icon">🚪</span> Logout</a>
+    </div>
+    <div class="sb-footer">
+      <div class="sb-user">
+        <div class="sb-avatar">BA</div>
+        <div>
+          <div class="sb-user-name">Baker Admin</div>
+          <div class="sb-user-role">admin@bakery.com</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-breadcrumb">
+    <span>Admin</span>
+    <span style="opacity:.4">›</span>
+    <strong>Analytics</strong>
+  </div>
+  <div class="topbar-right">
+    <div class="topbar-pill">📅 May 2026</div>
+    <div class="topbar-pill">🟢 Live</div>
+    <button class="topbar-icon-btn" title="Refresh">↻</button>
+    <button class="topbar-icon-btn" title="Export">⬇</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<main class="main">
+
+  <div class="page-header">
+    <div class="page-title">
+      <span>Business Intelligence</span>
+      Analytics
+    </div>
+    <div class="period-tabs">
+      <div class="period-tab">7D</div>
+      <div class="period-tab">30D</div>
+      <div class="period-tab active">6M</div>
+      <div class="period-tab">1Y</div>
+    </div>
+  </div>
+
+  <!-- KPI Row -->
+  <div class="kpi-grid">
+    <div class="kpi-card c1">
+      <div class="kpi-top">
+        <div class="kpi-icon">🔁</div>
+        <div class="kpi-trend up">↑ 4.2%</div>
+      </div>
+      <div class="kpi-value">38%</div>
+      <div class="kpi-label">Repeat Customer Rate</div>
+    </div>
+    <div class="kpi-card c2">
+      <div class="kpi-top">
+        <div class="kpi-icon">🎁</div>
+        <div class="kpi-trend up">↑ 12%</div>
+      </div>
+      <div class="kpi-value">12,450</div>
+      <div class="kpi-label">Loyalty Points Issued</div>
+    </div>
+    <div class="kpi-card c3">
+      <div class="kpi-top">
+        <div class="kpi-icon">💳</div>
+        <div class="kpi-trend down">↓ 2.1%</div>
+      </div>
+      <div class="kpi-value">4,820</div>
+      <div class="kpi-label">Points Redeemed</div>
+    </div>
+    <div class="kpi-card c4">
+      <div class="kpi-top">
+        <div class="kpi-icon">💰</div>
+        <div class="kpi-trend up">↑ 18%</div>
+      </div>
+      <div class="kpi-value">₹4.13L</div>
+      <div class="kpi-label">Total Revenue (6M)</div>
+    </div>
+  </div>
+
+  <!-- Row 1 -->
+  <div class="row-2-1">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">📊 Monthly Revenue</div>
+          <div class="card-subtitle">Last 6 months performance</div>
+        </div>
+        <span class="card-tag">Bar Chart</span>
+      </div>
+      <div class="card-body">
+        <canvas id="monthlyChart" height="110"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🔵 Order Status</div>
+          <div class="card-subtitle">Current distribution</div>
+        </div>
+        <span class="card-tag">Donut</span>
+      </div>
+      <div class="card-body" style="display:flex;justify-content:center">
+        <canvas id="statusChart" height="195" style="max-width:230px"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2 -->
+  <div class="row-1-1">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">🏆 Top Products</div>
+          <div class="card-subtitle">By units sold & revenue</div>
+        </div>
+        <span class="card-tag">6M</span>
+      </div>
+      <div class="card-body-flush">
+        <div class="prod-row">
+          <div class="prod-rank gold">1</div>
+          <div class="prod-name">Classic Chocolate Cake</div>
+          <div class="prod-badges">
+            <span class="badge badge-warm">142 sold</span>
+            <span class="badge badge-green">₹85,758</span>
+          </div>
+        </div>
+        <div class="prod-row">
+          <div class="prod-rank gold">2</div>
+          <div class="prod-name">Red Velvet Cake</div>
+          <div class="prod-badges">
+            <span class="badge badge-warm">118 sold</span>
+            <span class="badge badge-green">₹71,682</span>
+          </div>
+        </div>
+        <div class="prod-row">
+          <div class="prod-rank">3</div>
+          <div class="prod-name">Rainbow Cupcakes</div>
+          <div class="prod-badges">
+            <span class="badge badge-warm">96 sold</span>
+            <span class="badge badge-green">₹31,200</span>
+          </div>
+        </div>
+        <div class="prod-row">
+          <div class="prod-rank">4</div>
+          <div class="prod-name">Choco Chip Cookies</div>
+          <div class="prod-badges">
+            <span class="badge badge-warm">84 sold</span>
+            <span class="badge badge-green">₹23,520</span>
+          </div>
+        </div>
+        <div class="prod-row">
+          <div class="prod-rank">5</div>
+          <div class="prod-name">Black Forest Cake</div>
+          <div class="prod-badges">
+            <span class="badge badge-warm">61 sold</span>
+            <span class="badge badge-green">₹47,579</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">⏰ Peak Order Hours</div>
+          <div class="card-subtitle">Busiest times of day</div>
+        </div>
+        <span class="card-tag">Today</span>
+      </div>
+      <div class="card-body">
+        <canvas id="hourChart" height="195"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Revenue by Category -->
+  <div class="section-divider">
+    <div class="section-divider-line"></div>
+    <div class="section-divider-label">💰 Revenue by Category</div>
+    <div class="section-divider-line"></div>
+  </div>
+
+  <div class="card" style="margin-bottom:2rem">
+    <div class="card-body-flush">
+      <div class="cat-row">
+        <div class="cat-name">🎂 Cakes</div>
+        <div class="cat-bar-wrap"><div class="cat-bar" style="width:100%;animation-delay:.4s"></div></div>
+        <div class="cat-rev">₹2,04,019</div>
+      </div>
+      <div class="cat-row">
+        <div class="cat-name">🧁 Cupcakes</div>
+        <div class="cat-bar-wrap"><div class="cat-bar" style="width:52%;animation-delay:.5s"></div></div>
+        <div class="cat-rev">₹1,06,080</div>
+      </div>
+      <div class="cat-row">
+        <div class="cat-name">🍪 Cookies</div>
+        <div class="cat-bar-wrap"><div class="cat-bar" style="width:34%;animation-delay:.6s"></div></div>
+        <div class="cat-rev">₹69,440</div>
+      </div>
+      <div class="cat-row">
+        <div class="cat-name">🥐 Pastries</div>
+        <div class="cat-bar-wrap"><div class="cat-bar" style="width:22%;animation-delay:.7s"></div></div>
+        <div class="cat-rev">₹44,900</div>
+      </div>
+      <div class="cat-row">
+        <div class="cat-name">🍞 Breads</div>
+        <div class="cat-bar-wrap"><div class="cat-bar" style="width:14%;animation-delay:.8s"></div></div>
+        <div class="cat-rev">₹28,860</div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+Chart.defaults.font.family = "'DM Sans', sans-serif";
+Chart.defaults.font.size = 12;
+Chart.defaults.color = '#A08060';
+
+// Monthly Revenue
+const mData = [
+  {month:'Dec',revenue:48200},{month:'Jan',revenue:62400},
+  {month:'Feb',revenue:55800},{month:'Mar',revenue:71300},
+  {month:'Apr',revenue:83700},{month:'May',revenue:91500},
+];
+const mCtx = document.getElementById('monthlyChart').getContext('2d');
+const mGrad = mCtx.createLinearGradient(0,0,0,260);
+mGrad.addColorStop(0,'rgba(200,135,58,0.6)');
+mGrad.addColorStop(1,'rgba(200,135,58,0.04)');
+new Chart(mCtx,{
+  type:'bar',
+  data:{
+    labels:mData.map(d=>d.month),
+    datasets:[{label:'Revenue (₹)',data:mData.map(d=>d.revenue),backgroundColor:mGrad,borderColor:'#C8873A',borderWidth:2,borderRadius:8,borderSkipped:false,hoverBackgroundColor:'rgba(200,135,58,.8)'}]
+  },
+  options:{
+    responsive:true,animation:{duration:900,easing:'easeOutQuart'},
+    plugins:{legend:{display:false},tooltip:{backgroundColor:'#5C3D2E',titleColor:'#FDF6EC',bodyColor:'rgba(253,246,236,.8)',padding:10,cornerRadius:8,callbacks:{label:ctx=>'  ₹'+ctx.raw.toLocaleString()}}},
+    scales:{
+      y:{grid:{color:'rgba(0,0,0,.04)'},border:{dash:[4,4]},ticks:{callback:v=>'₹'+(v>=1000?(v/1000).toFixed(0)+'k':v),padding:6}},
+      x:{grid:{display:false},ticks:{padding:6}}
+    }
+  }
+});
+
+// Order Status Donut
+const statusCounts={PLACED:24,PREPARING:18,PACKED:11,OUT_FOR_DELIVERY:9,DELIVERED:142,CANCELLED:7,ON_HOLD:4};
+const colours={PLACED:'#7A9E7E',PREPARING:'#C8873A',PACKED:'#6B84A0',OUT_FOR_DELIVERY:'#9C6BA8',DELIVERED:'#4CAF50',CANCELLED:'#E57373',ON_HOLD:'#FFB74D'};
+const sLabels=Object.keys(statusCounts);
+new Chart(document.getElementById('statusChart'),{
+  type:'doughnut',
+  data:{
+    labels:sLabels.map(l=>l.replace(/_/g,' ')),
+    datasets:[{data:Object.values(statusCounts),backgroundColor:sLabels.map(l=>colours[l]||'#ccc'),borderWidth:3,borderColor:'#fff',hoverOffset:6}]
+  },
+  options:{
+    responsive:true,cutout:'68%',animation:{duration:900,easing:'easeOutQuart'},
+    plugins:{legend:{position:'bottom',labels:{font:{size:11},boxWidth:12,padding:10,usePointStyle:true,pointStyleWidth:10}},tooltip:{backgroundColor:'#5C3D2E',titleColor:'#FDF6EC',bodyColor:'rgba(253,246,236,.8)',padding:10,cornerRadius:8}}
+  }
+});
+
+// Peak Hours
+const hData=[[8,4],[9,9],[10,14],[11,18],[12,22],[13,17],[14,11],[15,8],[16,12],[17,19],[18,27],[19,23],[20,15],[21,8]];
+const hCtx=document.getElementById('hourChart').getContext('2d');
+const hGrad=hCtx.createLinearGradient(0,0,0,220);
+hGrad.addColorStop(0,'rgba(61,122,85,0.65)');
+hGrad.addColorStop(1,'rgba(61,122,85,0.05)');
+new Chart(hCtx,{
+  type:'bar',
+  data:{labels:hData.map(d=>d[0]+':00'),datasets:[{label:'Orders',data:hData.map(d=>d[1]),backgroundColor:hGrad,borderColor:'#3D7A55',borderWidth:2,borderRadius:6,borderSkipped:false}]},
+  options:{
+    responsive:true,animation:{duration:900,easing:'easeOutQuart'},
+    plugins:{legend:{display:false},tooltip:{backgroundColor:'#5C3D2E',titleColor:'#FDF6EC',bodyColor:'rgba(253,246,236,.8)',padding:10,cornerRadius:8}},
+    scales:{y:{grid:{color:'rgba(0,0,0,.04)'},border:{dash:[4,4]},ticks:{stepSize:5,padding:6}},x:{grid:{display:false},ticks:{font:{size:10},padding:4}}}
+  }
+});
+
+// Period tabs
+document.querySelectorAll('.period-tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.period-tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
+</script>
+</body>
+</html>

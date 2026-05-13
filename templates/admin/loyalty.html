@@ -1,0 +1,162 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Loyalty Points — Admin{% endblock %}
+{% block content %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1.5rem">⭐ Loyalty Points</h1>
+
+<!-- Stats -->
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card orange">
+    <span class="stat-icon">🎁</span>
+    <div class="stat-value">{{ '{:,}'.format(total_issued) }}</div>
+    <div class="stat-label">Total Points Issued</div>
+  </div>
+  <div class="stat-card green">
+    <span class="stat-icon">💳</span>
+    <div class="stat-value">{{ '{:,}'.format(total_redeemed) }}</div>
+    <div class="stat-label">Total Points Redeemed</div>
+  </div>
+  <div class="stat-card brown">
+    <span class="stat-icon">📊</span>
+    <div class="stat-value">{{ '{:,}'.format(total_issued - total_redeemed) }}</div>
+    <div class="stat-label">Points in Circulation</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 340px;gap:1.5rem;align-items:start">
+  <!-- Leaderboard -->
+  <div class="card">
+    <div class="card-header">🏆 Top Customers by Points</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Customer</th>
+            <th>Email</th>
+            <th>Points</th>
+            <th>Tier</th>
+            <th>Adjust</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user, pts in top_users %}
+          <tr>
+            <td class="text-muted">{{ loop.index }}</td>
+            <td style="font-weight:600">{{ user.name }}</td>
+            <td class="text-sm text-muted">{{ user.email }}</td>
+            <td style="font-family:var(--font-display);font-size:1.1rem;font-weight:700;color:var(--caramel)">
+              {{ '{:,}'.format(pts|int if pts > 0 else 0) }}
+            </td>
+            <td>
+              {% set tier = 'Gold' if (pts or 0) >= 1000 else ('Silver' if (pts or 0) >= 500 else 'Bronze') %}
+              <span class="badge {% if tier == 'Gold' %}badge-orange{% elif tier == 'Silver' %}badge-brown{% else %}badge-green{% endif %}">
+                {% if tier == 'Gold' %}🥇{% elif tier == 'Silver' %}🥈{% else %}🥉{% endif %} {{ tier }}
+              </span>
+            </td>
+            <td>
+              <button class="btn btn-ghost btn-sm"
+                      onclick="openAdjust({{ user.id }}, '{{ user.name }}', {{ (pts or 0)|int }})">
+                ✏️ Adjust
+              </button>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="text-center text-muted" style="padding:1.5rem">
+              No loyalty data yet. Points are earned when orders are delivered.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Info panel -->
+  <div style="display:flex;flex-direction:column;gap:1.5rem">
+    <div class="card">
+      <div class="card-header">⚙️ Current Rules</div>
+      <div class="card-body">
+        <div style="display:flex;flex-direction:column;gap:0.75rem;font-size:0.9rem">
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:var(--cream);border-radius:var(--radius)">
+            <span class="text-muted">Earn rate</span>
+            <strong>₹{{ loyalty_config.LOYALTY_EARN_PER }} spent = {{ loyalty_config.LOYALTY_EARN_RATE }} point{% if loyalty_config.LOYALTY_EARN_RATE != 1 %}s{% endif %}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:var(--cream);border-radius:var(--radius)">
+            <span class="text-muted">Redeem rate</span>
+            <strong>{{ loyalty_config.LOYALTY_REDEEM_PER }} pts = ₹{{ loyalty_config.LOYALTY_REDEEM_RATE }} off</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:var(--cream);border-radius:var(--radius)">
+            <span class="text-muted">Min to redeem</span>
+            <strong>{{ loyalty_config.LOYALTY_REDEEM_PER }} points</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:var(--cream);border-radius:var(--radius)">
+            <span class="text-muted">Points expire</span>
+            <strong>After {{ loyalty_config.LOYALTY_EXPIRY_DAYS }} day{% if loyalty_config.LOYALTY_EXPIRY_DAYS != 1 %}s{% endif %}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:var(--cream);border-radius:var(--radius)">
+            <span class="text-muted">Max discount per order</span>
+            <strong>20% of subtotal</strong>
+          </div>
+        </div>
+        <div style="margin-top:1rem;padding:0.75rem;background:#FFF8E1;border-radius:var(--radius);border:1px solid #FFE082;font-size:0.8rem;color:var(--text-muted)">
+          💡 Rules are read from <code>config.py</code>. Points are awarded automatically when an order is marked <strong>DELIVERED</strong>.
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">🎯 Tier Thresholds</div>
+      <div class="card-body">
+        <div style="display:flex;flex-direction:column;gap:0.5rem;font-size:0.9rem">
+          <div class="flex items-center gap-2"><span style="font-size:1.25rem">🥇</span><span><strong>Gold</strong> — 1,000+ points</span></div>
+          <div class="flex items-center gap-2"><span style="font-size:1.25rem">🥈</span><span><strong>Silver</strong> — 500–999 points</span></div>
+          <div class="flex items-center gap-2"><span style="font-size:1.25rem">🥉</span><span><strong>Bronze</strong> — 0–499 points</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Adjust Modal -->
+<div id="adjust-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:none;align-items:center;justify-content:center">
+  <div class="card" style="width:100%;max-width:400px;margin:1rem">
+    <div class="card-header" id="adjust-modal-title">Adjust Points</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.loyalty_adjust') }}">
+        <input type="hidden" name="user_id" id="adjust-user-id">
+        <div class="form-group">
+          <label class="form-label">Points Adjustment</label>
+          <input class="form-control" type="number" name="points" id="adjust-points"
+                 placeholder="e.g. 50 or -50" required>
+          <p class="text-sm text-muted mt-1">Use positive to add, negative to deduct.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Reason</label>
+          <input class="form-control" name="reason" placeholder="e.g. Goodwill, correction…">
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="btn btn-primary">Apply</button>
+          <button type="button" class="btn btn-ghost" onclick="closeAdjust()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function openAdjust(userId, name, pts) {
+  document.getElementById('adjust-user-id').value = userId;
+  document.getElementById('adjust-modal-title').textContent = `Adjust Points — ${name} (${pts.toLocaleString()} pts)`;
+  document.getElementById('adjust-points').value = '';
+  const modal = document.getElementById('adjust-modal');
+  modal.style.display = 'flex';
+}
+function closeAdjust() {
+  document.getElementById('adjust-modal').style.display = 'none';
+}
+document.getElementById('adjust-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeAdjust();
+});
+</script>
+{% endblock %}

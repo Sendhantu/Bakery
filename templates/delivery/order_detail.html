@@ -1,0 +1,58 @@
+{% extends 'delivery/base_delivery.html' %}
+{% block title %}Order #{{ order.order_number }} — Delivery{% endblock %}
+{% block content %}
+<div class="page-wrap"><div class="container" style="max-width:800px">
+  <div class="flex justify-between items-center mb-4">
+    <div>
+      <h1 class="section-title">Order #{{ order.order_number }}</h1>
+      <p class="text-muted">{{ order.customer.name }} · {{ order.delivery_slot }} · {{ order.delivery_date }}</p>
+    </div>
+    <a href="{{ url_for('delivery.dashboard') }}" class="btn btn-ghost btn-sm">← Back</a>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:1.5rem">
+    <div class="card"><div class="card-header">Customer & Delivery Info</div>
+      <div class="card-body">
+        <div class="ops-order-actions mb-2">
+          <a href="tel:{{ order.phone }}" class="btn btn-primary btn-sm">Call Customer</a>
+          {% set map_query = address_query(order.address_line1, order.address_line2, order.city, order.pincode) %}
+          {% if map_query %}
+          <a href="{{ map_link_url(map_query) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Open Maps ↗</a>
+          {% endif %}
+        </div>
+        <p><strong>Customer:</strong> {{ order.customer.name }}</p>
+        <p><strong>Phone:</strong> <a href="tel:{{ order.phone }}">{{ order.phone }}</a></p>
+        <p><strong>Address:</strong> {{ order.address_line1 }}{% if order.address_line2 %}, {{ order.address_line2 }}{% endif %}, {{ order.city }} — {{ order.pincode }}</p>
+        <p><strong>Slot:</strong> {{ order.delivery_slot }} | <strong>Date:</strong> {{ order.delivery_date }}</p>
+        {% if order.special_note %}<p><strong>Note:</strong> {{ order.special_note }}</p>{% endif %}
+        {% set map_title = 'Delivery route map for order ' ~ order.order_number %}
+        {% include 'includes/address_map.html' %}
+      </div>
+    </div>
+    <div class="card"><div class="card-header">Items</div>
+      {% for item in items %}
+      <div style="padding:0.875rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between">
+        <span>{{ item.product_name }} {% if item.variant_name %}({{ item.variant_name }}){% endif %}</span>
+        <span>×{{ item.quantity }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="card"><div class="card-header">Update Status</div>
+      <div class="card-body">
+        <div class="ops-status-actions">
+          {% for status in allowed_statuses %}
+            {% if status != order.status %}
+            <form method="POST" action="{{ url_for('delivery.update_status', order_id=order.id) }}">
+              <input type="hidden" name="status" value="{{ status }}">
+              <button type="submit" class="btn {% if loop.first %}btn-primary{% else %}btn-outline{% endif %}">
+                Mark {{ status.replace('_', ' ') }}
+              </button>
+            </form>
+            {% endif %}
+          {% endfor %}
+          <span class="badge badge-brown">Current: {{ order.status.replace('_', ' ') }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></div>
+{% endblock %}

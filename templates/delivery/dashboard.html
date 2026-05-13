@@ -1,0 +1,17 @@
+{% extends 'delivery/base_delivery.html' %}
+{% block title %}Delivery Dashboard — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap" data-live-refresh="15000" data-live-refresh-source="{{ url_for('delivery.dashboard_live') }}">
+  <div class="container">
+    <section class="delivery-console-hero">
+      <div>
+        <span class="portal-auth-kicker">Operations</span>
+        <h1 class="section-title">🚚 Delivery Dashboard</h1>
+        <p class="section-subtitle" style="margin-bottom:0">Assigned drops first, clear status actions, and customer contact details at a glance.</p>
+      </div>
+      {% include 'delivery/_dashboard_status.html' %}
+    </section>
+    {% include 'delivery/_dashboard_live.html' %}
+  </div>
+</div>
+{% endblock %}

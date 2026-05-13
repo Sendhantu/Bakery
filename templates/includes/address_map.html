@@ -1,0 +1,24 @@
+{% if map_query %}
+<div class="address-map" data-map-card>
+  <div class="address-map-actions">
+    <button type="button"
+            class="btn btn-outline btn-sm"
+            data-map-toggle
+            data-map-open-label="View map"
+            data-map-close-label="Hide map">
+      View map
+    </button>
+    <a href="{{ map_link_url(map_query) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">
+      Open in Maps ↗
+    </a>
+  </div>
+  <div class="address-map-frame hidden" data-map-frame>
+    <iframe
+      data-map-src="{{ map_embed_url(map_query) }}"
+      title="{{ map_title or 'Location map' }}"
+      loading="lazy"
+      allowfullscreen
+      referrerpolicy="no-referrer-when-downgrade"></iframe>
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,299 @@
+{% extends 'base.html' %}
+{% block title %}{{ product.name }} — {{ bakery_name }}{% endblock %}
+{% block meta_description %}{{ product.name }} — from ₹{{ product.base_price|int }} at {{ bakery_name }}. {% if product.description %}{{ product.description[:155] }}{% if product.description|length > 155 %}…{% endif %}{% else %}Fresh artisan bakes with delivery in {{ store_details.city }}.{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-wrap">
+<div class="container">
+
+  <!-- Breadcrumb -->
+  <div class="flex gap-1 items-center text-sm text-muted mb-3">
+    <a href="{{ url_for('customer.home') }}">Discover</a> /
+    <a href="{{ url_for('customer.products') }}">Shop</a> /
+    {% if product.category %}
+    <a href="{{ url_for('customer.products', category=product.category_id) }}">{{ product.category.name }}</a> /
+    {% endif %}
+    <span style="color:var(--brown)">{{ product.name }}</span>
+  </div>
+
+  <div class="product-detail-grid">
+
+    <!-- IMAGE -->
+    <div>
+      <div style="border-radius:var(--radius-xl);overflow:hidden;background:var(--cream-dark);aspect-ratio:1;position:relative">
+        <img src="{{ product.image_src }}"
+             alt="{{ product.name }}"
+             style="width:100%;height:100%;object-fit:cover"
+             fetchpriority="high" decoding="async"
+             onerror="this.onerror=null;this.src='{{ product.fallback_image_src }}'">
+        {% if product.is_eggless %}
+        <span class="badge badge-green" style="position:absolute;top:1rem;left:1rem;font-size:0.85rem;padding:0.4rem 1rem">🌿 Eggless</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- DETAILS -->
+    <div>
+      <div class="flex gap-2 items-center mb-2">
+        <span class="badge badge-brown">{{ product.category.name if product.category else '—' }}</span>
+        {% if product.occasion_tags %}
+        {% for tag in product.occasion_tags.split(',') %}
+        <span class="badge badge-purple">{{ tag.strip()|title }}</span>
+        {% endfor %}
+        {% endif %}
+      </div>
+
+      <h1 style="font-family:var(--font-display);font-size:2.2rem;color:var(--brown);line-height:1.2;margin-bottom:0.75rem">
+        {{ product.name }}
+      </h1>
+
+      <!-- Rating -->
+      <div class="flex items-center gap-2 mb-3">
+        <span class="stars" style="font-size:1.2rem">
+          {% set avg = product.avg_rating %}
+          {% for i in range(5) %}
+            {% if i < avg|int %}★
+            {% elif i < avg %}⭐
+            {% else %}☆{% endif %}
+          {% endfor %}
+        </span>
+        <span style="font-weight:600;color:var(--brown)">{{ avg }}</span>
+        <span class="text-muted text-sm">({{ reviews|length }} reviews)</span>
+      </div>
+
+      <!-- Price -->
+      <div class="flex items-center gap-2 mb-3">
+        <span class="current-price" style="font-family:var(--font-display);font-size:2rem;font-weight:700;color:var(--caramel)">
+          ₹{{ product.base_price|int }}
+        </span>
+        <span class="live-stock-badge badge
+          {% if product.stock_status == 'in_stock' %}badge-green
+          {% elif product.stock_status == 'few_left' %}badge-orange
+          {% else %}badge-red{% endif %}">
+          {% if product.stock_status == 'in_stock' %}In Stock
+          {% elif product.stock_status == 'few_left' %}Only {{ product.total_stock }} left!
+          {% else %}Out of Stock{% endif %}
+        </span>
+      </div>
+
+      <!-- Description -->
+      {% if product.description %}
+      <p style="color:var(--text-muted);line-height:1.7;margin-bottom:1.5rem">{{ product.description }}</p>
+      {% endif %}
+
+      <!-- Variants -->
+      {% set variants = product.variants.all() %}
+      {% if variants %}
+      <div class="form-group">
+        <label class="form-label">Select Size / Variant</label>
+        <div class="variant-group flex flex-wrap gap-2">
+          {% for v in variants %}
+          <button type="button" class="variant-btn btn {% if loop.first %}btn-primary active{% else %}btn-outline{% endif %}"
+                  data-variant-id="{{ v.id }}"
+                  data-price="{{ v.price }}"
+                  data-stock="{{ v.stock }}"
+                  {% if v.stock == 0 %}disabled style="opacity:0.5;cursor:not-allowed"{% endif %}>
+            {{ v.name }}<br>
+            <small style="font-size:0.78rem;font-weight:600">₹{{ v.price|int }}</small>
+            {% if v.stock == 0 %}<small style="color:var(--dusty-rose)"> (sold out)</small>{% endif %}
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Add to Cart Form -->
+      {% if product.stock_status != 'out_of_stock' %}
+      <form method="POST" action="{{ url_for('customer.add_to_cart') }}">
+        <input type="hidden" name="product_id" value="{{ product.id }}">
+        <input type="hidden" id="variant_id" name="variant_id"
+               value="{{ variants[0].id if variants else '' }}">
+        <div class="flex items-center gap-2 mb-3">
+          <label class="form-label" style="margin:0;white-space:nowrap">Quantity:</label>
+          <div class="qty-control">
+            <button type="button" class="qty-btn qty-minus">−</button>
+            <input type="number" class="qty-input" name="quantity" value="1" min="1" max="{{ variants[0].stock if variants else 99 }}" readonly>
+            <button type="button" class="qty-btn qty-plus">+</button>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="btn btn-primary btn-lg" style="flex:1">
+            <i class="fa-solid fa-cart-plus"></i> Add to Cart
+          </button>
+          {% if current_user.is_authenticated %}
+          <a href="{{ url_for('customer.toggle_wishlist', product_id=product.id) }}"
+             class="btn btn-lg {% if in_wish %}btn-danger{% else %}btn-outline{% endif %}" title="Wishlist">
+            {{ '❤️' if in_wish else '🤍' }}
+          </a>
+          {% endif %}
+        </div>
+      </form>
+      {% else %}
+      <div class="flex gap-2">
+        <button class="btn btn-lg" disabled style="flex:1;background:var(--cream-dark);color:var(--text-muted);cursor:not-allowed">
+          Out of Stock
+        </button>
+        {% if current_user.is_authenticated %}
+        <a href="{{ url_for('customer.toggle_wishlist', product_id=product.id) }}"
+           class="btn btn-outline btn-lg" title="Wishlist">🤍 Save</a>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Quick Info -->
+      <div style="margin-top:1.5rem;padding:1.25rem;background:var(--cream);border-radius:var(--radius-lg);border:1px solid var(--border)">
+        <div class="flex gap-3 flex-wrap">
+          <span class="text-sm"><i class="fa-solid fa-truck" style="color:var(--caramel)"></i> Free delivery above ₹500</span>
+          <span class="text-sm"><i class="fa-solid fa-phone" style="color:var(--caramel)"></i> <a href="tel:{{ store_details.phone_tel }}">Call to customise</a></span>
+          <span class="text-sm"><i class="fa-solid fa-clock" style="color:var(--caramel)"></i> Order 24hrs in advance</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABS: Ingredients / Preparation / Reviews -->
+  <div style="margin-top:3rem">
+    <div class="flex gap-0" style="border-bottom:2px solid var(--border);margin-bottom:2rem">
+      {% for tab in ['Ingredients', 'Preparation', 'Reviews'] %}
+      <button class="tab-btn" data-tab="{{ tab|lower }}" style="padding:0.75rem 1.5rem;background:none;border:none;cursor:pointer;font-family:var(--font-body);font-size:0.95rem;font-weight:500;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s">
+        {{ tab }}{% if tab == 'Reviews' %} ({{ reviews|length }}){% endif %}
+      </button>
+      {% endfor %}
+    </div>
+
+    <div id="tab-ingredients" class="tab-content" style="display:block">
+      {% if product.ingredients %}
+      <div style="display:flex;flex-wrap:wrap;gap:0.75rem">
+        {% for ing in product.ingredients.split(',') %}
+        <span class="badge badge-brown" style="padding:0.4rem 0.9rem">{{ ing.strip() }}</span>
+        {% endfor %}
+      </div>
+      {% else %}<p class="text-muted">No ingredient information available.</p>{% endif %}
+    </div>
+
+    <div id="tab-preparation" class="tab-content" style="display:none">
+      {% if preparation_steps %}
+      <div class="preparation-steps">
+        {% for step in preparation_steps %}
+        <div class="preparation-step">
+          <div class="preparation-step-number">{{ loop.index }}</div>
+          <div>
+            <h4>Preparation Step {{ loop.index }}</h4>
+            <p>{{ step }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="detail-card" style="margin-top:1.25rem;max-width:760px">
+        <h3>Bakery Notes</h3>
+        <div class="detail-list">
+          <span>Fresh preparation starts after your order is confirmed.</span>
+          <span>Please keep your selected delivery slot clear so the bake reaches you at its best.</span>
+          <span>For customised designs, call the bakery before checkout so decoration timing can be planned properly.</span>
+        </div>
+      </div>
+      {% else %}<p class="text-muted">No preparation details available.</p>{% endif %}
+    </div>
+
+    <div id="tab-reviews" class="tab-content" style="display:none">
+      {% if reviews %}
+      <div style="display:flex;flex-direction:column;gap:1.5rem;max-width:700px">
+        {% for review in reviews %}
+        <div style="padding:1.25rem;background:var(--cream);border-radius:var(--radius-lg);border:1px solid var(--border)">
+          <div class="flex justify-between items-center mb-1">
+            <span style="font-weight:600;font-size:0.9rem">{{ review.author.name }}</span>
+            <span style="font-size:0.75rem;color:var(--text-muted)">{{ review.created_at.strftime('%b %d, %Y') }}</span>
+          </div>
+          <div class="stars mb-1">{% for i in range(review.rating) %}★{% endfor %}{% for i in range(5 - review.rating) %}☆{% endfor %}</div>
+          {% if review.comment %}<p style="font-size:0.875rem;color:var(--text-muted)">{{ review.comment }}</p>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-muted">No reviews yet. Be the first!</p>
+      {% endif %}
+
+      {% if current_user.is_authenticated and current_user.role == 'customer' and can_review_product %}
+      <div class="card mt-3" style="max-width:500px">
+        <div class="card-header">Write a Review</div>
+        <div class="card-body">
+          <form method="POST" action="{{ url_for('customer.add_review') }}">
+            <input type="hidden" name="product_id" value="{{ product.id }}">
+            <div class="form-group">
+              <label class="form-label">Your Rating</label>
+              <div class="star-rating-container" style="display:flex;gap:0.25rem;font-size:2rem;cursor:pointer">
+                {% for i in range(1,6) %}
+                <span class="star-input" data-value="{{ i }}" style="color:#ccc">☆</span>
+                {% endfor %}
+              </div>
+              <input type="hidden" id="rating-input" name="rating" value="{{ current_review.rating if current_review else 5 }}" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Your Comment (optional)</label>
+              <textarea class="form-control" name="comment" placeholder="Share your experience…">{{ current_review.comment if current_review and current_review.comment else '' }}</textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">{{ 'Update Review' if current_review else 'Submit Review' }}</button>
+          </form>
+        </div>
+      </div>
+      {% elif current_user.is_authenticated and current_user.role == 'customer' %}
+      <div class="detail-card mt-3" style="max-width:560px">
+        <h3>Reviews unlock after delivery</h3>
+        <div class="detail-list">
+          <span>Place this product and wait until the order is marked as delivered.</span>
+          <span>Once it reaches you, the review form will appear automatically here.</span>
+        </div>
+      </div>
+      {% elif not current_user.is_authenticated %}
+      <p class="text-muted mt-3">Sign in and complete a delivered order to leave a review.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- RELATED -->
+  {% if related %}
+  <div style="margin-top:3rem">
+    <h2 class="section-title">You Might Also Like</h2>
+    <div class="product-grid" style="margin-top:1.5rem">
+      {% for p in related %}
+      <div class="product-card">
+        <div class="product-img-wrap">
+          <a href="{{ url_for('customer.product_detail', product_id=p.id) }}">
+            <img src="{{ p.image_src }}"
+                 alt="{{ p.name }}" class="product-card-img" loading="lazy" decoding="async"
+                 onerror="this.onerror=null;this.src='{{ p.fallback_image_src }}'">
+          </a>
+        </div>
+        <div class="product-card-body">
+          <h3 class="product-card-title"><a href="{{ url_for('customer.product_detail', product_id=p.id) }}" style="color:inherit">{{ p.name }}</a></h3>
+          <div class="flex justify-between items-center mt-2">
+            <span class="product-price">₹{{ p.base_price|int }}</span>
+            <a href="{{ url_for('customer.product_detail', product_id=p.id) }}" class="btn btn-outline btn-sm">View</a>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+</div>
+
+<script>
+// Tabs
+const tabBtns = document.querySelectorAll('.tab-btn');
+tabBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    tabBtns.forEach(b => { b.style.color='var(--text-muted)'; b.style.borderBottomColor='transparent'; });
+    document.querySelectorAll('.tab-content').forEach(c => c.style.display='none');
+    btn.style.color='var(--brown)';
+    btn.style.borderBottomColor='var(--caramel)';
+    document.querySelector('#tab-'+btn.dataset.tab).style.display='block';
+  });
+});
+const requestedTab = window.location.hash.replace('#tab-', '');
+const initialTab = Array.from(tabBtns).find(btn => btn.dataset.tab === requestedTab) || tabBtns[0];
+initialTab?.click();
+</script>
+{% endblock %}

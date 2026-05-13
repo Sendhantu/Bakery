@@ -1,0 +1,26 @@
+<div id="admin-orders-live">
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Order #</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for o in orders %}
+          <tr>
+            <td><a href="{{ url_for('admin.order_detail', order_id=o.id) }}" style="font-weight:600;color:var(--brown)">#{{ o.order_number }}</a></td>
+            <td>{{ o.customer.name }}<br><span class="text-sm text-muted">{{ o.customer.email }}</span></td>
+            <td>{{ o.item_count }}</td>
+            <td style="font-weight:600;color:var(--caramel)">₹{{ o.total|int }}</td>
+            <td><span class="badge {% if o.payment_status=='PAID' %}badge-green{% else %}badge-orange{% endif %}">{{ o.payment_status }}</span></td>
+            <td><span class="badge {% if o.status=='DELIVERED' %}badge-green{% elif o.status=='CANCELLED' %}badge-red{% elif o.status=='ON_HOLD' %}badge-orange{% else %}badge-brown{% endif %}">{{ o.status.replace('_',' ') }}</span></td>
+            <td class="text-sm text-muted">{{ o.placed_at.strftime('%d %b %Y') }}</td>
+            <td><a href="{{ url_for('admin.order_detail', order_id=o.id) }}" class="btn btn-ghost btn-sm">View</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted)">No orders found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% include 'includes/pagination.html' %}
+</div>

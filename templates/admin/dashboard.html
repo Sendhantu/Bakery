@@ -1,0 +1,56 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Dashboard — Admin{% endblock %}
+{% block content %}
+<div data-live-refresh="15000" data-live-refresh-source="{{ url_for('admin.dashboard') }}">
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">Dashboard</h1>
+    <span class="badge badge-green">Live updates every 15s</span>
+  </div>
+  <span class="text-muted text-sm">{{ current_date_label }}</span>
+</div>
+
+{% include 'admin/_dashboard_live.html' %}
+
+<!-- Charts + Top Products -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.5rem;margin-bottom:2rem">
+  <div class="card">
+    <div class="card-header">Revenue — Last 7 Days</div>
+    <div class="card-body">
+      <canvas id="revenueChart" height="100"
+              data-labels='{{ chart_labels|tojson }}'
+              data-revenues='{{ chart_revenues|tojson }}'></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Orders — Last 7 Days</div>
+    <div class="card-body">
+      <canvas id="ordersChart" height="100"
+              data-labels='{{ chart_labels|tojson }}'
+              data-orders='{{ chart_order_counts|tojson }}'></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">🏆 Top Products</div>
+    <div class="card-body" style="padding:0">
+      {% for name, sold in top_products %}
+      <div style="padding:0.75rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:0.875rem">
+        <span style="font-weight:500">{{ loop.index }}. {{ name[:22] }}{% if name|length > 22 %}…{% endif %}</span>
+        <span class="badge badge-brown">{{ sold }} sold</span>
+      </div>
+      {% else %}
+      <div style="padding:1.25rem;color:var(--text-muted);text-align:center">
+        <p style="margin-bottom:0.75rem">No data yet</p>
+        <a href="{{ url_for('admin.products') }}" class="btn btn-sm btn-outline">Add products</a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/admin_charts.js') }}"></script>
+{% endblock %}

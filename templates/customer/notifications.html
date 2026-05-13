@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block title %}Notifications — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap"><div class="container" style="max-width:720px">
+  <h1 class="section-title mb-4">🔔 Notifications</h1>
+  {% if notifs %}
+  <div style="display:flex;flex-direction:column;gap:0.75rem">
+    {% for n in notifs %}
+    <a href="{{ n.link or '#' }}" style="text-decoration:none">
+    <div style="padding:1rem 1.25rem;background:{% if not n.is_read %}var(--cream-dark){% else %}var(--white){% endif %};border:1px solid var(--border);border-radius:var(--radius-lg);display:flex;gap:1rem;align-items:flex-start;transition:all 0.2s" onmouseover="this.style.borderColor='var(--caramel)'" onmouseout="this.style.borderColor='var(--border)'">
+      <span style="font-size:1.5rem">
+        {% if n.type == 'order' %}📦{% elif n.type == 'payment' %}💳{% elif n.type == 'chat' %}💬{% else %}🎁{% endif %}
+      </span>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:0.9rem;color:var(--brown)">{{ n.title }}</div>
+        <div class="text-sm text-muted">{{ n.message }}</div>
+        <div class="text-sm text-muted" style="margin-top:0.3rem">{{ n.created_at.strftime('%d %b %Y, %I:%M %p') }}</div>
+      </div>
+      {% if not n.is_read %}<span class="badge badge-orange" style="flex-shrink:0">New</span>{% endif %}
+    </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state"><div class="empty-icon">🔔</div><h3>No notifications</h3><p class="text-muted">You're all caught up!</p></div>
+  {% endif %}
+</div></div>
+{% endblock %}

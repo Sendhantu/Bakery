@@ -1,0 +1,27 @@
+<div id="delivery-agent-status" class="delivery-status-strip">
+  {% if agent %}
+  <div class="delivery-status-card">
+    <div class="delivery-status-value">{{ assigned_count }}</div>
+    <div class="delivery-status-label">Assigned now</div>
+  </div>
+  <div class="delivery-status-card">
+    <div class="delivery-status-value">{{ delivered_today }}</div>
+    <div class="delivery-status-label">Delivered today</div>
+  </div>
+  <div class="delivery-status-card">
+    <div class="delivery-status-value">{{ completed_count }}</div>
+    <div class="delivery-status-label">Completed total</div>
+  </div>
+  <div class="delivery-status-card delivery-status-card--state">
+    <span class="badge badge-{% if agent.availability %}green{% else %}orange{% endif %}">
+      {% if agent.availability %}Available{% else %}On Delivery{% endif %}
+    </span>
+    <div class="delivery-status-label">{{ agent.name }}</div>
+  </div>
+  {% else %}
+  <div class="delivery-status-card delivery-status-card--state">
+    <span class="badge badge-orange">No Agent Profile</span>
+    <div class="delivery-status-label">Ask admin to link your delivery account.</div>
+  </div>
+  {% endif %}
+</div>

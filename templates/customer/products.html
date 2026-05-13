@@ -1,0 +1,190 @@
+{% extends 'base.html' %}
+{% block title %}Shop — {{ bakery_name }}{% endblock %}
+{% block meta_description %}Browse cakes, pastries, breads, and more at {{ bakery_name }}. Filter by category, price, eggless options, and occasion.{% endblock %}
+
+{% block content %}
+<div class="page-wrap">
+<div class="container">
+
+  <!-- Header & Search -->
+  <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+    <div>
+      <h1 class="section-title">Our Bakery Shop</h1>
+      <p class="text-muted">{{ products|length }} delicious item{{ 's' if products|length != 1 else '' }} found</p>
+    </div>
+    <div class="search-bar">
+      <i class="fa-solid fa-search search-icon"></i>
+      <input type="text" class="form-control search-input" placeholder="Search cakes, cookies..."
+             value="{{ q or '' }}" id="search-input">
+      <div class="search-suggestions" id="search-suggestions"></div>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-1 flex-wrap mb-3">
+    <span class="text-sm text-muted">Sort:</span>
+    {% for key, label in [('featured','Featured'), ('newest','Newest'), ('price_asc','Price ↑'), ('price_desc','Price ↓'), ('rating','Top Rated')] %}
+    <a href="{{ url_for('customer.products', q=q, category=cat_id, eggless=eggless, min_price=min_price, max_price=max_price, occasion=occasion, sort=key) }}"
+       class="btn btn-sm {% if sort == key %}btn-primary{% else %}btn-ghost{% endif %}">
+      {{ label }}
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="layout-sidebar" style="grid-template-columns:240px 1fr">
+
+    <!-- FILTERS SIDEBAR -->
+    <div class="sidebar" style="position:sticky;top:90px">
+      <div class="sidebar-header">
+        <div style="font-family:var(--font-display);font-size:1rem;font-weight:600">🔍 Filters</div>
+      </div>
+      <form method="GET" action="{{ url_for('customer.products') }}" style="padding:1.25rem">
+
+        <!-- Search -->
+        <div class="form-group">
+          <label class="form-label">Search</label>
+          <input class="form-control" name="q" value="{{ q or '' }}" placeholder="Search products…">
+        </div>
+
+        <!-- Category -->
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select class="form-control" name="category">
+            <option value="">All Categories</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}" {% if cat_id == cat.id %}selected{% endif %}>
+              {{ cat.icon }} {{ cat.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Price Range -->
+        <div class="form-group">
+          <label class="form-label">Price Range (₹)</label>
+          <div class="form-row">
+            <input class="form-control" type="number" name="min_price" placeholder="Min" value="{{ min_price or '' }}">
+            <input class="form-control" type="number" name="max_price" placeholder="Max" value="{{ max_price or '' }}">
+          </div>
+        </div>
+
+        <!-- Egg/Eggless -->
+        <div class="form-group">
+          <label class="form-label">Dietary</label>
+          <div class="flex flex-wrap gap-1">
+            <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.875rem">
+              <input type="radio" name="eggless" value="" {% if eggless is none %}checked{% endif %}> All
+            </label>
+            <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.875rem">
+              <input type="radio" name="eggless" value="0" {% if eggless == 0 %}checked{% endif %}> With Egg
+            </label>
+            <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.875rem">
+              <input type="radio" name="eggless" value="1" {% if eggless == 1 %}checked{% endif %}> 🌿 Eggless
+            </label>
+          </div>
+        </div>
+
+        <!-- Occasions -->
+        <div class="form-group">
+          <label class="form-label">Occasion</label>
+          <select class="form-control" name="occasion">
+            <option value="">All Occasions</option>
+            {% for occ in ['birthday','wedding','anniversary','baby shower','corporate'] %}
+            <option value="{{ occ }}" {% if occasion == occ %}selected{% endif %}>{{ occ|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Sort</label>
+          <select class="form-control" name="sort">
+            <option value="featured" {% if sort == 'featured' %}selected{% endif %}>Featured</option>
+            <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest</option>
+            <option value="price_asc" {% if sort == 'price_asc' %}selected{% endif %}>Price: Low to High</option>
+            <option value="price_desc" {% if sort == 'price_desc' %}selected{% endif %}>Price: High to Low</option>
+            <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Top Rated</option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block">Apply Filters</button>
+        <a href="{{ url_for('customer.products') }}" class="btn btn-ghost btn-block mt-1">Clear</a>
+      </form>
+    </div>
+
+    <!-- PRODUCTS -->
+    <div>
+      {% if products %}
+      <div class="product-grid" id="products-grid">
+        {% for product in products %}
+        <div class="product-card">
+          <div class="product-img-wrap">
+            <a href="{{ url_for('customer.product_detail', product_id=product.id) }}">
+              <img src="{{ product.image_src }}"
+                   alt="{{ product.name }}" class="product-card-img" loading="lazy" decoding="async"
+                   onerror="this.onerror=null;this.src='{{ product.fallback_image_src }}'">
+            </a>
+            <span class="badge stock-badge
+              {% if product.stock_status == 'in_stock' %}badge-green
+              {% elif product.stock_status == 'few_left' %}badge-orange
+              {% else %}badge-red{% endif %}">
+              {% if product.stock_status == 'in_stock' %}In Stock
+              {% elif product.stock_status == 'few_left' %}⚠ Few Left
+              {% else %}Out of Stock{% endif %}
+            </span>
+            {% if product.is_eggless %}
+            <span class="badge eggless-badge badge-green" style="top:auto;bottom:10px;right:10px">🌿</span>
+            {% endif %}
+          </div>
+          <div class="product-card-body">
+            <div class="product-card-meta-row">
+              <span class="badge badge-brown" style="font-size:0.7rem">{{ product.category.name if product.category else '—' }}</span>
+              <span class="product-card-meta-text">Fresh bake</span>
+              {% if current_user.is_authenticated %}
+              <a href="{{ url_for('customer.toggle_wishlist', product_id=product.id) }}"
+                 style="color:var(--text-muted);font-size:1.1rem" title="Add to Wishlist">❤</a>
+              {% endif %}
+            </div>
+            <h3 class="product-card-title">
+              <a href="{{ url_for('customer.product_detail', product_id=product.id) }}" style="color:inherit">{{ product.name }}</a>
+            </h3>
+            <div class="flex items-center gap-1 mb-1">
+              <span class="stars" style="font-size:0.8rem">
+                {% for i in range(5) %}{% if i < product.avg_rating|int %}★{% else %}☆{% endif %}{% endfor %}
+              </span>
+              <span class="text-sm text-muted">({{ product.reviews.count() }})</span>
+            </div>
+            <p class="product-card-text">
+              {{ product.description[:88] }}{% if product.description|length > 88 %}…{% endif %}
+            </p>
+            <div class="product-card-footer">
+              <span class="product-price">₹{{ product.base_price|int }}</span>
+              {% if product.stock_status != 'out_of_stock' %}
+              <form method="POST" action="{{ url_for('customer.add_to_cart') }}">
+                <input type="hidden" name="product_id" value="{{ product.id }}">
+                <input type="hidden" name="variant_id" value="{{ product.variants.first().id if product.variants.first() else '' }}">
+                <input type="hidden" name="quantity" value="1">
+                <button class="btn btn-primary btn-sm" title="Add to Cart">
+                  <i class="fa-solid fa-cart-plus"></i>
+                </button>
+              </form>
+              {% else %}
+              <span class="badge badge-red">Sold Out</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <h3>No products found</h3>
+        <p class="text-muted">Try adjusting your filters or search term.</p>
+        <a href="{{ url_for('customer.products') }}" class="btn btn-primary mt-3">Clear Filters</a>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+</div>
+{% endblock %}

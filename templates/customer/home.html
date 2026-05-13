@@ -1,0 +1,247 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ bakery_name }} — Freshly Baked Happiness{% endblock %}
+{% block meta_description %}Handcrafted cakes, pastries, and breads at {{ bakery_name }}. Same-day delivery, custom designs, and eggless options in {{ store_details.city }}.{% endblock %}
+
+{% block content %}
+{% set hero_product = featured[0] if featured else None %}
+
+<!-- HERO -->
+<section class="hero">
+  <div class="container">
+    <div class="page-grid page-grid-hero">
+      <div class="hero-content fade-up">
+        <div class="hero-kicker mb-3">
+          🌟 Artisan Baked Fresh Daily
+        </div>
+        <h1 class="hero-title">
+          Every Occasion<br>Deserves <em>Perfect</em><br>Bakes
+        </h1>
+        <p class="hero-subtitle">
+          Handcrafted cakes, pastries, and breads made with love. 
+          From birthday cakes to wedding tiers — we bake your stories.
+        </p>
+        <div class="flex gap-2 flex-wrap">
+          <a href="{{ url_for('customer.products') }}" class="btn btn-caramel btn-lg">
+            <i class="fa-solid fa-shop"></i> Shop Now
+          </a>
+          {% if current_user.is_authenticated %}
+          <a href="{{ url_for('customer.order_history') }}" class="btn btn-lg btn-hero-ghost">
+            📦 Track Orders
+          </a>
+          {% else %}
+          <a href="{{ url_for('customer.products', occasion='custom') }}" class="btn btn-lg btn-hero-ghost">
+            ✨ Custom Cakes
+          </a>
+          {% endif %}
+          <a href="{{ url_for('customer.products', occasion='birthday') }}" class="btn btn-lg btn-hero-ghost">
+            🎂 Birthday Cakes
+          </a>
+        </div>
+        <div class="hero-badges">
+          <span class="hero-badge">⚡ 2-Hour Delivery</span>
+          <span class="hero-badge">🌿 Fresh Ingredients</span>
+          <span class="hero-badge">🥚 Eggless Options</span>
+        </div>
+      </div>
+      <div class="hero-visual fade-up fade-up-2">
+        <div class="hero-visual-wrap">
+          <div class="hero-visual-glow" aria-hidden="true"></div>
+          <div class="hero-visual-card">
+            <img src="{{ hero_product.image_src if hero_product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=1200&q=80' }}"
+                 alt="{{ hero_product.name if hero_product else 'Signature celebration cake' }}"
+                 fetchpriority="high" decoding="async"
+                 width="1200" height="1500"
+                 onerror="this.onerror=null;this.src='{{ hero_product.fallback_image_src if hero_product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=1200&q=80' }}'">
+            <div class="hero-visual-caption">
+              <div class="hero-visual-caption-kicker">Today’s Signature Bake</div>
+              <div class="hero-visual-caption-title">{{ hero_product.name if hero_product else 'Fresh Celebration Cakes' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="home-trust-strip">
+  <div class="container">
+    <div class="home-trust-grid">
+      <div class="home-trust-card">
+        <span class="home-trust-card-icon">⭐</span>
+        <div>
+          <div class="home-trust-card-value">4.8/5 Rating</div>
+          <div class="home-trust-card-label">Loved by regulars</div>
+        </div>
+      </div>
+      <div class="home-trust-card">
+        <span class="home-trust-card-icon">🚚</span>
+        <div>
+          <div class="home-trust-card-value">2-Hour Delivery</div>
+          <div class="home-trust-card-label">On selected bakes</div>
+        </div>
+      </div>
+      <div class="home-trust-card">
+        <span class="home-trust-card-icon">🧈</span>
+        <div>
+          <div class="home-trust-card-value">Fresh Daily</div>
+          <div class="home-trust-card-label">No stale inventory</div>
+        </div>
+      </div>
+      <div class="home-trust-card">
+        <span class="home-trust-card-icon">🔒</span>
+        <div>
+          <div class="home-trust-card-value">Secure Checkout</div>
+          <div class="home-trust-card-label">Safe payments & data</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CATEGORIES -->
+<section class="home-section home-section--white">
+  <div class="container">
+    <h2 class="section-title text-center">Browse by Category</h2>
+    <p class="section-subtitle text-center">Fresh baked delights across every taste</p>
+    <div class="home-category-grid">
+      {% for cat in categories %}
+      <a href="{{ url_for('customer.products', category=cat.id) }}" class="home-category-pill">
+        <span class="home-category-pill-icon" aria-hidden="true">{{ cat.icon }}</span>
+        <span class="home-category-pill-label">{{ cat.name }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- FEATURED PRODUCTS -->
+<section class="home-section">
+  <div class="container">
+    <div class="flex justify-between items-center mb-3">
+      <div>
+        <h2 class="section-title">Featured Bakes</h2>
+        <p class="section-subtitle">Our most loved creations</p>
+      </div>
+      <a href="{{ url_for('customer.products') }}" class="btn btn-outline">View All →</a>
+    </div>
+    <div class="product-grid">
+      {% for product in featured %}
+      <div class="product-card fade-up fade-up-{{ loop.index % 3 + 1 }}">
+        <div class="product-img-wrap">
+          <img src="{{ product.image_src }}"
+               alt="{{ product.name }}" class="product-card-img" loading="lazy" decoding="async"
+               onerror="this.onerror=null;this.src='{{ product.fallback_image_src }}'">
+          <span class="badge stock-badge
+            {% if product.stock_status == 'in_stock' %}badge-green
+            {% elif product.stock_status == 'few_left' %}badge-orange
+            {% else %}badge-red{% endif %}">
+            {% if product.stock_status == 'in_stock' %}In Stock
+            {% elif product.stock_status == 'few_left' %}Few Left
+            {% else %}Out of Stock{% endif %}
+          </span>
+          {% if product.is_eggless %}
+          <span class="badge eggless-badge badge-green">🌿 Eggless</span>
+          {% endif %}
+          {% if current_user.is_authenticated %}
+          <a href="{{ url_for('customer.toggle_wishlist', product_id=product.id) }}"
+             class="wish-btn" style="position:absolute;top:10px;right:10px;text-decoration:none">❤️</a>
+          {% endif %}
+        </div>
+        <div class="product-card-body">
+          <div class="product-card-meta-row">
+            <div class="badge badge-brown" style="font-size:0.7rem">{{ product.category.name }}</div>
+            <span class="product-card-meta-text">Fresh today</span>
+          </div>
+          <h3 class="product-card-title">{{ product.name }}</h3>
+          <div class="flex items-center gap-1 mb-2">
+            <span class="stars">
+              {% for i in range(5) %}
+                {% if i < product.avg_rating|int %}★{% else %}☆{% endif %}
+              {% endfor %}
+            </span>
+            <span class="text-sm text-muted">({{ product.reviews.count() }})</span>
+          </div>
+          <p class="product-card-text">
+            {{ product.description[:80] }}{% if product.description|length > 80 %}…{% endif %}
+          </p>
+          <div class="product-card-footer">
+            <span class="product-price">₹{{ product.base_price|int }}</span>
+            <div class="product-card-actions">
+              <a href="{{ url_for('customer.product_detail', product_id=product.id) }}" class="btn btn-outline btn-sm">Details</a>
+              {% if product.stock_status != 'out_of_stock' %}
+              <form method="POST" action="{{ url_for('customer.add_to_cart') }}" style="display:inline">
+                <input type="hidden" name="product_id" value="{{ product.id }}">
+                <input type="hidden" name="variant_id" value="{{ product.variants.first().id if product.variants.first() else '' }}">
+                <input type="hidden" name="quantity" value="1">
+                <button class="btn btn-primary btn-sm">🛒</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- OCCASIONS SECTION -->
+<section class="home-section home-section--occasions">
+  <div class="container">
+    <h2 class="section-title text-center">Bakes for Every Occasion</h2>
+    <p class="section-subtitle text-center">Tell us the moment, we'll bake the magic</p>
+    <div class="home-occasion-grid">
+      {% for occ in occasions %}
+      <a href="{{ url_for('customer.products', occasion=occ.lower()) }}" class="home-occasion-card">
+        <span class="home-occasion-card-icon" aria-hidden="true">
+          {% if occ == 'Birthday' %}🎂
+          {% elif occ == 'Wedding' %}💍
+          {% elif occ == 'Anniversary' %}🌹
+          {% elif occ == 'Baby Shower' %}🍼
+          {% else %}🏢{% endif %}
+        </span>
+        <span class="home-occasion-card-label">{{ occ }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- WHY US -->
+<section class="home-section home-section--white">
+  <div class="container">
+    <h2 class="section-title text-center">Why SweetCrumbs?</h2>
+    <div class="home-why-grid">
+      {% for item in [
+        ('🎨','Custom Designs','Tell us your vision, we bring it to life with edible art'),
+        ('⏰','On-Time Delivery','Guaranteed fresh delivery in your chosen time slot'),
+        ('🌿','Fresh & Natural','No preservatives. Real butter, real chocolate, real love'),
+        ('♻️','Eggless Options','Full range of egg-free bakes for every dietary need')
+      ] %}
+      <div class="home-why-card">
+        <div class="home-why-card-icon" aria-hidden="true">{{ item[0] }}</div>
+        <h3 class="home-why-card-title">{{ item[1] }}</h3>
+        <p class="home-why-card-text">{{ item[2] }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- CTA SUBSCRIPTION -->
+<section class="home-cta-section">
+  <div class="container">
+    <div class="home-cta-banner">
+      <div>
+        <h2 class="home-cta-title">Join the Sweet Club 🌟</h2>
+        <p class="home-cta-text">Subscribe for exclusive discounts on every order. Monthly at ₹199 or Yearly at ₹1499. Save up to 15% on all orders!</p>
+      </div>
+      <a href="{{ url_for('customer.subscription') }}" class="btn btn-lg btn-cta-cream">
+        Get Membership →
+      </a>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Customer — {{ user.name }}{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">{{ user.name }}</h1>
+  <a href="{{ url_for('admin.customers') }}" class="btn btn-ghost btn-sm">← Back</a>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
+  <div class="card"><div class="card-header">Profile</div>
+    <div class="card-body">
+      <p><strong>Email:</strong> {{ user.email }}</p><p><strong>Phone:</strong> {{ user.phone or '—' }}</p>
+      <p><strong>Role:</strong> {{ user.role }}</p><p><strong>Joined:</strong> {{ user.created_at.strftime('%d %b %Y') }}</p>
+      <div class="mt-2 flex gap-2">
+        <a href="{{ url_for('admin.chat_thread', customer_id=user.id) }}" class="btn btn-outline btn-sm">💬 Chat</a>
+        {% if user.phone %}<a href="tel:{{ user.phone }}" class="btn btn-ghost btn-sm">📞 Call</a>{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="card"><div class="card-header">Login History</div>
+    <div class="card-body" style="padding:0">
+      {% for h in logins %}
+      <div style="padding:0.65rem 1.25rem;border-bottom:1px solid var(--border);font-size:0.85rem;display:flex;justify-content:space-between">
+        <span style="color:{% if h.status=='success' %}var(--sage){% else %}var(--dusty-rose){% endif %}">{{ h.status }}</span>
+        <span class="text-muted">{{ h.login_time.strftime('%d %b %Y, %I:%M %p') }}</span>
+      </div>
+      {% else %}<div style="padding:1rem;color:var(--text-muted)">No login history.</div>{% endfor %}
+    </div>
+  </div>
+</div>
+<div class="card mt-3">
+  <div class="card-header">Order History</div>
+  <div class="table-wrap">
+    <table><thead><tr><th>Order #</th><th>Total</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
+    <tbody>
+      {% for o in orders %}<tr>
+        <td>#{{ o.order_number }}</td>
+        <td style="color:var(--caramel);font-weight:600">₹{{ o.total|int }}</td>
+        <td><span class="badge badge-brown">{{ o.status.replace('_',' ') }}</span></td>
+        <td class="text-sm text-muted">{{ o.placed_at.strftime('%d %b %Y') }}</td>
+        <td><a href="{{ url_for('admin.order_detail', order_id=o.id) }}" class="btn btn-ghost btn-sm">View</a></td>
+      </tr>{% endfor %}
+    </tbody></table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+{% block title %}Cart — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+<div class="container">
+  <h1 class="section-title mb-4">🛒 Your Cart</h1>
+
+  {% if items %}
+  <div class="page-grid page-grid-sidebar">
+    <!-- Cart Items -->
+    <div style="display:flex;flex-direction:column;gap:1rem">
+    <div class="card">
+      <div class="card-header" id="cart-header-count">{{ total_quantity }} item{{ 's' if total_quantity != 1 else '' }} across {{ items|length }} product{{ 's' if items|length != 1 else '' }}</div>
+      {% for item in items %}
+      {% set price = item.variant.price if item.variant else item.product.base_price %}
+      <div class="cart-item" data-cart-item>
+        <img src="{{ item.product.image_src }}"
+             alt="{{ item.product.name }}" class="cart-item-img" loading="lazy" decoding="async"
+             onerror="this.onerror=null;this.src='{{ item.product.fallback_image_src }}'">
+        <div style="flex:1">
+          <h4 style="font-family:var(--font-display);font-size:1rem;margin-bottom:0.2rem">{{ item.product.name }}</h4>
+          {% if item.variant %}<p class="text-sm text-muted">{{ item.variant.name }}</p>{% endif %}
+          <p class="text-sm text-muted" data-cart-line-quantity>Quantity selected: {{ item.quantity }}</p>
+          <p style="font-size:1rem;font-weight:600;color:var(--caramel)">₹{{ price|int }} each</p>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.75rem">
+          <form method="POST" action="{{ url_for('customer.update_cart') }}" style="display:flex;align-items:center;gap:0.5rem" data-cart-quantity-form>
+            {% if item.is_guest %}
+            <input type="hidden" name="product_id" value="{{ item.product_id }}">
+            <input type="hidden" name="variant_id" value="{{ item.variant_id }}">
+            {% else %}
+            <input type="hidden" name="cart_id" value="{{ item.cart_id }}">
+            {% endif %}
+            <div class="qty-control">
+              <button type="button" class="qty-btn qty-minus">−</button>
+              <input type="number" class="qty-input" name="quantity" value="{{ item.quantity }}" min="1" max="{{ item.max_qty }}" readonly>
+              <button type="button" class="qty-btn qty-plus">+</button>
+            </div>
+            <button type="submit" class="btn btn-ghost btn-sm">Update</button>
+          </form>
+          <div class="flex items-center gap-2">
+            <span style="font-weight:600;color:var(--brown)" data-cart-line-total>₹{{ (price * item.quantity)|int }}</span>
+            <a href="{{ item.remove_url }}" class="btn btn-ghost btn-sm" style="color:var(--dusty-rose)" title="Remove">✕</a>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="detail-card">
+        <h3>Order Planning</h3>
+        <div class="detail-list">
+          <span>Total quantity in bag: <strong style="color:var(--brown)" id="cart-planning-quantity">{{ total_quantity }}</strong></span>
+          {% if not current_user.is_authenticated %}
+          <span>Login is required only at checkout. Your current cart will stay saved after sign in.</span>
+          {% endif %}
+          <span>Delivery address and preferred slot will be collected at checkout.</span>
+          <span>Need a custom cake message or pickup note? Add it in the special instructions at checkout.</span>
+        </div>
+    </div>
+    </div>
+
+    <!-- Summary -->
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <div class="card">
+        <div class="card-header">Order Summary</div>
+        <div class="card-body">
+          <div class="flex justify-between mb-2"><span class="text-muted">Products</span><span class="fw-600" id="cart-summary-products">{{ items|length }}</span></div>
+          <div class="flex justify-between mb-2"><span class="text-muted">Total quantity</span><span class="fw-600" id="cart-summary-quantity">{{ total_quantity }}</span></div>
+          <div class="flex justify-between mb-2"><span class="text-muted">Subtotal</span><span class="fw-600" id="cart-summary-subtotal">₹{{ subtotal|int }}</span></div>
+          <div class="flex justify-between mb-2"><span class="text-muted">Delivery</span><span class="fw-600" id="cart-summary-delivery">{% if subtotal >= 500 %}<span style="color:var(--sage)">FREE</span>{% else %}₹50{% endif %}</span></div>
+          <div class="divider"></div>
+          <div class="flex justify-between mb-3"><span style="font-weight:600">Total</span><span style="font-family:var(--font-display);font-size:1.3rem;font-weight:700;color:var(--caramel)" id="cart-summary-total">₹{{ (subtotal + (0 if subtotal >= 500 else 50))|int }}</span></div>
+          <a href="{{ url_for('customer.checkout') if current_user.is_authenticated else url_for('auth.login', next=url_for('customer.checkout')) }}" class="btn btn-primary btn-block btn-lg">
+            {{ 'Proceed to Checkout →' if current_user.is_authenticated else 'Login to Checkout →' }}
+          </a>
+          <a href="{{ url_for('customer.products') }}" class="btn btn-ghost btn-block mt-2">Continue Shopping</a>
+        </div>
+      </div>
+      <div class="detail-card">
+        <h3>Bakery Address</h3>
+        <div class="detail-list">
+          <span>{{ store_details.name }}</span>
+          <span>{{ store_details.address_line1 }}, {{ store_details.address_line2 }}</span>
+          <span>{{ store_details.city }} - {{ store_details.pincode }}</span>
+          <span>{{ store_details.phone }}</span>
+          <span>{{ store_details.hours }}</span>
+          <span>If you prefer self-pickup, mention it in the order instructions at checkout.</span>
+        </div>
+      </div>
+      {% if subtotal < 500 %}
+      <div style="margin-top:1rem;padding:1rem;background:var(--cream);border-radius:var(--radius-lg);border:1px solid var(--border);text-align:center;font-size:0.85rem;color:var(--text-muted)" id="cart-free-delivery-note">
+        Add ₹{{ (500 - subtotal)|int }} more for <strong style="color:var(--sage)">FREE delivery</strong> 🎁
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">🛒</div>
+    <h3>Your cart is empty</h3>
+    <p class="text-muted">Looks like you haven't added anything yet.</p>
+    <a href="{{ url_for('customer.products') }}" class="btn btn-primary mt-3">Start Shopping</a>
+  </div>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

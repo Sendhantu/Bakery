@@ -1,0 +1,16 @@
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-Bcrypt==1.0.1
+Flask-WTF==1.2.1
+Flask-Mail==0.10.0
+WTForms==3.1.1
+PyMySQL==1.1.0
+cryptography==41.0.7
+Pillow==10.1.0
+reportlab==4.0.7
+python-dotenv==1.0.0
+email-validator==2.1.0
+python-dateutil==2.9.0
+twilio==8.12.0
+pytest==8.0.0

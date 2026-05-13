@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Something Went Wrong — {{ bakery_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+  <main class="site-main" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;background:linear-gradient(135deg,var(--cream) 0%,#f8ead8 100%)">
+    <section class="card" style="width:min(600px,100%);text-align:center">
+      <div class="card-body" style="padding:3rem 2rem">
+        <div style="font-size:3rem;margin-bottom:1rem">🧁</div>
+        <h1 style="font-size:2.2rem;margin-bottom:0.75rem">The bakery is having a moment.</h1>
+        <p class="text-muted" style="max-width:440px;margin:0 auto 1.5rem">Something unexpected happened while loading this page. Please refresh once, or return to the storefront and try again in a moment.</p>
+        <div class="flex gap-2 justify-center flex-wrap">
+          <a href="{{ url_for('customer.home') }}" class="btn btn-primary">Return Home</a>
+          <button class="btn btn-outline" type="button" onclick="window.location.reload()">Refresh Page</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

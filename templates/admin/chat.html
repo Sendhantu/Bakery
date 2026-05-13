@@ -1,0 +1,48 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Chat — Admin{% endblock %}
+{% block content %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1.5rem">💬 Chat Dashboard</h1>
+<div style="display:grid;grid-template-columns:280px 1fr;gap:1.5rem;height:600px">
+  <div class="card" style="overflow-y:auto">
+    <div class="card-header">Conversations</div>
+    {% for c in customers %}
+    <a href="{{ url_for('admin.chat_thread', customer_id=c.id) }}"
+       style="display:flex;align-items:center;gap:0.75rem;padding:0.875rem 1.25rem;border-bottom:1px solid var(--border);{% if active_customer and active_customer.id==c.id %}background:var(--cream-dark){% endif %}">
+      <div style="width:36px;height:36px;background:var(--brown);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--cream);font-size:0.875rem;font-weight:600;flex-shrink:0">{{ c.name[0] }}</div>
+      <div><div style="font-size:0.875rem;font-weight:600;color:var(--brown)">{{ c.name }}</div><div class="text-sm text-muted">{{ c.email }}</div></div>
+    </a>
+    {% else %}<div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:0.875rem">No conversations yet</div>{% endfor %}
+  </div>
+  <div>
+    {% if active_customer is defined and active_customer %}
+    <div class="chat-container">
+      <div style="padding:0.875rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0.75rem">
+        <div style="width:36px;height:36px;background:var(--brown);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--cream);font-weight:600">{{ active_customer.name[0] }}</div>
+        <div><div style="font-weight:600">{{ active_customer.name }}</div><div class="text-sm text-muted">{{ active_customer.email }}</div></div>
+        <a href="tel:{{ active_customer.phone }}" class="btn btn-ghost btn-sm ml-auto">📞</a>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        {% for msg in messages %}
+        <div>
+          <div class="msg-bubble {% if msg.sender_id == current_user.id %}sent{% else %}received{% endif %}">
+            {{ msg.content }}<div class="msg-time">{{ msg.sent_at.strftime('%I:%M %p') }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="chat-input-area">
+        <form method="POST" action="{{ url_for('admin.admin_send_message', receiver_id=active_customer.id) }}" style="display:flex;gap:0.75rem;width:100%">
+          <input class="form-control" name="content" placeholder="Type a reply…" required autocomplete="off" style="flex:1">
+          <button type="submit" class="btn btn-primary" style="flex-shrink:0">Send ✈️</button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+    <div class="flex-center" style="height:100%;background:var(--cream);border-radius:var(--radius-xl);border:1px solid var(--border)">
+      <div style="text-align:center;color:var(--text-muted)"><div style="font-size:3rem;margin-bottom:0.75rem">💬</div><p>Select a conversation to start chatting</p></div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+<script>const m=document.getElementById('chat-messages');if(m)m.scrollTop=m.scrollHeight;</script>
+{% endblock %}

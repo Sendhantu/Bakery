@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}Membership — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap" data-live-refresh="15000"><div class="container" style="max-width:900px">
+  <h1 class="section-title text-center mb-1">🌟 Sweet Club Membership</h1>
+  <p class="section-subtitle text-center">Save more on every order with our exclusive membership plans</p>
+
+  {% if pending_subscription_payment %}
+  <div style="padding:1rem 1.25rem;background:#FFF8E1;border:1px solid #FFE082;border-radius:var(--radius-lg);margin-bottom:1.5rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+    <span>⏳ A {{ pending_subscription_payment.subscription_plan|title }} membership payment is pending. The plan will activate only after payment success is integrated.</span>
+    <a href="{{ url_for('customer.payment_link_page', token=pending_subscription_payment.token) }}" class="btn btn-outline btn-sm">Continue to Payment Page</a>
+  </div>
+  {% endif %}
+
+  {% if sub %}
+  <div style="padding:1.5rem;background:linear-gradient(135deg,var(--caramel),var(--brown));border-radius:var(--radius-xl);color:var(--cream);text-align:center;margin-bottom:2rem">
+    <div style="font-size:2rem;margin-bottom:0.5rem">🌟</div>
+    <h3 style="font-family:var(--font-display);color:var(--cream);margin-bottom:0.3rem">Active {{ sub.plan|title }} Membership</h3>
+    <p style="opacity:0.85">{{ sub.discount_pct|int }}% discount on all orders · Expires {{ sub.end_date.strftime('%d %b %Y') }}</p>
+  </div>
+  {% endif %}
+
+  <div class="page-grid page-grid-plans" style="margin-top:2rem">
+    {% for plan, price, disc, days, badge in [('monthly',199,10,30,''), ('yearly',1499,15,365,'⭐ Best Value')] %}
+    <div class="card" style="border-radius:var(--radius-xl);position:relative;{% if plan=='yearly' %}border-color:var(--caramel);box-shadow:0 0 0 2px var(--caramel){% endif %}">
+      {% if badge %}<div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--caramel);color:var(--white);padding:0.25rem 1rem;border-radius:100px;font-size:0.78rem;font-weight:600;white-space:nowrap">{{ badge }}</div>{% endif %}
+      <div class="card-body" style="text-align:center;padding:2rem">
+        <h3 style="font-family:var(--font-display);font-size:1.5rem;margin-bottom:0.3rem">{{ plan|title }}</h3>
+        <div style="font-family:var(--font-display);font-size:3rem;font-weight:700;color:var(--caramel);line-height:1">₹{{ price }}</div>
+        <div class="text-muted text-sm mb-3">per {{ plan }}</div>
+        <div style="background:var(--cream);border-radius:var(--radius-lg);padding:1rem;margin-bottom:1.5rem">
+          <div style="font-size:2rem;font-weight:700;color:var(--brown)">{{ disc }}% OFF</div>
+          <div class="text-sm text-muted">on every order</div>
+        </div>
+        <ul style="list-style:none;text-align:left;margin-bottom:1.5rem">
+          {% for feat in ['Automatic discount on all orders','Priority customer support','Early access to new products','Exclusive member-only offers'] %}
+          <li style="padding:0.4rem 0;font-size:0.875rem;display:flex;gap:0.5rem"><span style="color:var(--sage)">✓</span>{{ feat }}</li>
+          {% endfor %}
+        </ul>
+        <form method="POST" action="{{ url_for('customer.subscribe') }}">
+          <input type="hidden" name="plan" value="{{ plan }}">
+          <button type="submit" class="btn {% if plan=='yearly' %}btn-caramel{% else %}btn-primary{% endif %} btn-block btn-lg">
+            {% if sub and sub.plan == plan %}Renew Plan{% else %}Get {{ plan|title }}{% endif %}
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div></div>
+{% endblock %}

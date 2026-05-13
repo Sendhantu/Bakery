@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Invoice #{{ order.order_number }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <style>
+    body { background: #fff; padding: 2rem; }
+    .invoice-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem; }
+    .invoice-brand { font-family: 'Playfair Display', serif; font-size: 2rem; color: #5C3D2E; }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom:1.5rem">
+    <button onclick="window.print()" class="btn btn-primary">🖨️ Print Invoice</button>
+    <a href="{{ url_for('customer.order_detail', order_id=order.id) }}" class="btn btn-ghost">← Back to Order</a>
+  </div>
+
+  <div style="border:1px solid #ddd;border-radius:12px;padding:2rem;max-width:700px;margin:0 auto">
+    <div class="invoice-header">
+      <div>
+        <div class="invoice-brand">🎂 SweetCrumbs</div>
+        <p style="color:#7A6A5A;font-size:0.85rem;margin-top:0.25rem">Artisan Bakery · {{ store_details.phone }}</p>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:1.5rem;font-weight:700;color:#C8873A">INVOICE</div>
+        <div style="font-size:0.9rem;color:#7A6A5A">#{{ order.order_number }}</div>
+        <div style="font-size:0.85rem;color:#7A6A5A">{{ order.placed_at.strftime('%d %B %Y') }}</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-bottom:2rem;padding:1.5rem;background:#FDF6EC;border-radius:12px">
+      <div>
+        <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:#7A6A5A;margin-bottom:0.5rem">Bill To</div>
+        <div style="font-weight:600">{{ order.customer.name }}</div>
+        <div style="font-size:0.875rem;color:#7A6A5A">{{ order.customer.email }}</div>
+        <div style="font-size:0.875rem;color:#7A6A5A">{{ order.phone }}</div>
+      </div>
+      <div>
+        <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:#7A6A5A;margin-bottom:0.5rem">Deliver To</div>
+        <div style="font-size:0.875rem">{{ order.address_line1 }}{% if order.address_line2 %}, {{ order.address_line2 }}{% endif %}</div>
+        <div style="font-size:0.875rem">{{ order.city }} — {{ order.pincode }}</div>
+        <div style="font-size:0.875rem;color:#7A6A5A">Slot: {{ order.delivery_slot }} | {{ order.delivery_date }}</div>
+      </div>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:1.5rem">
+      <thead>
+        <tr style="background:#F5E6D0">
+          <th style="padding:0.75rem;text-align:left;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:#7A6A5A">Item</th>
+          <th style="padding:0.75rem;text-align:center;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:#7A6A5A">Qty</th>
+          <th style="padding:0.75rem;text-align:right;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:#7A6A5A">Unit Price</th>
+          <th style="padding:0.75rem;text-align:right;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:#7A6A5A">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr style="border-bottom:1px solid #eee">
+          <td style="padding:0.75rem">
+            <div style="font-weight:500">{{ item.product_name }}</div>
+            {% if item.variant_name %}<div style="font-size:0.8rem;color:#7A6A5A">{{ item.variant_name }}</div>{% endif %}
+          </td>
+          <td style="padding:0.75rem;text-align:center">{{ item.quantity }}</td>
+          <td style="padding:0.75rem;text-align:right">₹{{ item.unit_price|int }}</td>
+          <td style="padding:0.75rem;text-align:right;font-weight:600">₹{{ item.subtotal|int }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div style="display:flex;justify-content:flex-end">
+      <div style="min-width:250px">
+        <div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem"><span style="color:#7A6A5A">Subtotal</span><span>₹{{ order.subtotal|int }}</span></div>
+        {% if order.discount > 0 %}<div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem;color:#7A9E7E"><span>Discount</span><span>−₹{{ order.discount|int }}</span></div>{% endif %}
+        {% if order.loyalty_discount > 0 %}<div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem;color:#7A9E7E"><span>Loyalty Discount</span><span>−₹{{ order.loyalty_discount|int }}</span></div>{% endif %}
+        <div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem"><span style="color:#7A6A5A">Delivery</span><span>{% if order.delivery_charge == 0 %}FREE{% else %}₹{{ order.delivery_charge|int }}{% endif %}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:0.75rem 0;border-top:2px solid #5C3D2E;margin-top:0.5rem">
+          <span style="font-weight:700">Total</span>
+          <span style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#C8873A">₹{{ order.total|int }}</span>
+        </div>
+        <div style="padding:0.4rem 0;font-size:0.85rem;color:#7A6A5A">Payment: {{ order.payment_method }} · <span class="badge {% if order.payment_status == 'PAID' %}badge-green{% else %}badge-orange{% endif %}">{{ order.payment_status }}</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:2rem;padding:1rem;background:#FDF6EC;border-radius:8px;text-align:center;font-size:0.85rem;color:#7A6A5A">
+      Thank you for choosing SweetCrumbs! 🎂 We hope every bite brings joy. 
+    </div>
+  </div>
+</body>
+</html>

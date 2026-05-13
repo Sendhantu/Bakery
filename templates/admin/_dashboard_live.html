@@ -1,0 +1,128 @@
+<div id="admin-dashboard-live">
+  <div class="stat-grid">
+    <a href="{{ url_for('admin.analytics') }}" class="stat-card orange" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">₹</span>
+      <div class="stat-value">₹{{ '{:,.0f}'.format(total_revenue) }}</div>
+      <div class="stat-label">Total Revenue</div>
+      <div class="trend-chip trend-chip-{{ trend_revenue.dir }}">
+        {% if trend_revenue.dir == 'up' %}↗{% elif trend_revenue.dir == 'down' %}↘{% else %}→{% endif %}
+        {{ trend_revenue.pct }}% vs last 7 days
+      </div>
+    </a>
+    <a href="{{ url_for('admin.orders') }}" class="stat-card green" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">📦</span>
+      <div class="stat-value">{{ total_orders }}</div>
+      <div class="stat-label">Total Orders</div>
+      <div class="trend-chip trend-chip-{{ trend_orders.dir }}">
+        {% if trend_orders.dir == 'up' %}↗{% elif trend_orders.dir == 'down' %}↘{% else %}→{% endif %}
+        {{ trend_orders.pct }}% vs last 7 days
+      </div>
+    </a>
+    <a href="{{ url_for('admin.customers') }}" class="stat-card brown" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">👥</span>
+      <div class="stat-value">{{ total_customers }}</div>
+      <div class="stat-label">Customers</div>
+      <div class="trend-chip trend-chip-{{ trend_customers.dir }}">
+        {% if trend_customers.dir == 'up' %}↗{% elif trend_customers.dir == 'down' %}↘{% else %}→{% endif %}
+        {{ trend_customers.pct }}% new customers
+      </div>
+    </a>
+    <a href="{{ url_for('admin.orders', scope='pending') }}" class="stat-card rose" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">⏳</span>
+      <div class="stat-value">{{ pending_orders }}</div>
+      <div class="stat-label">Pending Orders</div>
+    </a>
+    <a href="{{ url_for('admin.orders', scope='today') }}" class="stat-card orange" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">📅</span>
+      <div class="stat-value">{{ today_orders }}</div>
+      <div class="stat-label">Today's Orders</div>
+    </a>
+    <a href="{{ url_for('admin.analytics') }}" class="stat-card green" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">💰</span>
+      <div class="stat-value">₹{{ '{:,.0f}'.format(today_revenue) }}</div>
+      <div class="stat-label">Today's Revenue</div>
+    </a>
+    <a href="{{ url_for('admin.inventory') }}" class="stat-card rose" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">⚠️</span>
+      <div class="stat-value">{{ low_stock_items }}</div>
+      <div class="stat-label">Low Stock Variants</div>
+    </a>
+    <a href="{{ url_for('admin.raw_materials') }}" class="stat-card orange" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">🧂</span>
+      <div class="stat-value">{{ material_alerts }}</div>
+      <div class="stat-label">Material Alerts</div>
+    </a>
+    <a href="{{ url_for('admin.products') }}" class="stat-card brown" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">🛑</span>
+      <div class="stat-value">{{ inactive_products }}</div>
+      <div class="stat-label">Inactive Products</div>
+    </a>
+    <a href="{{ url_for('admin.chat') }}" class="stat-card brown" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">💬</span>
+      <div class="stat-value">{{ pending_msgs }}</div>
+      <div class="stat-label">Unread Messages</div>
+    </a>
+    <a href="{{ url_for('admin.loyalty') }}" class="stat-card green" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">⭐</span>
+      <div class="stat-value">{{ '{:,}'.format(total_loyalty_points) }}</div>
+      <div class="stat-label">Loyalty Points in Circulation</div>
+    </a>
+  </div>
+
+  {% if mod_requests > 0 %}
+  <div style="padding:0.875rem 1.25rem;background:#FFF3E0;border:1px solid #FFE082;border-radius:var(--radius-lg);margin-bottom:1.5rem;display:flex;justify-content:space-between;align-items:center">
+    <span>⚠️ <strong>{{ mod_requests }}</strong> modification request{{ 's' if mod_requests != 1 }} awaiting review</span>
+    <a href="{{ url_for('admin.modifications') }}" class="btn btn-sm btn-outline">Review Now</a>
+  </div>
+  {% endif %}
+  {% if out_of_stock > 0 %}
+  <div style="padding:0.875rem 1.25rem;background:#FFEBEE;border:1px solid #FFCDD2;border-radius:var(--radius-lg);margin-bottom:1.5rem;display:flex;justify-content:space-between;align-items:center">
+    <span>❌ <strong>{{ out_of_stock }}</strong> variant{{ 's' if out_of_stock != 1 }} out of stock</span>
+    <a href="{{ url_for('admin.inventory') }}" class="btn btn-sm btn-outline">Update Stock</a>
+  </div>
+  {% endif %}
+  {% if low_stock_materials > 0 or out_of_stock_materials > 0 %}
+  <div style="padding:0.875rem 1.25rem;background:#FFF8E1;border:1px solid #FFE082;border-radius:var(--radius-lg);margin-bottom:1.5rem;display:flex;justify-content:space-between;align-items:center">
+    <span>🧂 <strong>{{ low_stock_materials }}</strong> low-stock and <strong>{{ out_of_stock_materials }}</strong> out-of-stock raw material{{ '' if (low_stock_materials + out_of_stock_materials) == 1 else 's' }}</span>
+    <div class="flex gap-2">
+      <form method="POST" action="{{ url_for('admin.send_inventory_alerts') }}" style="display:inline">
+        <button type="submit" class="btn btn-sm btn-outline">📧 Alert Admins</button>
+      </form>
+      <a href="{{ url_for('admin.raw_materials') }}" class="btn btn-sm btn-outline">Review Materials</a>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+      Recent Orders
+      <a href="{{ url_for('admin.orders') }}" class="btn btn-ghost btn-sm">View All →</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Order #</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {% for order in recent_orders %}
+          <tr>
+            <td><a href="{{ url_for('admin.order_detail', order_id=order.id) }}" style="font-weight:600;color:var(--brown)">#{{ order.order_number }}</a></td>
+            <td>{{ order.customer.name }}</td>
+            <td>{{ order.item_count }} item{{ 's' if order.item_count != 1 }}</td>
+            <td style="font-weight:600;color:var(--caramel)">₹{{ order.total|int }}</td>
+            <td>
+              <span class="badge {% if order.status=='DELIVERED' %}badge-green{% elif order.status=='CANCELLED' %}badge-red{% elif order.status=='ON_HOLD' %}badge-orange{% else %}badge-brown{% endif %}">
+                {{ order.status.replace('_',' ') }}
+              </span>
+            </td>
+            <td class="text-muted text-sm">{{ order.placed_at.strftime('%d %b, %I:%M %p') }}</td>
+            <td><a href="{{ url_for('admin.order_detail', order_id=order.id) }}" class="btn btn-ghost btn-sm">View</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">No recent orders yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,135 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Delivery Agents — Admin{% endblock %}
+{% block content %}
+<section class="admin-page-intro">
+  <div>
+    <span class="portal-auth-kicker">Delivery Management</span>
+    <h1 class="section-title">🚚 Delivery Team</h1>
+    <p class="section-subtitle" style="margin-bottom:0">Create rider accounts, reset credentials, and control access from one screen.</p>
+  </div>
+</section>
+
+<div class="stat-grid">
+  <div class="stat-card brown">
+    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-label">Total Rider Profiles</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-value">{{ stats.active }}</div>
+    <div class="stat-label">Active Accounts</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-value">{{ stats.busy }}</div>
+    <div class="stat-label">Currently Busy</div>
+  </div>
+  <div class="stat-card rose">
+    <div class="stat-value">{{ stats.inactive }}</div>
+    <div class="stat-label">Inactive Accounts</div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">Create Delivery Login</div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('admin.add_agent') }}" class="ops-form-grid">
+      <div class="form-group">
+        <label class="form-label">Rider Name</label>
+        <input class="form-control" name="name" required placeholder="Rider full name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone</label>
+        <input class="form-control" name="phone" required placeholder="+91 9XXXXXXXXX">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Login Email</label>
+        <input class="form-control" type="email" name="email" required placeholder="rider@bakery.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Temporary Password</label>
+        <input class="form-control" type="text" name="password" required minlength="8" placeholder="At least 8 characters">
+      </div>
+      <div class="ops-form-actions">
+        <button type="submit" class="btn btn-primary">Create Rider Account</button>
+      </div>
+    </form>
+    <p class="text-sm text-muted mt-2">New rider credentials are printed in the terminal and recorded in development so you can copy them from the running console.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Existing Rider Accounts</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Rider</th>
+          <th>Login</th>
+          <th>Access</th>
+          <th>Workload</th>
+          <th>Reset Password</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for agent in agents %}
+        <tr>
+          <td>
+            <div class="ops-table-primary">{{ agent.name }}</div>
+            <div class="text-sm text-muted">{{ agent.phone or 'No phone' }}</div>
+          </td>
+          <td>
+            {% if agent.user %}
+            <div class="ops-table-primary">{{ agent.user.email }}</div>
+            <div class="text-sm text-muted">Role: {{ agent.user.role }}</div>
+            {% else %}
+            <div class="text-sm text-muted">Legacy profile without login</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if agent.user and agent.user.is_active %}
+            <span class="badge badge-green">Active</span>
+            {% else %}
+            <span class="badge badge-red">Inactive</span>
+            {% endif %}
+            <div class="mt-1">
+              <span class="badge {% if agent.availability and agent.user and agent.user.is_active %}badge-blue{% else %}badge-orange{% endif %}">
+                {% if agent.availability and agent.user and agent.user.is_active %}Available{% else %}Busy / Locked{% endif %}
+              </span>
+            </div>
+          </td>
+          <td>
+            <div class="ops-table-primary">{{ agent.open_delivery_count }}</div>
+            <div class="text-sm text-muted">{{ agent.completed_delivery_count }} completed</div>
+          </td>
+          <td>
+            {% if agent.user %}
+            <form method="POST" action="{{ url_for('admin.reset_agent_password', agent_id=agent.id) }}" class="ops-password-form">
+              <input class="form-control" type="text" name="password" minlength="8" required placeholder="New password">
+              <button type="submit" class="btn btn-outline btn-sm">Reset</button>
+            </form>
+            {% else %}
+            <span class="text-sm text-muted">Unavailable</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if agent.user %}
+            <form method="POST" action="{{ url_for('admin.toggle_agent_access', agent_id=agent.id) }}">
+              <button type="submit" class="btn btn-sm {% if agent.user.is_active %}btn-ghost{% else %}btn-primary{% endif %}" {% if agent.user.is_active %}data-confirm="Deactivate this rider account?"{% endif %}>
+                {% if agent.user.is_active %}Deactivate{% else %}Activate{% endif %}
+              </button>
+            </form>
+            {% else %}
+            <span class="text-sm text-muted">Unavailable</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" class="text-center text-muted">No rider accounts yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

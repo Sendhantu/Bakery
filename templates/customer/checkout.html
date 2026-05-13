@@ -1,0 +1,293 @@
+{% extends 'base.html' %}
+{% block title %}Checkout — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+<div class="container">
+  <h1 class="section-title mb-1">Checkout</h1>
+  <p class="text-muted mb-4">Almost there! Just fill in your delivery details.</p>
+
+  <form method="POST" action="{{ url_for('customer.checkout') }}">
+  <div class="page-grid page-grid-checkout">
+
+    <!-- LEFT: Address & Slot -->
+    <div style="display:flex;flex-direction:column;gap:1.5rem">
+
+      <!-- Delivery Address -->
+      <div class="card">
+        <div class="card-header">📍 Delivery Address</div>
+        <div class="card-body">
+          {% if saved_addresses %}
+          <div class="form-group">
+            <label class="form-label">Choose a saved address or enter a new one</label>
+            <div class="saved-address-list">
+              {% for address in saved_addresses %}
+              <label class="saved-address-card" data-saved-address
+                     data-label="{{ address.label }}"
+                     data-address-line1="{{ address.address_line1 }}"
+                     data-address-line2="{{ address.address_line2 or '' }}"
+                     data-city="{{ address.city }}"
+                     data-pincode="{{ address.pincode }}"
+                     data-phone="{{ address.phone }}">
+                <input type="radio" name="selected_address_id" value="{{ address.id }}" {% if selected_address_id == address.id %}checked{% endif %}>
+                <div>
+                  <div style="font-weight:700;color:var(--brown)">{{ address.label }} {% if address.is_default %}<span class="badge badge-green">Default</span>{% endif %}</div>
+                  <div class="text-sm text-muted" style="margin-top:0.25rem">{{ address.full_address }}</div>
+                  <div class="text-sm text-muted">{{ address.phone }}</div>
+                </div>
+              </label>
+              {% endfor %}
+              <label class="saved-address-card saved-address-card-new" data-new-address-card
+                     data-label=""
+                     data-address-line1=""
+                     data-address-line2=""
+                     data-city=""
+                     data-pincode=""
+                     data-phone="{{ current_user.phone or '' }}">
+                <input type="radio" name="selected_address_id" value="" {% if not selected_address_id %}checked{% endif %}>
+                <div>
+                  <div style="font-weight:700;color:var(--brown)">Use a new address</div>
+                  <div class="text-sm text-muted" style="margin-top:0.25rem">Type a different address for this order and optionally save it.</div>
+                </div>
+              </label>
+            </div>
+          </div>
+          {% endif %}
+          <div class="form-group">
+            <label class="form-label">Address Label</label>
+            <input class="form-control" id="checkout-address-label" name="address_label" value="{{ checkout_address.label or '' }}" placeholder="Home, Office, Parents">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Address Line 1 *</label>
+            <input class="form-control" id="checkout-address-line1" name="address_line1" required placeholder="House/Flat No., Street" value="{{ checkout_address.address_line1 or '' }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Address Line 2</label>
+            <input class="form-control" id="checkout-address-line2" name="address_line2" placeholder="Landmark, Area" value="{{ checkout_address.address_line2 or '' }}">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">City *</label>
+              <input class="form-control" id="checkout-city" name="city" required placeholder="City" value="{{ checkout_address.city or '' }}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">PIN Code *</label>
+              <input class="form-control" id="checkout-pincode" name="pincode" required placeholder="6-digit PIN" maxlength="6" value="{{ checkout_address.pincode or '' }}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contact Phone *</label>
+            <input class="form-control" id="checkout-phone" name="phone" required value="{{ checkout_address.phone or current_user.phone or '' }}" placeholder="+91 9999999999">
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0.6rem">
+            <label style="display:flex;align-items:center;gap:0.55rem;font-size:0.9rem;color:var(--text-muted)">
+              <input type="checkbox" name="save_address_for_future" style="accent-color:var(--brown)">
+              Save this address for future orders
+            </label>
+            <label style="display:flex;align-items:center;gap:0.55rem;font-size:0.9rem;color:var(--text-muted)">
+              <input type="checkbox" name="make_default" style="accent-color:var(--brown)">
+              Make this my default address
+            </label>
+          </div>
+          {% set customer_map_query = address_query(checkout_address.address_line1, checkout_address.address_line2, checkout_address.city, checkout_address.pincode) %}
+          <div class="address-map" id="checkout-address-map"
+               data-empty-text="Enter the customer delivery address to preview it on the map.">
+            <div class="text-sm text-muted" style="font-weight:600;color:var(--brown)">Map Preview</div>
+            <div class="address-map-actions">
+              <button type="button"
+                      class="btn btn-outline btn-sm"
+                      id="checkout-address-map-toggle"
+                      data-map-toggle
+                      data-map-open-label="View map"
+                      data-map-close-label="Hide map"
+                      {% if not customer_map_query %}disabled{% endif %}>
+                View map
+              </button>
+              <a href="{{ map_link_url(customer_map_query) if customer_map_query else '#' }}"
+                 class="btn btn-outline btn-sm{% if not customer_map_query %} hidden{% endif %}"
+                 id="checkout-address-map-link"
+                 target="_blank" rel="noopener">
+                Open in Maps ↗
+              </a>
+            </div>
+            <div class="address-map-frame hidden" data-map-frame>
+              <iframe
+                id="checkout-address-map-frame"
+                data-map-src="{{ map_embed_url(customer_map_query) if customer_map_query else '' }}"
+                title="Customer delivery address map"
+                loading="lazy"
+                allowfullscreen
+                referrerpolicy="no-referrer-when-downgrade"></iframe>
+              <div class="address-map-empty{% if customer_map_query %} hidden{% endif %}" id="checkout-address-map-empty">
+                Enter the customer delivery address to preview it on the map.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Delivery Slot -->
+      <div class="card">
+        <div class="card-header">⏰ Delivery Schedule</div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Delivery Date *</label>
+              <input class="form-control" type="date" name="delivery_date" id="delivery_date" required min="{{ earliest_delivery_date }}">
+              <p class="text-sm text-muted mt-1">Earliest delivery is tomorrow. Available slots are confirmed at checkout.</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Time Slot *</label>
+              <select class="form-control" name="time_slot" required>
+                <option value="">— Select Slot —</option>
+                {% for slot in time_slots %}
+                <option value="{{ slot }}">{{ slot }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Occasion (optional)</label>
+            <select class="form-control" name="occasion">
+              <option value="">No specific occasion</option>
+              {% for occ in ['Birthday','Wedding','Anniversary','Baby Shower','Corporate','Festival'] %}
+              <option value="{{ occ }}">{{ occ }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Special Instructions</label>
+            <textarea class="form-control" name="special_note" placeholder="Write message on cake, allergen info, etc."></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Payment -->
+      <div class="card">
+        <div class="card-header">💳 Payment Method</div>
+        <div class="card-body">
+          {% for pm, label, icon in [('COD','Cash on Delivery','💵'),('UPI','UPI Payment','📲'),('CARD','Credit/Debit Card','💳')] %}
+          <label class="payment-option" data-payment-option>
+            <input type="radio" name="payment_method" value="{{ pm }}" {% if pm == 'COD' %}checked{% endif %}>
+            <span style="font-size:1.5rem">{{ icon }}</span>
+            <span style="font-weight:500">{{ label }}</span>
+          </label>
+          {% endfor %}
+          <p class="text-sm text-muted">💡 Simulated payment — COD means pay on delivery. UPI/Card are demo flows.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Order Summary -->
+    <div class="sticky-panel">
+      <div class="card">
+        <div class="card-header">📦 Order Summary</div>
+        <div class="card-body" style="padding-bottom:0">
+          {% for item in cart_items %}
+          {% set price = item.variant.price if item.variant else item.product.base_price %}
+          <div class="flex justify-between items-center mb-2">
+            <div>
+              <span style="font-size:0.9rem;font-weight:500">{{ item.product.name }}</span>
+              {% if item.variant %}<span class="text-sm text-muted"> · {{ item.variant.name }}</span>{% endif %}
+              <span class="text-sm text-muted"> ×{{ item.quantity }}</span>
+            </div>
+            <span style="font-weight:600">₹{{ (price * item.quantity)|int }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="divider" style="margin:0"></div>
+        <div class="card-body">
+          <!-- Coupon -->
+          <div class="form-group">
+            <label class="form-label">Coupon Code</label>
+            <div class="flex gap-2">
+              <input class="form-control" type="text" id="coupon_code" name="coupon_code" placeholder="e.g. WELCOME10">
+              <button type="button" id="apply-coupon-btn" class="btn btn-outline" style="flex-shrink:0">Apply</button>
+            </div>
+            <div id="coupon-msg" class="text-sm mt-1"></div>
+            <p class="text-sm text-muted mt-1">Coupons stack with membership savings and loyalty redemptions when all rules are met.</p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Use Loyalty Points</label>
+            <div class="flex gap-2">
+              <input class="form-control" type="number" id="checkout-loyalty-input" name="loyalty_points" min="0" step="{{ loyalty_rules.LOYALTY_REDEEM_PER }}" placeholder="Enter points in multiples of {{ loyalty_rules.LOYALTY_REDEEM_PER }}">
+              <button type="button" id="preview-loyalty-btn" class="btn btn-outline" style="flex-shrink:0">Preview</button>
+            </div>
+            <div class="text-sm text-muted mt-1">
+              You have <strong>{{ loyalty_balance }}</strong> points.
+              {{ loyalty_rules.LOYALTY_REDEEM_PER }} points = ₹{{ loyalty_rules.LOYALTY_REDEEM_RATE }} off, capped at 20% of subtotal.
+            </div>
+            <div id="loyalty-msg" class="text-sm mt-1"></div>
+            <div id="loyalty-points-summary" class="text-sm text-muted mt-1"></div>
+          </div>
+
+          <div class="divider"></div>
+          <div class="flex justify-between mb-2">
+            <span class="text-muted">Subtotal</span>
+            <span id="subtotal-value" data-value="{{ subtotal }}">₹{{ subtotal|int }}</span>
+          </div>
+          {% if discount > 0 %}
+          <div class="flex justify-between mb-2" style="color:var(--sage)">
+            <span>🌟 Member Discount</span>
+            <span>−₹{{ discount|int }}</span>
+          </div>
+          {% endif %}
+          <div id="coupon-discount-row" class="flex justify-between mb-2" style="color:var(--sage);display:none">
+            <span>🎟 Coupon</span>
+            <span id="coupon-discount-val">−₹0</span>
+          </div>
+          <div id="loyalty-discount-row" class="flex justify-between mb-2" style="color:var(--sage);display:none">
+            <span>⭐ Loyalty</span>
+            <span id="loyalty-discount-val">−₹0</span>
+          </div>
+          <div class="flex justify-between mb-2">
+            <span class="text-muted">Delivery</span>
+            <span>{% if delivery_charge == 0 %}<span style="color:var(--sage)">FREE</span>{% else %}₹{{ delivery_charge|int }}{% endif %}</span>
+          </div>
+          <p class="text-sm text-muted" style="margin-bottom:0.75rem">
+            {% if delivery_charge == 0 %}
+            Free delivery unlocked on this order.
+            {% else %}
+            Add ₹{{ (delivery_threshold - subtotal)|int }} more next time to unlock free delivery.
+            {% endif %}
+          </p>
+          <div class="divider"></div>
+          <div class="flex justify-between mb-3">
+            <span style="font-weight:600;font-size:1rem">Total</span>
+            <span id="order-total" data-base-total="{{ total }}" style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--caramel)">
+              ₹{{ total|int }}
+            </span>
+          </div>
+          <div class="checkout-payable-note">
+            Final payable updates instantly as you preview coupon and loyalty savings.
+          </div>
+          <button type="submit" class="btn btn-primary btn-block btn-lg">
+            🎉 Place Order
+          </button>
+        </div>
+      </div>
+
+      {% if has_subscription %}
+      <div style="margin-top:1rem;padding:0.75rem 1rem;background:linear-gradient(135deg,var(--caramel),var(--brown));border-radius:var(--radius-lg);color:var(--cream);text-align:center;font-size:0.85rem">
+        🌟 Member discount applied automatically!
+      </div>
+      {% endif %}
+      <div class="detail-card" style="margin-top:1rem">
+        <h3>Bakery Pickup Details</h3>
+        <div class="detail-list">
+          <span>{{ store_details.name }}</span>
+          <span>{{ store_details.address_line1 }}, {{ store_details.address_line2 }}</span>
+          <span>{{ store_details.city }} - {{ store_details.pincode }}</span>
+          <span>{{ store_details.phone }}</span>
+          <span>If you want pickup instead of delivery, add that note in Special Instructions.</span>
+        </div>
+        {% set map_query = address_query(store_details.name, store_details.address_line1, store_details.address_line2, store_details.city, store_details.pincode) %}
+        {% set map_title = store_details.name ~ ' pickup map' %}
+        {% include 'includes/address_map.html' %}
+      </div>
+    </div>
+  </div>
+  </form>
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,207 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}{% if product %}Edit{% else %}Add{% endif %} Product — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">{% if product %}Edit{% else %}Add New{% endif %} Product</h1>
+  <a href="{{ url_for('admin.products') }}" class="btn btn-ghost">← Back</a>
+</div>
+<form method="POST" enctype="multipart/form-data">
+<div style="display:grid;grid-template-columns:1fr 360px;gap:2rem;align-items:start">
+  <div style="display:flex;flex-direction:column;gap:1.5rem">
+    <div class="card">
+      <div class="card-header">Basic Information</div>
+      <div class="card-body">
+        <div class="form-group"><label class="form-label">Product Name *</label><input class="form-control" name="name" required value="{{ product.name if product else '' }}"></div>
+        <div class="form-group"><label class="form-label">Description</label><textarea class="form-control" name="description">{{ product.description if product else '' }}</textarea></div>
+        <div class="form-group"><label class="form-label">Ingredients (comma-separated)</label><input class="form-control" name="ingredients" value="{{ product.ingredients if product else '' }}" placeholder="Flour, Butter, Sugar, Eggs"></div>
+        <div class="form-group"><label class="form-label">Preparation Details</label><textarea class="form-control" name="preparation">{{ product.preparation if product else '' }}</textarea></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Base Price (₹) *</label><input class="form-control" type="number" step="0.01" name="base_price" required value="{{ product.base_price if product else '' }}"></div>
+          <div class="form-group"><label class="form-label">Category</label>
+            <select class="form-control" name="category_id">
+              <option value="">— Select —</option>
+              {% for cat in categories %}<option value="{{ cat.id }}" {% if product and product.category_id == cat.id %}selected{% endif %}>{{ cat.icon }} {{ cat.name }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label">Occasion Tags (comma-separated)</label><input class="form-control" name="occasion_tags" value="{{ product.occasion_tags if product else '' }}" placeholder="birthday,wedding,anniversary"></div>
+        <div class="flex gap-3 flex-wrap">
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_eggless" {% if product and product.is_eggless %}checked{% endif %}> 🌿 Eggless</label>
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_featured" {% if product and product.is_featured %}checked{% endif %}> ⭐ Featured</label>
+          {% if product %}<label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_active" {% if product.is_active %}checked{% endif %}> ✅ Active</label>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Variants -->
+    <div class="card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+        Product Variants <button type="button" id="add-variant-btn" class="btn btn-ghost btn-sm">+ Add Variant</button>
+      </div>
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;font-size:0.8rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;padding-bottom:0.5rem">
+          <span>Size / Name</span><span>Price (₹)</span><span>Stock</span><span></span>
+        </div>
+        <div id="variants-container">
+          {% if product %}
+            {% for v in product.variants.all() %}
+            <div class="variant-row flex gap-2 items-center mt-2">
+              <input type="hidden" name="variant_id[]" value="{{ v.id }}">
+              <input class="form-control" type="text" name="variant_name[]" value="{{ v.name }}" placeholder="e.g. 1 kg" required>
+              <input class="form-control" type="number" name="variant_price[]" value="{{ v.price }}" step="0.01" required>
+              <input class="form-control" type="number" name="variant_stock[]" value="{{ v.stock }}">
+              <button type="button" class="btn btn-ghost remove-variant-btn" style="flex-shrink:0;color:var(--dusty-rose)">✕</button>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="variant-row flex gap-2 items-center mt-2">
+            <input type="hidden" name="variant_id[]" value="">
+            <input class="form-control" type="text" name="variant_name[]" placeholder="e.g. 0.5 kg" required>
+            <input class="form-control" type="number" name="variant_price[]" placeholder="Price" required>
+            <input class="form-control" type="number" name="variant_stock[]" placeholder="Stock">
+            <button type="button" class="btn btn-ghost remove-variant-btn" style="flex-shrink:0;color:var(--dusty-rose)">✕</button>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+        Raw Materials Used <button type="button" id="add-material-btn" class="btn btn-ghost btn-sm">+ Add Material</button>
+      </div>
+      <div class="card-body">
+        <p class="text-sm text-muted mb-2">Add the ingredients used for one order unit of this product. These stocks will reduce automatically after checkout.</p>
+        <div style="display:grid;grid-template-columns:1.2fr 0.8fr auto;gap:0.5rem;font-size:0.8rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;padding-bottom:0.5rem">
+          <span>Raw Material</span><span>Qty Used</span><span></span>
+        </div>
+        <div id="materials-container">
+          {% if product and product.recipe_items.count() %}
+            {% for recipe_item in product.recipe_items.all() %}
+            <div class="material-row flex gap-2 items-center mt-2">
+              <select class="form-control" name="recipe_material_id[]">
+                <option value="">Select material</option>
+                {% for material in raw_materials %}
+                <option value="{{ material.id }}" {% if recipe_item.raw_material_id == material.id %}selected{% endif %}>
+                  {{ material.name }} ({{ material.unit }})
+                </option>
+                {% endfor %}
+              </select>
+              <input class="form-control" type="number" name="recipe_quantity[]" step="0.01" min="0" value="{{ recipe_item.quantity_required }}" placeholder="0.00">
+              <button type="button" class="btn btn-ghost remove-material-btn" style="flex-shrink:0;color:var(--dusty-rose)">✕</button>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="material-row flex gap-2 items-center mt-2">
+            <select class="form-control" name="recipe_material_id[]">
+              <option value="">Select material</option>
+              {% for material in raw_materials %}
+              <option value="{{ material.id }}">{{ material.name }} ({{ material.unit }})</option>
+              {% endfor %}
+            </select>
+            <input class="form-control" type="number" name="recipe_quantity[]" step="0.01" min="0" placeholder="0.00">
+            <button type="button" class="btn btn-ghost remove-material-btn" style="flex-shrink:0;color:var(--dusty-rose)">✕</button>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image -->
+  <div>
+    <div class="card" style="position:sticky;top:90px">
+      <div class="card-header">Product Image</div>
+      <div class="card-body">
+        <div style="background:var(--cream-dark);border-radius:var(--radius-lg);overflow:hidden;aspect-ratio:1;margin-bottom:1rem;display:flex;align-items:center;justify-content:center">
+          <img id="image-preview" src="{{ product.image_src if product else '' }}"
+               style="width:100%;height:100%;object-fit:cover;{% if not product %}display:none{% endif %}"
+               data-fallback-src="{{ product.fallback_image_src if product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=800&q=80' }}">
+          <span style="color:var(--text-muted);font-size:3rem;{% if product %}display:none{% endif %}" id="img-placeholder">🖼️</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Image URL</label>
+          <input class="form-control" type="url" id="image-url-input" name="image_url"
+                 value="{{ product.image if product and product.image and (product.image.startswith('http://') or product.image.startswith('https://')) else '' }}"
+                 placeholder="https://example.com/cake-photo.jpg">
+          <p class="text-sm text-muted mt-1">Paste a real cake photo URL, or upload a file below.</p>
+        </div>
+        <input class="form-control" type="file" id="product-image-input" name="image" accept="image/*">
+        <p class="text-sm text-muted mt-1">JPG, PNG up to 5MB</p>
+        <div class="divider"></div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg">
+          {% if product %}Update Product{% else %}Add Product{% endif %}
+        </button>
+        <a href="{{ url_for('admin.products') }}" class="btn btn-ghost btn-block mt-1">Cancel</a>
+      </div>
+    </div>
+  </div>
+</div>
+</form>
+<script>
+const imagePreview = document.getElementById('image-preview');
+const imagePlaceholder = document.getElementById('img-placeholder');
+const imageInput = document.getElementById('product-image-input');
+const imageUrlInput = document.getElementById('image-url-input');
+const existingPreview = {{ (product.image_src if product else '')|tojson }};
+const fallbackPreview = {{ (product.fallback_image_src if product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=800&q=80')|tojson }};
+
+function showImagePreview(src) {
+  if (!src) {
+    imagePreview.style.display = 'none';
+    imagePreview.removeAttribute('src');
+    imagePlaceholder.style.display = 'block';
+    return;
+  }
+
+  imagePreview.src = src;
+  imagePreview.style.display = 'block';
+  imagePlaceholder.style.display = 'none';
+}
+
+function resetImagePreview() {
+  if (existingPreview) {
+    showImagePreview(existingPreview);
+    return;
+  }
+
+  showImagePreview('');
+}
+
+imagePreview.addEventListener('error', () => {
+  if (imagePreview.src !== fallbackPreview) {
+    imagePreview.src = fallbackPreview;
+  }
+});
+
+imageUrlInput.addEventListener('input', () => {
+  const imageUrl = imageUrlInput.value.trim();
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+    showImagePreview(imageUrl);
+    return;
+  }
+
+  if (!imageInput.files.length) {
+    resetImagePreview();
+  }
+});
+
+imageInput.addEventListener('change', () => {
+  const [file] = imageInput.files;
+  if (!file) {
+    const imageUrl = imageUrlInput.value.trim();
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      showImagePreview(imageUrl);
+      return;
+    }
+
+    resetImagePreview();
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (event) => showImagePreview(event.target?.result || '');
+  reader.readAsDataURL(file);
+});
+</script>
+{% endblock %}

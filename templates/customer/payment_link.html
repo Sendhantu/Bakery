@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}Payment Page — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="container" style="max-width:920px">
+    <div class="card" style="overflow:hidden">
+      <div style="padding:1rem 1.25rem;background:linear-gradient(135deg,var(--brown),var(--charcoal));color:var(--cream)">
+        <div class="text-sm" style="opacity:0.8;text-transform:uppercase;letter-spacing:0.08em">Payment Placeholder</div>
+        <h1 style="font-family:var(--font-display);font-size:2rem;color:var(--cream);margin:0.35rem 0">{{ payment_link.title }}</h1>
+        <p style="opacity:0.82;margin:0">This page is ready for gateway integration. Nothing is auto-activated from here yet.</p>
+      </div>
+
+      <div class="page-grid page-grid-sidebar" style="padding:1.5rem">
+        <div style="display:flex;flex-direction:column;gap:1rem">
+          <div class="detail-card">
+            <h3>What Happens Here</h3>
+            <div class="detail-list">
+              <span>Reference: <strong style="color:var(--brown)">{{ payment_link.token }}</strong></span>
+              <span>Status: <strong style="color:var(--caramel)">{{ payment_link.status }}</strong></span>
+              <span>Purpose: {{ payment_link.purpose.replace('_', ' ')|title }}</span>
+              <span>Payment method: {{ payment_link.payment_method }}</span>
+            </div>
+          </div>
+
+          {% if payment_link.purpose == 'SUBSCRIPTION' %}
+          <div class="card">
+            <div class="card-header">Membership Summary</div>
+            <div class="card-body">
+              <div class="flex justify-between mb-2"><span class="text-muted">Plan</span><strong>{{ payment_link.subscription_plan|title }}</strong></div>
+              <div class="flex justify-between mb-2"><span class="text-muted">Discount</span><strong>{{ payment_link.subscription_discount_pct|int }}% on every order</strong></div>
+              <div class="flex justify-between mb-2"><span class="text-muted">Duration</span><strong>{{ payment_link.subscription_duration_days }} days</strong></div>
+              <div class="divider"></div>
+              <div class="flex justify-between"><span style="font-weight:600">Amount to collect</span><span style="font-family:var(--font-display);font-size:1.5rem;color:var(--caramel)">₹{{ payment_link.amount|int }}</span></div>
+            </div>
+          </div>
+          {% endif %}
+
+          {% if related_order %}
+          <div class="card">
+            <div class="card-header">Order Payment Details</div>
+            <div class="card-body">
+              <div class="flex justify-between mb-2"><span class="text-muted">Order #</span><strong>#{{ related_order.order_number }}</strong></div>
+              <div class="flex justify-between mb-2"><span class="text-muted">Customer</span><strong>{{ related_order.customer.name }}</strong></div>
+              <div class="flex justify-between mb-2"><span class="text-muted">Payment status</span><strong>{{ related_order.payment_status }}</strong></div>
+              <div class="flex justify-between mb-2"><span class="text-muted">Order total</span><strong>₹{{ related_order.total|int }}</strong></div>
+              <div class="divider"></div>
+              <div class="detail-list">
+                <span>{{ related_order.address_line1 }}{% if related_order.address_line2 %}, {{ related_order.address_line2 }}{% endif %}</span>
+                <span>{{ related_order.city }} - {{ related_order.pincode }}</span>
+                <span>{{ related_order.phone }}</span>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:1rem">
+          <div class="card">
+            <div class="card-header">Gateway Integration Notes</div>
+            <div class="card-body">
+              <div class="detail-list">
+                <span>Use this token as the external payment reference when you connect Razorpay, Stripe, Cashfree, or another provider.</span>
+                <span>Success callback should update this link to <strong>PAID</strong> and then activate the related subscription or order payment.</span>
+                <span>Cancel callback can return the user to the provided cancel URL.</span>
+              </div>
+              {% if payment_link.notes %}
+              <div style="margin-top:1rem;padding:0.9rem;background:var(--cream);border-radius:var(--radius-lg);border:1px solid var(--border);font-size:0.9rem;color:var(--text-muted)">
+                {{ payment_link.notes }}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">Next Step</div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:0.75rem">
+              <button type="button" class="btn btn-outline btn-block" disabled>Gateway Button Goes Here</button>
+              {% if related_order %}
+              <a href="{{ url_for('customer.order_detail', order_id=related_order.id) if current_user.role != 'admin' else url_for('admin.order_detail', order_id=related_order.id) }}" class="btn btn-primary btn-block">Back to Order</a>
+              {% else %}
+              <a href="{{ url_for('customer.subscription') }}" class="btn btn-primary btn-block">Back to Membership</a>
+              {% endif %}
+              {% if current_user.role == 'admin' and related_order %}
+              <a href="{{ url_for('delivery.order_detail', order_id=related_order.id) }}" class="btn btn-ghost btn-block">Open Delivery View</a>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

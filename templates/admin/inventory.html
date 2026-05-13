@@ -1,0 +1,88 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Inventory — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">📦 Inventory</h1>
+  <a href="{{ url_for('admin.raw_materials') }}" class="btn btn-outline">Manage Raw Materials</a>
+</div>
+
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card green"><span class="stat-icon">🟢</span><div class="stat-value">{{ live_products }}</div><div class="stat-label">Live Products</div></div>
+  <div class="stat-card brown"><span class="stat-icon">⏸️</span><div class="stat-value">{{ inactive_products }}</div><div class="stat-label">Inactive Products</div></div>
+  <div class="stat-card rose"><span class="stat-icon">⚠️</span><div class="stat-value">{{ low_variant_count }}</div><div class="stat-label">Low Stock Variants</div></div>
+  <div class="stat-card orange"><span class="stat-icon">📭</span><div class="stat-value">{{ out_of_stock_count }}</div><div class="stat-label">Out of Stock Variants</div></div>
+  <div class="stat-card brown"><span class="stat-icon">🧂</span><div class="stat-value">{{ raw_material_alerts }}</div><div class="stat-label">Material Alerts</div></div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Product</th><th>Product Status</th><th>Variant</th><th>Stock</th><th>Stock Status</th><th>Update Stock</th></tr></thead>
+      <tbody>
+        {% for v in variants %}
+        <tr>
+          <td style="font-weight:500">{{ v.product.name }}</td>
+          <td><span class="badge {% if v.product.is_active %}badge-green{% else %}badge-red{% endif %}">{% if v.product.is_active %}Live{% else %}Inactive{% endif %}</span></td>
+          <td>{{ v.name }}</td>
+          <td style="font-family:var(--font-display);font-size:1.1rem;font-weight:700;color:{% if v.stock==0 %}var(--dusty-rose){% elif v.stock<=5 %}var(--caramel){% else %}var(--sage){% endif %}">{{ v.stock }}</td>
+          <td><span class="badge {% if v.stock==0 %}badge-red{% elif v.stock<=5 %}badge-orange{% else %}badge-green{% endif %}">{% if v.stock==0 %}Out of Stock{% elif v.stock<=5 %}Low Stock{% else %}OK{% endif %}</span></td>
+          <td>
+            <form method="POST" action="{{ url_for('admin.update_stock') }}" style="display:flex;gap:0.5rem">
+              <input type="hidden" name="variant_id" value="{{ v.id }}">
+              <input class="form-control" type="number" name="stock" value="{{ v.stock }}" min="0" style="max-width:90px">
+              <button type="submit" class="btn btn-primary btn-sm">Save</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" class="text-center text-muted" style="padding:1.25rem">No product variants yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+    Raw Materials Snapshot
+    <a href="{{ url_for('admin.raw_materials') }}" class="btn btn-ghost btn-sm">Open Full Material Manager</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Material</th><th>Unit</th><th>Stock</th><th>Status</th><th>Quick Update</th></tr></thead>
+      <tbody>
+        {% for material in materials %}
+        <tr>
+          <td style="font-weight:500">{{ material.name }}</td>
+          <td>{{ material.unit }}</td>
+          <td style="font-family:var(--font-display);font-size:1.05rem;font-weight:700;color:{% if material.stock_status == 'out_of_stock' %}var(--dusty-rose){% elif material.stock_status == 'low_stock' %}var(--caramel){% else %}var(--sage){% endif %}">
+            {{ material.stock }}
+          </td>
+          <td>
+            <span class="badge {% if material.stock_status == 'out_of_stock' %}badge-red{% elif material.stock_status == 'low_stock' %}badge-orange{% else %}badge-green{% endif %}">
+              {% if material.stock_status == 'out_of_stock' %}Out of Stock{% elif material.stock_status == 'low_stock' %}Low Stock{% else %}In Stock{% endif %}
+            </span>
+            <span class="badge {% if material.is_active %}badge-blue{% else %}badge-brown{% endif %}" style="margin-left:0.35rem">
+              {% if material.is_active %}Active{% else %}Inactive{% endif %}
+            </span>
+          </td>
+          <td>
+            <form method="POST" action="{{ url_for('admin.update_raw_material_stock') }}" style="display:flex;gap:0.5rem">
+              <input type="hidden" name="material_id" value="{{ material.id }}">
+              <input class="form-control" type="number" name="stock" value="{{ material.stock }}" min="0" step="0.01" style="max-width:110px">
+              <button type="submit" class="btn btn-primary btn-sm">Save</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="text-center text-muted" style="padding:1.25rem">No raw materials yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

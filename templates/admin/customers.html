@@ -1,0 +1,33 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Customers — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center gap-2 flex-wrap" style="margin-bottom:1.5rem">
+  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">👥 Customers</h1>
+  <form method="GET" action="{{ url_for('admin.customers') }}" class="admin-toolbar-search">
+    <input class="form-control" type="search" name="q" value="{{ search or '' }}" placeholder="Search by name or email">
+    <button type="submit" class="btn btn-outline btn-sm">Search</button>
+  </form>
+</div>
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Orders</th><th>Action</th></tr></thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td style="font-weight:600">{{ u.name }}</td>
+          <td>{{ u.email }}</td>
+          <td>{{ u.phone or '—' }}</td>
+          <td class="text-sm text-muted">{{ u.created_at.strftime('%d %b %Y') }}</td>
+          <td><span class="badge badge-brown">{{ u.order_count }}</span></td>
+          <td><a href="{{ url_for('admin.customer_detail', user_id=u.id) }}" class="btn btn-ghost btn-sm">View →</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-muted)">No customers found for this search.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% include 'includes/pagination.html' %}
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends 'delivery/base_delivery.html' %}
+{% block title %}Delivery History{% endblock %}
+{% block content %}
+<div class="page-wrap"><div class="container">
+  <div class="flex justify-between items-center flex-wrap gap-2 mb-4">
+    <div>
+      <h1 class="section-title">📋 Delivery History</h1>
+      <p class="section-subtitle" style="margin-bottom:0">Filter by status or search by order, customer, phone, or city.</p>
+    </div>
+  </div>
+  <div class="card mb-4">
+    <div class="card-body">
+      <form method="GET" action="{{ url_for('delivery.history') }}" class="ops-filter-grid">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Search</label>
+          <input class="form-control" type="text" name="q" value="{{ search_query }}" placeholder="Order number, customer, phone, city">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Status</label>
+          <select class="form-control" name="status">
+            <option value="">All statuses</option>
+            {% for status in status_options %}
+            <option value="{{ status }}" {% if selected_status == status %}selected{% endif %}>{{ status.replace('_', ' ') }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ops-form-actions">
+          <button type="submit" class="btn btn-primary">Apply</button>
+          <a href="{{ url_for('delivery.history') }}" class="btn btn-ghost">Clear</a>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="card"><div class="table-wrap">
+    <table>
+      <thead><tr><th>Order #</th><th>Customer</th><th>Contact</th><th>Assigned</th><th>Delivered</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for d in deliveries %}
+        <tr>
+          <td><a href="{{ url_for('delivery.order_detail', order_id=d.order_id) }}" style="font-weight:600;color:var(--brown)">#{{ d.order.order_number }}</a></td>
+          <td>
+            <div class="ops-table-primary">{{ d.order.customer.name }}</div>
+            <div class="text-sm text-muted">{{ d.order.city }}</div>
+          </td>
+          <td>
+            <div><a href="tel:{{ d.order.phone }}">{{ d.order.phone }}</a></div>
+            <div class="text-sm text-muted">{{ d.order.address_line1 }}</div>
+          </td>
+          <td class="text-sm text-muted">{{ d.assigned_time.strftime('%d %b %Y, %I:%M %p') if d.assigned_time else '—' }}</td>
+          <td class="text-sm text-muted">{{ d.delivered_time.strftime('%d %b %Y, %I:%M %p') if d.delivered_time else '—' }}</td>
+          <td><span class="badge {% if d.status=='DELIVERED' %}badge-green{% elif d.status=='OUT_FOR_DELIVERY' %}badge-blue{% else %}badge-brown{% endif %}">{{ d.status.replace('_', ' ') }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-muted)">No delivery history yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div></div>
+</div></div>
+{% endblock %}

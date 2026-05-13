@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Wishlist — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap"><div class="container">
+  <h1 class="section-title mb-4">❤️ My Wishlist</h1>
+  {% if items %}
+  <div class="product-grid">
+    {% for item in items %}
+    <div class="product-card">
+      <div class="product-img-wrap">
+        <a href="{{ url_for('customer.product_detail', product_id=item.product_id) }}">
+          <img src="{{ item.product.image_src }}"
+               alt="{{ item.product.name }}" class="product-card-img" loading="lazy" decoding="async"
+               onerror="this.onerror=null;this.src='{{ item.product.fallback_image_src }}'">
+        </a>
+      </div>
+      <div class="product-card-body">
+        <h3 class="product-card-title">{{ item.product.name }}</h3>
+        <div class="flex justify-between items-center mt-2">
+          <span class="product-price">₹{{ item.product.base_price|int }}</span>
+          <div class="flex gap-1">
+            <form method="POST" action="{{ url_for('customer.add_to_cart') }}">
+              <input type="hidden" name="product_id" value="{{ item.product_id }}">
+              <input type="hidden" name="variant_id" value="{{ item.product.variants.first().id if item.product.variants.first() else '' }}">
+              <input type="hidden" name="quantity" value="1">
+              <button class="btn btn-primary btn-sm">🛒</button>
+            </form>
+            <a href="{{ url_for('customer.toggle_wishlist', product_id=item.product_id) }}" class="btn btn-danger btn-sm">✕</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">❤️</div>
+    <h3>Your wishlist is empty</h3>
+    <p class="text-muted">Save your favourite items here!</p>
+    <a href="{{ url_for('customer.products') }}" class="btn btn-primary mt-3">Browse Products</a>
+  </div>
+  {% endif %}
+</div></div>
+{% endblock %}

@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+{% block title %}Profile — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap"><div class="container" style="max-width:800px">
+  <h1 class="section-title mb-4">👤 My Profile</h1>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
+    <div class="card">
+      <div class="card-header">Edit Profile</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('auth.profile') }}">
+          <div class="form-group"><label class="form-label">Full Name</label>
+            <input class="form-control" name="name" value="{{ current_user.name }}" required></div>
+          <div class="form-group"><label class="form-label">Email</label>
+            <input class="form-control" value="{{ current_user.email }}" disabled style="opacity:0.6"></div>
+          <div class="form-group"><label class="form-label">Phone</label>
+            <input class="form-control" name="phone" value="{{ current_user.phone or '' }}"></div>
+          <div style="padding:1rem;background:var(--cream);border-radius:var(--radius-lg);margin-bottom:1rem">
+            <div class="form-group"><label class="form-label">Current Password</label>
+              <input class="form-control" type="password" name="current_password" placeholder="Required to change password" autocomplete="current-password"></div>
+            <div class="form-group"><label class="form-label">New Password</label>
+              <input class="form-control" type="password" name="new_password" placeholder="Leave blank to keep current" minlength="6" autocomplete="new-password"></div>
+          </div>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </form>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">Recent Login Activity</div>
+      <div class="card-body" style="padding:0">
+        {% for h in history %}
+        <div style="padding:0.75rem 1.25rem;border-bottom:1px solid var(--border);font-size:0.85rem">
+          <div class="flex justify-between">
+            <span style="color:{% if h.status == 'success' %}var(--sage){% else %}var(--dusty-rose){% endif %}">
+              {% if h.status == 'success' %}✅{% else %}❌{% endif %} {{ h.status|title }}
+            </span>
+            <span class="text-muted">{{ h.login_time.strftime('%d %b %Y, %I:%M %p') }}</span>
+          </div>
+          {% if h.ip_address %}<div class="text-muted" style="margin-top:0.2rem">📍 {{ h.ip_address }}</div>{% endif %}
+        </div>
+        {% else %}
+        <div class="text-muted" style="padding:1rem">No login history found.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {% if current_user.role == 'customer' %}
+  <div class="card" style="margin-top:2rem">
+    <div class="card-header">📍 Saved Delivery Addresses</div>
+    <div class="card-body">
+      {% if saved_addresses %}
+      <div style="display:flex;flex-direction:column;gap:0.9rem;margin-bottom:1.5rem">
+        {% for address in saved_addresses %}
+        <div style="padding:1rem 1.1rem;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--cream)">
+          <div class="flex justify-between items-start gap-2 flex-wrap">
+            <div>
+              <div style="font-weight:700;color:var(--brown)">{{ address.label }} {% if address.is_default %}<span class="badge badge-green">Default</span>{% endif %}</div>
+              <div class="text-muted text-sm" style="margin-top:0.25rem">{{ address.full_address }}</div>
+              <div class="text-muted text-sm">{{ address.phone }}</div>
+            </div>
+            <div class="flex gap-1 flex-wrap">
+              {% if not address.is_default %}
+              <form method="POST" action="{{ url_for('auth.set_default_address', address_id=address.id) }}">
+                <button type="submit" class="btn btn-outline btn-sm">Make Default</button>
+              </form>
+              {% endif %}
+              <form method="POST" action="{{ url_for('auth.delete_saved_address', address_id=address.id) }}">
+                <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--dusty-rose)">Delete</button>
+              </form>
+            </div>
+          </div>
+          {% set map_query = address_query(address.address_line1, address.address_line2, address.city, address.pincode) %}
+          {% set map_title = address.label ~ ' saved address map' %}
+          {% include 'includes/address_map.html' %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-muted" style="margin-bottom:1.25rem">No saved addresses yet. Add one below and it will be available at checkout.</p>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('auth.add_saved_address') }}">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Label</label>
+            <input class="form-control" name="label" placeholder="Home, Office, Parents">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Phone</label>
+            <input class="form-control" name="phone" value="{{ current_user.phone or '' }}" required maxlength="20">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Address Line 1</label>
+          <input class="form-control" name="address_line1" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Address Line 2</label>
+          <input class="form-control" name="address_line2">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">City</label>
+            <input class="form-control" name="city" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">PIN Code</label>
+            <input class="form-control" name="pincode" required maxlength="6" pattern="[0-9]{6}">
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;font-size:0.9rem;color:var(--text-muted)">
+          <input type="checkbox" name="is_default" style="accent-color:var(--brown)">
+          Make this my default address
+        </label>
+        <button type="submit" class="btn btn-primary">Save Address</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</div></div>
+{% endblock %}

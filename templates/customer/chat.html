@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}Chat — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap"><div class="container" style="max-width:760px">
+  <h1 class="section-title mb-1">💬 Chat with Us</h1>
+  <p class="text-muted mb-4">We're here to help with your orders and customisations.</p>
+  <div class="flex gap-3 items-center mb-3 p-3" style="background:var(--cream-dark);border-radius:var(--radius-lg)">
+    <div style="width:44px;height:44px;background:var(--brown);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--cream);font-size:1.3rem">🎂</div>
+    <div>
+      <div style="font-weight:600;color:var(--brown)">SweetCrumbs Bakery</div>
+      <div class="text-sm text-muted">Usually replies within 30 minutes · <a href="tel:+919999999999">📞 Call instead</a></div>
+    </div>
+  </div>
+  <div class="chat-container">
+    <div class="chat-messages" id="chat-messages">
+      {% if not messages %}
+      <div style="text-align:center;color:var(--text-muted);padding:2rem;font-size:0.9rem">
+        👋 Hi {{ current_user.name.split()[0] }}! How can we help you today?
+      </div>
+      {% endif %}
+      {% for msg in messages %}
+      <div>
+        <div class="msg-bubble {% if msg.sender_id == current_user.id %}sent{% else %}received{% endif %}">
+          {{ msg.content }}
+          <div class="msg-time">{{ msg.sent_at.strftime('%I:%M %p') }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="chat-input-area">
+      <form method="POST" action="{{ url_for('customer.send_message') }}" style="display:flex;gap:0.75rem;width:100%">
+        <input class="form-control" name="content" placeholder="Type your message…" required autocomplete="off" style="flex:1">
+        <button type="submit" class="btn btn-primary" style="flex-shrink:0">Send ✈️</button>
+      </form>
+    </div>
+  </div>
+</div></div>
+<script>
+  const msgs = document.getElementById('chat-messages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+</script>
+{% endblock %}

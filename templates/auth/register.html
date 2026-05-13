@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Register — {{ bakery_name }}{% endblock %}
+{% block footer %}{% endblock %}
+{% block content %}
+<div class="portal-auth-shell portal-auth-shell--customer">
+  <div class="portal-auth-card portal-auth-card--wide">
+    <div class="portal-auth-header">
+      <div class="portal-auth-icon">🧁</div>
+      <span class="portal-auth-kicker">Customer Portal</span>
+      <h1 class="portal-auth-title">Create Account</h1>
+      <p class="portal-auth-subtitle">Join SweetCrumbs and enjoy fresh bakes.</p>
+    </div>
+    <div class="portal-auth-card-body">
+      <form method="POST" action="{{ url_for('auth.register') }}">
+        <div class="form-group">
+          <label class="form-label">Full Name</label>
+          <input class="form-control" type="text" name="name" required placeholder="Your name" autofocus autocomplete="name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <input class="form-control" type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Phone Number</label>
+          <input class="form-control" type="tel" name="phone" placeholder="+91 9999999999" autocomplete="tel" maxlength="20" pattern="[0-9+ ]{10,20}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input class="form-control" type="password" name="password" required placeholder="Min. 6 characters" minlength="6" autocomplete="new-password">
+          <p class="text-sm text-muted mt-1">Use at least 6 characters. A longer password is better.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm Password</label>
+          <input class="form-control" type="password" name="confirm_password" required placeholder="Re-enter password" minlength="6" autocomplete="new-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg mt-2">Create Account</button>
+      </form>
+      <div class="portal-auth-footer">
+        <p class="text-sm text-muted">Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a></p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

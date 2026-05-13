@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+{% block title %}Order #{{ order.order_number }} — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap" data-live-refresh="30000">
+<div class="container">
+  <div class="flex justify-between items-center mb-4">
+    <div>
+      <h1 class="section-title">Order #{{ order.order_number }}</h1>
+      <p class="text-muted">Placed on {{ order.placed_at.strftime('%d %B %Y at %I:%M %p') }}</p>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <span class="badge badge-green">Live updates every 30s</span>
+      <a href="{{ url_for('customer.invoice', order_id=order.id) }}" class="btn btn-outline btn-sm" target="_blank">🧾 Invoice</a>
+      <a href="{{ url_for('customer.order_history') }}" class="btn btn-ghost btn-sm">← Back</a>
+    </div>
+  </div>
+
+  <!-- Status Tracker -->
+  {% set statuses = ['PLACED','PREPARING','PACKED','OUT_FOR_DELIVERY','DELIVERED'] %}
+  {% set icons = ['📋','👩‍🍳','📦','🚚','✅'] %}
+  {% if order.status != 'CANCELLED' %}
+  <div class="card mb-4">
+    <div class="card-header">Order Tracking</div>
+    <div class="card-body">
+      <div class="order-tracker">
+        {% for s in statuses %}
+        {% set is_active = s == order.status %}
+        {% set is_done = statuses.index(s) < statuses.index(order.status) if order.status in statuses else false %}
+        <div class="tracker-step {% if is_active %}active{% elif is_done %}completed{% endif %}">
+          <div class="tracker-icon">{{ icons[loop.index0] }}</div>
+          <div class="tracker-label">{{ s.replace('_',' ') }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div style="padding:1rem 1.5rem;background:#FFF0F0;border:1px solid #FFCDD2;border-radius:var(--radius-lg);color:#B71C1C;margin-bottom:1.5rem">
+    ❌ This order has been <strong>CANCELLED</strong>.
+  </div>
+  {% endif %}
+
+  <div style="display:grid;grid-template-columns:1fr 360px;gap:2rem;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:1.5rem">
+
+      <!-- Items -->
+      <div class="card">
+        <div class="card-header">Items Ordered</div>
+        {% for item in items %}
+        <div class="cart-item">
+          <img src="{{ item.product.image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}"
+               alt="{{ item.product_name }}" class="cart-item-img"
+               data-fallback-src="{{ item.product.fallback_image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}">
+          <div style="flex:1">
+            <h4 style="font-family:var(--font-display);font-size:0.95rem;margin-bottom:0.2rem">{{ item.product_name }}</h4>
+            {% if item.variant_name %}<p class="text-sm text-muted">{{ item.variant_name }}</p>{% endif %}
+            <p class="text-sm text-muted">₹{{ item.unit_price|int }} × {{ item.quantity }}</p>
+          </div>
+          <span style="font-weight:600;color:var(--caramel)">₹{{ item.subtotal|int }}</span>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Delivery Address -->
+      <div class="card">
+        <div class="card-header">📍 Delivery Address</div>
+        <div class="card-body">
+          <p>{{ order.address_line1 }}{% if order.address_line2 %}, {{ order.address_line2 }}{% endif %}</p>
+          <p>{{ order.city }} — {{ order.pincode }}</p>
+          <p class="text-muted">📞 {{ order.phone }}</p>
+          <p class="text-muted mt-1">🕐 {{ order.delivery_slot }} | 📅 {{ order.delivery_date }}</p>
+          {% if order.special_note %}<p class="text-sm text-muted mt-1">💬 {{ order.special_note }}</p>{% endif %}
+          {% set map_query = address_query(order.address_line1, order.address_line2, order.city, order.pincode) %}
+          {% set map_title = 'Delivery address map for order ' ~ order.order_number %}
+          {% include 'includes/address_map.html' %}
+
+          {% if can_change_addr %}
+          <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+            <button class="btn btn-outline btn-sm" data-toggle-target="#addr-form" data-toggle-hide-self>
+              ✏️ Change Address
+            </button>
+            <form id="addr-form" method="POST" action="{{ url_for('customer.change_address', order_id=order.id) }}" style="display:none;margin-top:1rem">
+              <div class="form-row">
+                <div class="form-group"><label class="form-label">Address Line 1</label><input class="form-control" name="address_line1" value="{{ order.address_line1 }}"></div>
+                <div class="form-group"><label class="form-label">Address Line 2</label><input class="form-control" name="address_line2" value="{{ order.address_line2 or '' }}"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label class="form-label">City</label><input class="form-control" name="city" value="{{ order.city }}"></div>
+                <div class="form-group"><label class="form-label">PIN Code</label><input class="form-control" name="pincode" value="{{ order.pincode }}"></div>
+              </div>
+              <div class="flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm">Save Address</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-hide-target="#addr-form">Cancel</button>
+              </div>
+              <p class="text-sm text-muted mt-1">Changes remaining: {{ 2 - order.address_changes }}/2</p>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Modification Request -->
+      {% if can_modify %}
+      <div class="card">
+        <div class="card-header">✏️ Request Modification</div>
+        <div class="card-body">
+          <form method="POST" action="{{ url_for('customer.request_modification', order_id=order.id) }}">
+            <div class="form-group">
+              <label class="form-label">Describe the modification needed</label>
+              <textarea class="form-control" name="description" placeholder="e.g. Change the message on cake, increase quantity..." required></textarea>
+            </div>
+            <button type="submit" class="btn btn-outline">Submit Request</button>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if order.status == 'DELIVERED' %}
+      <div class="card">
+        <div class="card-header">⭐ Review Delivered Items</div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:0.9rem">
+          {% for item in items %}
+          {% if item.product %}
+          <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap;padding:0.9rem 1rem;background:var(--cream);border-radius:var(--radius-lg);border:1px solid var(--border)">
+            <div>
+              <div style="font-weight:600;color:var(--brown)">{{ item.product_name }}</div>
+              <div class="text-sm text-muted">Delivered successfully. Share your feedback when you are ready.</div>
+            </div>
+            <a href="{{ url_for('customer.product_detail', product_id=item.product_id) }}#tab-reviews" class="btn btn-outline btn-sm">Review Product</a>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+
+    <!-- Sidebar Summary -->
+    <div style="display:flex;flex-direction:column;gap:1.5rem">
+      <div class="card">
+        <div class="card-header">💳 Payment Summary</div>
+        <div class="card-body">
+          <div class="flex justify-between mb-1"><span class="text-muted">Subtotal</span><span>₹{{ order.subtotal|int }}</span></div>
+          {% if order.discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Discount</span><span>−₹{{ order.discount|int }}</span></div>{% endif %}
+          {% if order.loyalty_discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Loyalty Discount</span><span>−₹{{ order.loyalty_discount|int }}</span></div>{% endif %}
+          <div class="flex justify-between mb-1"><span class="text-muted">Delivery</span><span>{% if order.delivery_charge == 0 %}FREE{% else %}₹{{ order.delivery_charge|int }}{% endif %}</span></div>
+          <div class="divider"></div>
+          <div class="flex justify-between"><span style="font-weight:600">Total</span><span style="font-family:var(--font-display);font-size:1.3rem;font-weight:700;color:var(--caramel)">₹{{ order.total|int }}</span></div>
+        <div class="mt-2">
+          <span class="badge {% if order.payment_status == 'PAID' %}badge-green{% else %}badge-orange{% endif %}">{{ order.payment_status }}</span>
+          <span class="text-sm text-muted ml-1">{{ order.payment_method }}</span>
+        </div>
+        {% if pending_payment_link %}
+        <a href="{{ url_for('customer.payment_link_page', token=pending_payment_link.token) }}" class="btn btn-outline btn-block mt-3">Continue to Payment Page</a>
+        <p class="text-sm text-muted mt-1">This order payment stays pending until your gateway integration is connected.</p>
+        {% endif %}
+      </div>
+    </div>
+
+      <!-- Actions -->
+      <div class="card">
+        <div class="card-header">Actions</div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:0.75rem">
+          <a href="{{ url_for('customer.reorder', order_id=order.id) }}" class="btn btn-outline btn-block">🔄 Reorder</a>
+          <a href="{{ url_for('customer.chat') }}" class="btn btn-ghost btn-block">💬 Chat with Bakery</a>
+          <a href="tel:+919999999999" class="btn btn-ghost btn-block">📞 Call Us</a>
+          {% if can_cancel %}
+          <div class="cancel-window" style="padding:0.75rem;background:#FFF0F0;border-radius:var(--radius-lg);text-align:center;border:1px solid #FFCDD2">
+            <p class="text-sm" style="color:#B71C1C;margin-bottom:0.5rem">Cancel window closes in <strong id="cancel-timer" data-placed-at="{{ order.placed_at.isoformat() }}">2:00</strong></p>
+            <form method="POST" action="{{ url_for('customer.cancel_order', order_id=order.id) }}">
+              <button type="submit" class="btn btn-danger btn-sm cancel-btn" data-confirm="Are you sure you want to cancel this order?">Cancel Order</button>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+{% endblock %}

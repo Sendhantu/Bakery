@@ -1,0 +1,62 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Products — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Products</h1>
+  <div class="flex gap-2">
+    <a href="{{ url_for('admin.inventory') }}" class="btn btn-outline">Manage Stock</a>
+    <a href="{{ url_for('admin.add_product') }}" class="btn btn-primary">+ Add Product</a>
+  </div>
+</div>
+<form method="GET" action="{{ url_for('admin.products') }}" class="admin-toolbar-search" style="margin-bottom:1rem">
+  <input class="form-control" type="search" name="q" value="{{ search or '' }}" placeholder="Search products">
+  <button type="submit" class="btn btn-outline btn-sm">Search</button>
+</form>
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Featured</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for p in products %}
+        <tr>
+          <td>
+            <div class="flex items-center gap-2">
+              <img src="{{ p.image_src }}" style="width:44px;height:44px;border-radius:8px;object-fit:cover;background:var(--cream-dark)" data-fallback-src="{{ p.fallback_image_src }}">
+              <div>
+                <div style="font-weight:600;font-size:0.9rem">{{ p.name }}</div>
+                {% if p.is_eggless %}<span class="badge badge-green" style="font-size:0.68rem">Eggless</span>{% endif %}
+              </div>
+            </div>
+          </td>
+          <td>{{ p.category.name if p.category else '—' }}</td>
+          <td>₹{{ p.base_price|int }}</td>
+          <td>
+            <span class="badge {% if p.total_stock == 0 %}badge-red{% elif p.total_stock <= 5 %}badge-orange{% else %}badge-green{% endif %}">
+              {{ p.total_stock }}
+            </span>
+          </td>
+          <td><span class="badge {% if p.is_active %}badge-green{% else %}badge-red{% endif %}">{% if p.is_active %}Active{% else %}Inactive{% endif %}</span></td>
+          <td>{% if p.is_featured %}⭐{% else %}—{% endif %}</td>
+          <td>
+            <div class="flex gap-1">
+              <a href="{{ url_for('admin.edit_product', product_id=p.id) }}" class="btn btn-ghost btn-sm">✏️</a>
+              <form method="POST" action="{{ url_for('admin.delete_product', product_id=p.id) }}">
+                <button type="submit"
+                        class="btn btn-ghost btn-sm"
+                        style="color:{% if p.is_active %}var(--dusty-rose){% else %}var(--sage){% endif %}"
+                        data-confirm="{% if p.is_active %}Move this product offline?{% else %}Make this product live again?{% endif %}">
+                  {% if p.is_active %}Pause{% else %}Go Live{% endif %}
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">No products found for this search.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% include 'includes/pagination.html' %}
+{% endblock %}

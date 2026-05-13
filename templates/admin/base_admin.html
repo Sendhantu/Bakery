@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="SweetCrumbs admin — catalogue, orders, and analytics.">
+  <meta name="theme-color" content="#5C3D2E">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}Admin — {{ bakery_name }}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <!-- Font Awesome only loaded where needed via class; CDN kept for icon fallback -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" media="print" onload="this.media='all'">
+  <style>
+    /* ── Flash auto-dismiss ── */
+    .flash-msg { animation: flash-slide-in 0.3s ease; }
+    @keyframes flash-slide-in { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+
+    /* ── Sidebar active ── */
+    .admin-nav a.active { background:var(--cream-dark); color:var(--brown); font-weight:600; }
+
+    /* ── Badge blue (for loyalty) ── */
+    .badge-blue { background:#E3F2FD; color:#1565C0; }
+
+    /* ── Loyalty tier colours ── */
+    .tier-gold   { color:#C8873A; font-weight:700; }
+    .tier-silver { color:#777; font-weight:700; }
+    .tier-bronze { color:#8D6748; font-weight:700; }
+  </style>
+</head>
+<body data-page-role="admin">
+
+<nav class="navbar navbar--ops navbar--admin">
+  <div class="flex items-center gap-2">
+    <button class="hamburger admin-menu-toggle" style="display:flex" aria-label="Toggle sidebar">
+      <span></span><span></span><span></span>
+    </button>
+    <a href="{{ url_for('admin.dashboard') }}" class="navbar-brand">
+      🎂 Sweet<span>Crumbs</span>
+      <span class="navbar-portal-tag">Admin</span>
+    </a>
+  </div>
+  <div class="flex items-center gap-2 admin-toolbar-meta">
+    <a href="{{ portal_urls.customer }}" class="btn btn-ghost btn-sm" target="_blank" rel="noopener">View Site ↗</a>
+    <span class="badge badge-brown">Operations Console</span>
+    <span class="admin-toolbar-user">{{ current_user.name }}</span>
+    <a href="{{ url_for('auth.logout') }}" class="btn btn-outline btn-sm">Logout</a>
+  </div>
+</nav>
+
+<!-- Flash messages with auto-dismiss -->
+<div class="flash-container" id="flash-container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+    <div class="flash-msg flash-{{ category }}" role="alert">
+      <span>{% if category=='success' %}✅{% elif category=='danger' %}❌{% elif category=='warning' %}⚠️{% else %}ℹ️{% endif %}</span>
+      <span>{{ message }}</span>
+      <button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.1rem;opacity:0.6;" aria-label="Dismiss">✕</button>
+    </div>
+    {% endfor %}
+  {% endwith %}
+</div>
+
+<div class="admin-layout">
+  <aside class="admin-sidebar" id="admin-sidebar">
+    <div class="admin-sidebar-brand">Admin Console</div>
+    <ul class="admin-nav">
+      <li class="section-label">Overview</li>
+      <li><a href="{{ url_for('admin.dashboard') }}" class="{{ 'active' if request.endpoint == 'admin.dashboard' }}">
+        <span class="icon">📊</span>Dashboard</a></li>
+      <li><a href="{{ url_for('admin.analytics') }}" class="{{ 'active' if request.endpoint == 'admin.analytics' }}">
+        <span class="icon">📈</span>Analytics</a></li>
+
+      <li class="section-label">Catalogue</li>
+      <li><a href="{{ url_for('admin.products') }}" class="{{ 'active' if 'product' in request.endpoint }}">
+        <span class="icon">🎂</span>Products</a></li>
+      <li><a href="{{ url_for('admin.categories') }}" class="{{ 'active' if 'categor' in request.endpoint }}">
+        <span class="icon">📁</span>Categories</a></li>
+      <li><a href="{{ url_for('admin.inventory') }}" class="{{ 'active' if 'inventory' in request.endpoint }}">
+        <span class="icon">📦</span>Inventory</a></li>
+      <li><a href="{{ url_for('admin.raw_materials') }}" class="{{ 'active' if 'raw_material' in request.endpoint }}">
+        <span class="icon">🧂</span>Raw Materials</a></li>
+
+      <li class="section-label">Orders</li>
+      <li><a href="{{ url_for('admin.orders') }}" class="{{ 'active' if request.endpoint == 'admin.orders' }}">
+        <span class="icon">🛒</span>All Orders</a></li>
+      <li><a href="{{ url_for('admin.modifications') }}" class="{{ 'active' if 'modification' in request.endpoint }}">
+        <span class="icon">✏️</span>Modifications</a></li>
+
+      <li class="section-label">Customers</li>
+      <li><a href="{{ url_for('admin.customers') }}" class="{{ 'active' if request.endpoint in ['admin.customers','admin.customer_detail'] }}">
+        <span class="icon">👥</span>Customers</a></li>
+      <li><a href="{{ url_for('admin.chat') }}" class="{{ 'active' if 'chat' in request.endpoint }}">
+        <span class="icon">💬</span>Chat
+        {% if pending_msgs > 0 %}
+        <span class="badge badge-orange" style="margin-left:auto;font-size:0.7rem">{{ pending_msgs }}</span>
+        {% endif %}
+      </a></li>
+      <li><a href="{{ url_for('admin.loyalty') }}" class="{{ 'active' if 'loyalty' in request.endpoint }}">
+        <span class="icon">⭐</span>Loyalty Points</a></li>
+
+      <li class="section-label">Finance</li>
+      <li><a href="{{ url_for('admin.coupons') }}" class="{{ 'active' if 'coupon' in request.endpoint }}">
+        <span class="icon">🎟</span>Coupons</a></li>
+
+      <li class="section-label">Delivery</li>
+      <li><a href="{{ url_for('admin.agents') }}" class="{{ 'active' if 'agent' in request.endpoint }}">
+        <span class="icon">🚚</span>Agents</a></li>
+    </ul>
+  </aside>
+  <main class="admin-main">{% block content %}{% endblock %}</main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+<script>
+// Auto-dismiss flash messages after 5s
+(function() {
+  const container = document.getElementById('flash-container');
+  if (!container) return;
+  const msgs = container.querySelectorAll('.flash-msg');
+  msgs.forEach(function(msg) {
+    setTimeout(function() {
+      msg.style.transition = 'opacity 0.4s';
+      msg.style.opacity = '0';
+      setTimeout(function() { msg.remove(); }, 400);
+    }, 5000);
+  });
+})();
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

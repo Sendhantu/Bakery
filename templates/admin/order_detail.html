@@ -1,0 +1,155 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Order #{{ order.order_number }} — Admin{% endblock %}
+{% block content %}
+<div>
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Order #{{ order.order_number }}</h1>
+    <p class="text-muted">{{ order.placed_at.strftime('%d %B %Y, %I:%M %p') }} · {{ order.customer.name }}</p>
+  </div>
+  <div class="flex gap-2 flex-wrap">
+    <a href="{{ url_for('customer.invoice', order_id=order.id) }}" class="btn btn-outline btn-sm" target="_blank">🧾 Invoice</a>
+    <a href="{{ url_for('admin.orders') }}" class="btn btn-ghost btn-sm">← Back</a>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 340px;gap:2rem;align-items:start">
+  <div style="display:flex;flex-direction:column;gap:1.5rem">
+    <!-- Items -->
+    <div class="card">
+      <div class="card-header">Items</div>
+      {% for item in items %}
+      <div class="cart-item">
+        <img src="{{ item.product.image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}" class="cart-item-img" data-fallback-src="{{ item.product.fallback_image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}">
+        <div style="flex:1">
+          <div style="font-weight:600">{{ item.product_name }}</div>
+          <div class="text-sm text-muted">{{ item.variant_name }} · ×{{ item.quantity }}</div>
+          <div class="text-sm">₹{{ item.unit_price|int }} each</div>
+        </div>
+        <span style="font-weight:600;color:var(--caramel)">₹{{ item.subtotal|int }}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Address -->
+    <div class="card">
+      <div class="card-header">📍 Delivery Address</div>
+      <div class="card-body">
+        <p>{{ order.address_line1 }}{% if order.address_line2 %}, {{ order.address_line2 }}{% endif %}</p>
+        <p>{{ order.city }} — {{ order.pincode }}</p>
+        <p class="text-muted">📞 {{ order.phone }} · 🕐 {{ order.delivery_slot }} · 📅 {{ order.delivery_date }}</p>
+        {% if order.special_note %}<p class="text-sm text-muted mt-1">💬 {{ order.special_note }}</p>{% endif %}
+        {% set map_query = address_query(order.address_line1, order.address_line2, order.city, order.pincode) %}
+        {% set map_title = 'Admin order delivery map for ' ~ order.order_number %}
+        {% include 'includes/address_map.html' %}
+        {% if addr_hist %}
+        <details style="margin-top:1rem"><summary class="text-sm text-muted" style="cursor:pointer">Address change history ({{ addr_hist|length }})</summary>
+          {% for ch in addr_hist %}<div class="text-sm" style="padding:0.5rem 0;border-top:1px solid var(--border);margin-top:0.5rem"><span style="color:var(--dusty-rose)">From:</span> {{ ch.old_address }}<br><span style="color:var(--sage)">To:</span> {{ ch.new_address }}</div>{% endfor %}
+        </details>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Modification Requests -->
+    {% if mod_reqs %}
+    <div class="card">
+      <div class="card-header">✏️ Modification Requests</div>
+      <div class="card-body" style="padding:0">
+        {% for req in mod_reqs %}
+        <div style="padding:1rem 1.25rem;border-bottom:1px solid var(--border)">
+          <div class="flex justify-between items-center mb-1">
+            <span class="badge {% if req.status=='PENDING' %}badge-orange{% elif req.status=='APPROVED' %}badge-green{% else %}badge-red{% endif %}">{{ req.status }}</span>
+            <span class="text-sm text-muted">{{ req.created_at.strftime('%d %b %Y') }}</span>
+          </div>
+          <p class="text-sm" style="margin-bottom:0.75rem">{{ req.description }}</p>
+          {% if req.status == 'PENDING' %}
+          <form method="POST" action="{{ url_for('admin.resolve_modification', req_id=req.id) }}">
+            <div class="flex gap-2 items-center flex-wrap">
+              <input class="form-control" type="number" name="price_diff" placeholder="Price diff (+ or -)" step="0.01" style="max-width:160px">
+              <button name="action" value="approve" class="btn btn-primary btn-sm">✅ Approve</button>
+              <button name="action" value="reject" class="btn btn-danger btn-sm">❌ Reject</button>
+            </div>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Sidebar -->
+  <div style="display:flex;flex-direction:column;gap:1.5rem">
+    <!-- Update Status -->
+    <div class="card">
+      <div class="card-header">Update Status</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin.update_order_status', order_id=order.id) }}">
+          <div class="form-group">
+            <select class="form-control" name="status">
+              {% for s in allowed_statuses %}
+              <option value="{{ s }}" {% if order.status == s %}selected{% endif %}>{{ s.replace('_',' ') }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Update Status</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Assign Delivery -->
+    {% if agents %}
+    <div class="card">
+      <div class="card-header">🚚 Assign Delivery</div>
+      <div class="card-body">
+        {% if order.delivery %}
+        <div class="badge badge-blue mb-2">Assigned to: {{ order.delivery.agent.name }}</div>
+        <a href="{{ url_for('delivery.order_detail', order_id=order.id) }}" class="btn btn-outline btn-block btn-sm" style="margin-bottom:0.75rem">Open Delivery View</a>
+        {% endif %}
+        <form method="POST" action="{{ url_for('admin.assign_delivery', order_id=order.id) }}">
+          <div class="form-group">
+            <select class="form-control" name="agent_id">
+              <option value="">— Select Agent —</option>
+              {% for a in agents %}<option value="{{ a.id }}" {% if order.delivery and order.delivery.agent_id == a.id %}selected{% endif %}>{{ a.name }} · {{ a.phone }}{% if not a.availability %} · Busy{% endif %}</option>{% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Assign</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Order Summary -->
+    <div class="card">
+      <div class="card-header">💳 Payment</div>
+      <div class="card-body">
+        <div class="flex justify-between mb-1"><span class="text-muted">Subtotal</span><span>₹{{ order.subtotal|int }}</span></div>
+        {% if order.discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Discount</span><span>−₹{{ order.discount|int }}</span></div>{% endif %}
+        {% if order.loyalty_discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Loyalty Discount</span><span>−₹{{ order.loyalty_discount|int }}</span></div>{% endif %}
+        <div class="flex justify-between mb-1"><span class="text-muted">Delivery</span><span>{% if order.delivery_charge == 0 %}FREE{% else %}₹{{ order.delivery_charge|int }}{% endif %}</span></div>
+        <div class="divider"></div>
+        <div class="flex justify-between"><span style="font-weight:600">Total</span><span style="font-family:var(--font-display);font-size:1.25rem;font-weight:700;color:var(--caramel)">₹{{ order.total|int }}</span></div>
+        <div class="mt-2 flex gap-1 flex-wrap">
+          <span class="badge {% if order.payment_status=='PAID' %}badge-green{% else %}badge-orange{% endif %}">{{ order.payment_status }}</span>
+          <span class="badge badge-brown">{{ order.payment_method }}</span>
+        </div>
+        {% if payment_link %}
+        <a href="{{ url_for('customer.payment_link_page', token=payment_link.token) }}" class="btn btn-outline btn-block mt-3">Open Payment Page</a>
+        {% else %}
+        <a href="{{ url_for('admin.order_payment_link', order_id=order.id) }}" class="btn btn-outline btn-block mt-3">Create Payment Page</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Contact Customer -->
+    <div class="card">
+      <div class="card-header">Contact Customer</div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:0.75rem">
+        <a href="{{ url_for('admin.chat_thread', customer_id=order.user_id) }}" class="btn btn-outline btn-block">💬 Open Chat</a>
+        <a href="tel:{{ order.phone }}" class="btn btn-ghost btn-block">📞 Call</a>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+{% endblock %}

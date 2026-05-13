@@ -1,0 +1,59 @@
+<div id="delivery-dashboard-live">
+  {% if not agent %}
+  <div class="empty-state">
+    <div class="empty-icon">⚠️</div>
+    <h3>No delivery agent profile found</h3>
+    <p class="text-muted">Ask the admin to assign your delivery agent profile.</p>
+  </div>
+  {% elif assigned %}
+  <div class="delivery-assigned-list">
+    {% for delivery in assigned %}
+    <article class="ops-order-card">
+      <div class="ops-order-card-head">
+        <div>
+          <div class="ops-order-kicker">Order #{{ delivery.order.order_number }}</div>
+          <h3>{{ delivery.order.customer.name }}</h3>
+        </div>
+        <div class="ops-order-head-meta">
+          <span class="badge badge-brown">{{ delivery.order.status.replace('_',' ') }}</span>
+          <strong>₹{{ delivery.order.total|int }}</strong>
+        </div>
+      </div>
+      <div class="ops-order-meta-row">
+        <span>📞 <a href="tel:{{ delivery.order.phone }}">{{ delivery.order.phone }}</a></span>
+        <span>🕐 {{ delivery.order.delivery_slot }}</span>
+        <span>📅 {{ delivery.order.delivery_date }}</span>
+      </div>
+      <p class="ops-order-address">📍 {{ delivery.order.address_line1 }}{% if delivery.order.address_line2 %}, {{ delivery.order.address_line2 }}{% endif %}, {{ delivery.order.city }} — {{ delivery.order.pincode }}</p>
+      {% if delivery.order.special_note %}
+      <p class="ops-order-note">💬 {{ delivery.order.special_note }}</p>
+      {% endif %}
+      <div class="ops-order-actions">
+        {% set map_query = address_query(delivery.order.address_line1, delivery.order.address_line2, delivery.order.city, delivery.order.pincode) %}
+        <a href="tel:{{ delivery.order.phone }}" class="btn btn-outline btn-sm">Call Customer</a>
+        {% if map_query %}
+        <a href="{{ map_link_url(map_query) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Open Maps ↗</a>
+        {% endif %}
+        <a href="{{ url_for('delivery.order_detail', order_id=delivery.order_id) }}" class="btn btn-ghost btn-sm">View Details</a>
+      </div>
+      <div class="ops-status-actions">
+        {% for status in delivery.allowed_statuses if status != delivery.order.status %}
+        <form method="POST" action="{{ url_for('delivery.update_status', order_id=delivery.order_id) }}">
+          <input type="hidden" name="status" value="{{ status }}">
+          <button type="submit" class="btn btn-sm {% if loop.first %}btn-primary{% else %}btn-outline{% endif %}">
+            {{ status.replace('_',' ') }}
+          </button>
+        </form>
+        {% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">✅</div>
+    <h3>No active deliveries</h3>
+    <p class="text-muted">You have no deliveries assigned right now.</p>
+  </div>
+  {% endif %}
+</div>
