@@ -14,6 +14,12 @@ class Payment(db.Model):
 
 
 class PaymentLink(db.Model):
+    """A lightweight payment link record.
+
+    This model stores metadata and a token for redirecting customers to a
+    payment provider. It intentionally does not store raw payment credentials
+    such as card numbers, CVV, or UPI PINs.
+    """
     __tablename__ = 'payment_links'
     id                         = db.Column(db.Integer, primary_key=True)
     token                      = db.Column(db.String(64), unique=True, nullable=False)

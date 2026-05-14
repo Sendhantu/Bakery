@@ -1,9 +1,11 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, current_app, abort, session
 from flask_login import login_required, current_user
+from app import csrf
 from models import (db, Product, ProductVariant, Category, Cart, Wishlist,
                     Order, OrderItem, Payment, Refund, Coupon, Subscription,
                     Review, Message, Notification, AddressChange, ModificationRequest,
                     PaymentLink, LoyaltyLedger, calculate_loyalty_redemption, get_loyalty_config, cache)
+from recommendation_engine import get_recommendation_engine
 from services import (
     enrich_products,
     get_customer_orders_page,
@@ -1051,6 +1053,35 @@ def send_message():
                                receiver_id=admin.id, content=content))
         db.session.commit()
     return redirect(url_for('customer.chat'))
+
+
+@customer_bp.route('/chat/ai', methods=['POST'])
+@login_required
+@csrf.exempt
+def ai_recommend():
+    payload = request.get_json(silent=True) or {}
+    query = (payload.get('query') or '').strip()
+    if not query:
+        return jsonify({'ok': False, 'message': 'Tell us what kind of bakery item you are looking for.'}), 400
+
+    engine = get_recommendation_engine()
+    products, message = engine.recommend(current_user.id, query, limit=6)
+    result = {
+        'ok': True,
+        'message': message,
+        'products': [
+            {
+                'id': product.id,
+                'name': product.name,
+                'price': float(product.base_price),
+                'category': product.category.name if product.category else '',
+                'image': product.image_src,
+                'description': product.description or '',
+            }
+            for product in products
+        ],
+    }
+    return jsonify(result)
 
 
 # ────────────────────────────────────────

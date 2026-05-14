@@ -40,6 +40,8 @@ DATABASE_URL=mysql+pymysql://root:YOUR_PASSWORD@localhost/bakery_db
 SECRET_KEY=your-long-random-secret-key
 ```
 
+> In production, `SECRET_KEY` must be a strong random value. The app will refuse to start with the default key in production.
+
 **SQLite (default):** If you leave `DATABASE_URL` unset, the app uses a local **`bakery.db`** SQLite file in the project directory—no MySQL install required for quick local runs. Use MySQL for production or when you need the full `schema.sql` workflow.
 
 ---
@@ -49,7 +51,12 @@ SECRET_KEY=your-long-random-secret-key
 ```bash
 pip install -r requirements.txt
 ```
-
+> For the local AI layer, set `LLM_MODEL_PATH` in your environment to a local Llama/Mistral model file before starting the app.
+>
+> Example:
+> ```bash
+> export LLM_MODEL_PATH=/path/to/mistral-7b.gguf
+> ```
 ---
 
 ### 5. Run the Application
@@ -138,12 +145,40 @@ bakery/
 
 ---
 
-## 🗄 Database Tables (20)
+## 🗄 Database Schema
 
-`users` · `login_history` · `categories` · `products` · `product_variants` ·
-`cart` · `wishlist` · `orders` · `order_items` · `address_changes` ·
-`modification_requests` · `payments` · `refunds` · `coupons` · `subscriptions` ·
-`reviews` · `messages` · `notifications` · `delivery_agents` · `deliveries`
+This app stores data in a relational database. If `DATABASE_URL` is set, it will use that database (MySQL is the expected production backend). Otherwise it falls back to a local SQLite file at `bakery.db`.
+
+The full MySQL schema is defined in `schema.sql`, while the ORM models are defined in `models/`.
+
+### Tables and main purpose
+
+| Table | Key fields | Purpose |
+|---|---|---|
+| `users` | `id`, `name`, `email`, `role`, `is_active` | Stores all users and login credentials for customers, admins, and delivery staff. |
+| `login_history` | `user_id`, `login_time`, `ip_address`, `status` | Tracks login attempts and access events. |
+| `categories` | `name`, `icon` | Stores product categories and category icons. |
+| `products` | `name`, `base_price`, `category_id`, `is_featured`, `occasion_tags` | Main product catalog with descriptions, pricing, and display flags. |
+| `product_variants` | `product_id`, `name`, `price`, `stock` | Variant pricing and inventory for product sizes/options. |
+| `cart` | `user_id`, `product_id`, `variant_id`, `quantity` | Temporary shopping cart contents for customers. |
+| `wishlist` | `user_id`, `product_id` | Customer saved products for later. |
+| `saved_addresses` | `user_id`, `label`, `address_line1`, `city`, `pincode` | Stored delivery addresses and defaults. |
+| `orders` | `order_number`, `user_id`, `status`, `total`, `delivery_date`, `payment_status` | Placed orders with delivery, payment, and coupon details. |
+| `order_items` | `order_id`, `product_id`, `variant_id`, `quantity`, `subtotal` | Items and pricing details for each order. |
+| `address_changes` | `order_id`, `old_address`, `new_address`, `changed_by` | History of order address updates. |
+| `modification_requests` | `order_id`, `user_id`, `status`, `price_diff` | Customer requests for order edits. |
+| `payments` | `order_id`, `amount`, `status`, `transaction_id` | Payment status for orders. |
+| `payment_links` | `token`, `user_id`, `order_id`, `status` | Generated payment link records for UPI/card flows. |
+| `refunds` | `order_id`, `amount`, `status` | Refund tracking for cancelled/returned orders. |
+| `coupons` | `code`, `discount_type`, `discount_value`, `valid_until`, `used_count` | Promotion codes and validation rules. |
+| `subscriptions` | `user_id`, `plan`, `discount_pct`, `start_date`, `end_date` | Customer membership plans and discounts. |
+| `reviews` | `product_id`, `user_id`, `rating`, `comment` | Customer product reviews and ratings. |
+| `messages` | `sender_id`, `receiver_id`, `order_id`, `content`, `is_read` | In-app messaging between users and staff. |
+| `notifications` | `user_id`, `title`, `message`, `is_read` | User notifications and alerts. |
+| `delivery_agents` | `user_id`, `name`, `phone`, `availability` | Delivery staff profiles and availability state. |
+| `deliveries` | `order_id`, `agent_id`, `status`, `delivered_time` | Order delivery assignment and status history. |
+| `raw_materials` | `name`, `stock`, `reorder_level`, `cost_per_unit` | Inventory for bakery ingredients. |
+| `product_materials` | `product_id`, `raw_material_id`, `quantity_required` | Links products to raw material recipes. |
 
 ---
 
@@ -163,12 +198,18 @@ pytest
 
 Uses a temporary SQLite database and the `testing` config (see `tests/conftest.py`).
 
+A GitHub Actions workflow also runs `pytest` and `black --check` on every push.
+
 ---
 
 ## 📦 Production Notes
 
 1. Change `SECRET_KEY` to a strong random value
 2. Set `FLASK_ENV=production` in `.env`
-3. Use a production WSGI server (Gunicorn, uWSGI)
-4. Configure MySQL with proper user permissions (not root)
-5. Set up a reverse proxy (Nginx/Apache)
+3. The app exposes `/healthz` for platform health checks
+4. Use a production WSGI server (Gunicorn, uWSGI)
+5. Configure MySQL with proper user permissions (not root)
+6. Set up a reverse proxy (Nginx/Apache)
+7. Enable `USE_PROXY_FIX=true` when behind a trusted proxy
+8. Set `RATE_LIMIT_STORAGE_URI` for production rate limiting (for example, `redis://user:pass@host:6379/0`)
+9. Serve the app over HTTPS and verify security headers are set

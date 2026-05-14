@@ -34,9 +34,63 @@
       </form>
     </div>
   </div>
+  <div class="mt-4 p-4" style="background:var(--cream-dark);border-radius:var(--radius-lg);">
+    <h2 class="mb-2">Ask our Bakery Assistant</h2>
+    <p class="text-muted">Get product suggestions, budget-friendly ideas and personalized recommendations instantly.</p>
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">
+      <input id="ai-query" class="form-control" type="text" placeholder="E.g. birthday cake under ₹800, less sweet, chocolate" style="flex:1;min-width:240px;">
+      <button id="ai-submit" class="btn btn-secondary">Ask AI</button>
+    </div>
+    <div id="ai-response" class="mt-3" style="min-height:120px;line-height:1.6rem;color:var(--text);"></div>
+  </div>
 </div></div>
 <script>
   const msgs = document.getElementById('chat-messages');
   if (msgs) msgs.scrollTop = msgs.scrollHeight;
+
+  async function askBakeryAI(event) {
+    event.preventDefault();
+    const queryBox = document.getElementById('ai-query');
+    const responseBox = document.getElementById('ai-response');
+    const query = queryBox.value.trim();
+    if (!query) {
+      responseBox.innerHTML = '<div class="text-danger">Please enter what you are looking for.</div>';
+      return;
+    }
+
+    responseBox.innerHTML = '<div class="text-muted">Finding the best bakery recommendations for you…</div>';
+    try {
+      const response = await fetch('{{ url_for('customer.ai_recommend') }}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+      });
+      const result = await response.json();
+      if (!result.ok) {
+        responseBox.innerHTML = `<div class="text-danger">${result.message || 'Unable to get recommendations.'}</div>`;
+        return;
+      }
+
+      const productCards = result.products.map(product => `
+        <div style="padding:1rem;border:1px solid rgba(0,0,0,0.08);border-radius:1rem;margin-bottom:0.75rem;">
+          <div style="font-weight:600;">${product.name} — ₹${product.price.toFixed(0)}</div>
+          <div class="text-muted">${product.category}</div>
+          <div style="margin-top:0.5rem;font-size:0.95rem;">${product.description || 'A delicious bakery choice.'}</div>
+        </div>
+      `).join('');
+
+      responseBox.innerHTML = `
+        <div style="margin-bottom:1rem;">${result.message}</div>
+        ${productCards}
+      `;
+    } catch (error) {
+      responseBox.innerHTML = '<div class="text-danger">Something went wrong while fetching recommendations.</div>';
+      console.error(error);
+    }
+  }
+
+  document.getElementById('ai-submit').addEventListener('click', askBakeryAI);
 </script>
 {% endblock %}
