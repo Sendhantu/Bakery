@@ -46,3 +46,15 @@ CREATE TABLE IF NOT EXISTS email_log (
 ALTER TABLE orders
     ADD COLUMN IF NOT EXISTS loyalty_discount DECIMAL(10,2) DEFAULT 0
     AFTER discount;
+
+ALTER TABLE saved_addresses
+    ADD COLUMN IF NOT EXISTS latitude DECIMAL(10,7) NULL
+    AFTER phone,
+    ADD COLUMN IF NOT EXISTS longitude DECIMAL(10,7) NULL
+    AFTER latitude;
+
+ALTER TABLE orders
+    ADD COLUMN IF NOT EXISTS delivery_latitude DECIMAL(10,7) NULL
+    AFTER phone,
+    ADD COLUMN IF NOT EXISTS delivery_longitude DECIMAL(10,7) NULL
+    AFTER delivery_latitude;

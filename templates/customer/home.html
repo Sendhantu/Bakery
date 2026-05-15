@@ -53,7 +53,7 @@
                  alt="{{ hero_product.name if hero_product else 'Signature celebration cake' }}"
                  fetchpriority="high" decoding="async"
                  width="1200" height="1500"
-                 onerror="this.onerror=null;this.src='{{ hero_product.fallback_image_src if hero_product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=1200&q=80' }}'">
+                 data-fallback-src="{{ hero_product.fallback_image_src if hero_product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=1200&q=80' }}">
             <div class="hero-visual-caption">
               <div class="hero-visual-caption-kicker">Today’s Signature Bake</div>
               <div class="hero-visual-caption-title">{{ hero_product.name if hero_product else 'Fresh Celebration Cakes' }}</div>
@@ -93,8 +93,34 @@
         <span class="home-trust-card-icon">🔒</span>
         <div>
           <div class="home-trust-card-value">Secure Checkout</div>
-          <div class="home-trust-card-label">Safe payments & data</div>
+          <div class="home-trust-card-label">Safe payments &amp; data</div>
         </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- AI ASSISTANT -->
+<section class="home-section home-section--white">
+  <div class="container">
+    <div class="ai-panel">
+      <div class="ai-panel-header">
+        <div>
+          <p class="section-kicker">AI Bakery Assistant</p>
+          <h2 class="section-title">Need help picking the perfect bake?</h2>
+          <p class="section-subtitle">Ask SweetCrumbs AI about cakes, eggless options, custom orders, or gifts.</p>
+        </div>
+        <span class="ai-panel-badge">Fast recommendations</span>
+      </div>
+
+      <div class="ai-panel-form">
+        <input id="home-ai-query" class="form-control" type="text"
+          placeholder="E.g. chocolate birthday cake under ₹800, eggless gift box, savoury breads" />
+        <button id="home-ai-submit" class="btn btn-caramel">Ask AI</button>
+      </div>
+
+      <div id="home-ai-response" class="ai-panel-response">
+        <div class="ai-panel-note">Type your bakery question above and get personalized product suggestions instantly.</div>
       </div>
     </div>
   </div>
@@ -132,7 +158,7 @@
         <div class="product-img-wrap">
           <img src="{{ product.image_src }}"
                alt="{{ product.name }}" class="product-card-img" loading="lazy" decoding="async"
-               onerror="this.onerror=null;this.src='{{ product.fallback_image_src }}'">
+               data-fallback-src="{{ product.fallback_image_src }}">
           <span class="badge stock-badge
             {% if product.stock_status == 'in_stock' %}badge-green
             {% elif product.stock_status == 'few_left' %}badge-orange
@@ -146,12 +172,12 @@
           {% endif %}
           {% if current_user.is_authenticated %}
           <a href="{{ url_for('customer.toggle_wishlist', product_id=product.id) }}"
-             class="wish-btn" style="position:absolute;top:10px;right:10px;text-decoration:none">❤️</a>
+             class="wish-btn{% if product.is_eggless %} wish-btn--offset{% endif %}" aria-label="Add {{ product.name }} to wishlist">❤️</a>
           {% endif %}
         </div>
         <div class="product-card-body">
           <div class="product-card-meta-row">
-            <div class="badge badge-brown" style="font-size:0.7rem">{{ product.category.name }}</div>
+            <div class="badge badge-brown product-category-badge">{{ product.category.name }}</div>
             <span class="product-card-meta-text">Fresh today</span>
           </div>
           <h3 class="product-card-title">{{ product.name }}</h3>
@@ -171,7 +197,7 @@
             <div class="product-card-actions">
               <a href="{{ url_for('customer.product_detail', product_id=product.id) }}" class="btn btn-outline btn-sm">Details</a>
               {% if product.stock_status != 'out_of_stock' %}
-              <form method="POST" action="{{ url_for('customer.add_to_cart') }}" style="display:inline">
+              <form method="POST" action="{{ url_for('customer.add_to_cart') }}" class="inline-form">
                 <input type="hidden" name="product_id" value="{{ product.id }}">
                 <input type="hidden" name="variant_id" value="{{ product.variants.first().id if product.variants.first() else '' }}">
                 <input type="hidden" name="quantity" value="1">
@@ -244,5 +270,60 @@
     </div>
   </div>
 </section>
+
+<script>
+  async function askHomeAI(event) {
+    event.preventDefault && event.preventDefault();
+    const queryBox = document.getElementById('home-ai-query');
+    const responseBox = document.getElementById('home-ai-response');
+    const query = queryBox.value.trim();
+
+    if (!query) {
+      responseBox.innerHTML = '<div class="ai-error">Please enter what you would like help with.</div>';
+      return;
+    }
+
+    responseBox.innerHTML = '<div class="ai-loading">Finding the best bakery recommendations for you…</div>';
+
+    try {
+      const response = await fetch('{{ url_for('customer.ai_recommend') }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      const result = await response.json();
+      if (!result.ok) {
+        responseBox.innerHTML = `<div class="ai-error">${result.message || 'Unable to get recommendations.'}</div>`;
+        return;
+      }
+
+      const productsHtml = result.products.length
+        ? result.products.map(product => `
+          <div class="ai-product-card">
+            <div class="ai-product-card-title">${product.name} — ₹${product.price.toFixed(0)}</div>
+            <div class="ai-product-card-meta">${product.category}</div>
+            <div class="ai-product-card-desc">${product.description || 'A delicious bakery choice.'}</div>
+          </div>
+        `).join('')
+        : '<div class="ai-empty">No matching bakes found. Try another query.</div>';
+
+      responseBox.innerHTML = `
+        <div class="ai-message">${result.message}</div>
+        <div class="ai-products">${productsHtml}</div>
+      `;
+    } catch (error) {
+      console.error(error);
+      responseBox.innerHTML = '<div class="ai-error">Something went wrong while fetching recommendations. Please try again.</div>';
+    }
+  }
+
+  document.getElementById('home-ai-submit').addEventListener('click', askHomeAI);
+  document.getElementById('home-ai-query').addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      askHomeAI();
+    }
+  });
+</script>
 
 {% endblock %}

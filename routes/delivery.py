@@ -1,10 +1,11 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, abort, jsonify
 from flask_login import login_required, current_user
+from bootstrap import get_container
+from exceptions import ValidationError
 from functools import wraps
 from sqlalchemy import or_
 
 from models import db, Delivery, DeliveryAgent, Order, User, can_transition_order_status, get_allowed_order_statuses
-from utils import notify_order_status_change
 from datetime import datetime
 
 delivery_bp = Blueprint('delivery', __name__)
@@ -109,21 +110,15 @@ def update_status(order_id):
     agent, delivery, order = get_assigned_delivery_or_404(order_id)
     status = (request.form.get('status') or '').strip().upper()
 
-    if not can_transition_order_status(order.status, status, actor='delivery'):
+    try:
+        order = get_container().order_service.update_order_status(
+            order_id,
+            status,
+            actor='delivery',
+        )
+    except ValidationError:
         flash('Invalid delivery status.', 'danger')
         return redirect(url_for('delivery.order_detail', order_id=order_id))
-
-    order.status = status
-    order.updated_at = datetime.utcnow()
-    delivery.status = status
-    if status == 'DELIVERED':
-        delivery.delivered_time = datetime.utcnow()
-        agent.availability = True
-    else:
-        agent.availability = False
-
-    db.session.commit()
-    notify_order_status_change(order, status)
 
     flash(f'Status updated to {status}.', 'success')
     return redirect(url_for('delivery.order_detail', order_id=order.id))

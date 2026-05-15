@@ -70,6 +70,8 @@
             </div>
           </div>
           {% set map_query = address_query(address.address_line1, address.address_line2, address.city, address.pincode) %}
+          {% set latitude = address.latitude %}
+          {% set longitude = address.longitude %}
           {% set map_title = address.label ~ ' saved address map' %}
           {% include 'includes/address_map.html' %}
         </div>

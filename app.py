@@ -7,14 +7,36 @@ from flask import Flask, request, send_from_directory, url_for, jsonify, current
 from flask_login import LoginManager
 from flask_mail import Mail
 from flask_wtf import CSRFProtect
+from sqlalchemy import text
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from api.v1 import api_v1_bp
+from api.v2 import api_v2_bp
+from bootstrap import build_service_container
 from config import config
 from models import User, bcrypt, cache, db, limiter, socketio
+from utils import (
+    address_query,
+    apply_security_headers,
+    map_embed_url,
+    map_link_url,
+    should_force_https,
+)
+
+try:
+    from flask_migrate import Migrate
+except ImportError:  # pragma: no cover
+    class Migrate:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def init_app(self, *args, **kwargs):
+            return None
 
 login_manager = LoginManager()
 mail = Mail()
 csrf = CSRFProtect()
+migrate = Migrate()
 CREDENTIAL_REGISTRY_PATH = os.path.join(
     os.path.dirname(__file__), "output", "dev_credentials.json"
 )
@@ -22,8 +44,8 @@ STARTUP_BANNER_CACHE = set()
 
 PORTAL_PORTS = {
     "customer": 5000,
-    "admin": 5002,
-    "delivery": 5003,
+    "admin": 5001,
+    "delivery": 5002,
 }
 
 LOCAL_PORTAL_URLS = {
@@ -188,42 +210,48 @@ def print_development_startup_banner(app):
         return
 
     STARTUP_BANNER_CACHE.add(cache_key)
-    print("", flush=True)
-    print("SweetCrumbs local portals:", flush=True)
-    print(f"  Customer: {app.config.get('CUSTOMER_PORTAL_URL')}", flush=True)
-    print(f"  Admin:    {app.config.get('ADMIN_PORTAL_URL')}", flush=True)
-    print(f"  Delivery: {app.config.get('DELIVERY_PORTAL_URL')}", flush=True)
-    print("", flush=True)
-    print("Available login credentials:", flush=True)
+    app.logger.info("SweetCrumbs local portals:")
+    app.logger.info("  Customer: %s", app.config.get("CUSTOMER_PORTAL_URL"))
+    app.logger.info("  Admin:    %s", app.config.get("ADMIN_PORTAL_URL"))
+    app.logger.info("  Delivery: %s", app.config.get("DELIVERY_PORTAL_URL"))
+    app.logger.info("Available login credentials:")
     for entry in get_available_development_credentials():
-        print(
-            f"  [{entry['role'].upper():8}] {entry['email']} / {entry['password']}"
-            + (f"  ({entry['label']})" if entry["label"] else ""),
-            flush=True,
+        app.logger.info(
+            "  [%s] %s / %s%s",
+            entry["role"].upper().ljust(8),
+            entry["email"],
+            entry["password"],
+            f"  ({entry['label']})" if entry["label"] else "",
         )
-    print("", flush=True)
-    print(
+    app.logger.info(
         "New customer signups and delivery password resets are also recorded here during development.",
-        flush=True,
     )
 
 
-def create_app(config_name="default", portal_role=None):
+def configure_app(app, config_name="default", portal_role=None):
     config_name = (config_name or "default").strip().lower() or "default"
     if config_name not in config:
         config_name = "default"
 
-    app = Flask(__name__)
     app.config.from_object(config[config_name])
     if hasattr(config[config_name], "init_app"):
         config[config_name].init_app(app)
-
     database_url = (os.environ.get("DATABASE_URL") or "").strip()
     if database_url:
+        database_url = database_url.replace("Sendhan@2005", "Sendhan%402005")
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+
+    existing_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    if "Sendhan@2005" in existing_uri:
+        app.config["SQLALCHEMY_DATABASE_URI"] = existing_uri.replace(
+            "Sendhan@2005",
+            "Sendhan%402005",
+        )
     app.config.setdefault("CACHE_TYPE", "SimpleCache")
     app.config["PORTAL_ROLE"] = resolve_portal_role(portal_role)
-    app.config["PORTAL_PORTS"] = PORTAL_PORTS
+    # Separate session cookies for each portal
+    current_role = app.config["PORTAL_ROLE"]
+    app.config["SESSION_COOKIE_NAME"] = f"sweetcrumbs_{current_role}_session"
     app.config["SHOW_DEMO_ACCOUNTS"] = config_name != "production"
     show_demo_override = env_flag("SHOW_DEMO_ACCOUNTS")
     if show_demo_override is not None:
@@ -238,67 +266,69 @@ def create_app(config_name="default", portal_role=None):
             role, config_name
         )
 
+    app.config.setdefault("JSON_SORT_KEYS", False)
+    # Disable CSRF during local development
+    if config_name != "production":
+        app.config["WTF_CSRF_ENABLED"] = False
+    return config_name
+
+
+def setup_middleware(app):
     if app.config.get("USE_PROXY_FIX"):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
-    app.config.setdefault("JSON_SORT_KEYS", False)
 
-    @app.before_request
-    def enforce_https_in_production():
-        if app.config.get("ENV") == "production" and not request.is_secure:
-            if request.endpoint not in {"healthz"} and not request.path.startswith("/static/"):
-                return redirect(request.url.replace("http://", "https://", 1), code=301)
+def build_socketio_origins(app):
+    if app.config.get("ENV") == "production":
+        origins = [
+            app.config.get("CUSTOMER_PORTAL_URL"),
+            app.config.get("ADMIN_PORTAL_URL"),
+            app.config.get("DELIVERY_PORTAL_URL"),
+        ]
+        return [origin for origin in origins if origin]
+    return "*"
 
-    def _build_socketio_origins():
-        if app.config.get("ENV") == "production":
-            origins = [
-                app.config.get("CUSTOMER_PORTAL_URL"),
-                app.config.get("ADMIN_PORTAL_URL"),
-                app.config.get("DELIVERY_PORTAL_URL"),
-            ]
-            return [origin for origin in origins if origin]
-        return "*"
 
-    def _apply_security_headers(response):
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault(
-            "Permissions-Policy",
-            "geolocation=(), microphone=(), camera=()",
-        )
-        response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
-        if app.config.get("ENV") == "production":
-            response.headers.setdefault(
-                "Strict-Transport-Security",
-                "max-age=63072000; includeSubDomains; preload",
-            )
-        if app.config.get("CONTENT_SECURITY_POLICY"):
-            response.headers.setdefault(
-                "Content-Security-Policy",
-                app.config["CONTENT_SECURITY_POLICY"],
-            )
-        return response
-
-    # Init extensions
+def setup_extensions(app):
     db.init_app(app)
     bcrypt.init_app(app)
     limiter.init_app(app)
     cache.init_app(app)
     mail.init_app(app)
     csrf.init_app(app)
-    socketio.init_app(app, async_mode="threading", cors_allowed_origins=_build_socketio_origins())
+    socketio.init_app(
+        app,
+        async_mode="threading",
+        cors_allowed_origins=build_socketio_origins(app),
+        message_queue=app.config.get("SOCKETIO_MESSAGE_QUEUE"),
+    )
+    migrate.init_app(app, db, compare_type=True)
     login_manager.init_app(app)
     login_manager.session_protection = "strong"
     login_manager.login_view = "auth.login"
+    if app.config.get("PORTAL_ROLE") == "admin":
+        login_manager.login_view = "admin.admin_login"
+    elif app.config.get("PORTAL_ROLE") == "delivery":
+        login_manager.login_view = "delivery.delivery_login"
     login_manager.login_message_category = "info"
-    app.after_request(_apply_security_headers)
+
+    @app.before_request
+    def enforce_https_in_production():
+        if should_force_https(app, request):
+            return redirect(request.url.replace("http://", "https://", 1), code=301)
 
     @login_manager.user_loader
     def load_user(user_id):
         return db.session.get(User, int(user_id))
 
-    # Register Blueprints
+
+def setup_security(app):
+    @app.after_request
+    def attach_security_headers(response):
+        return apply_security_headers(response, app)
+
+
+def register_blueprints(app):
     from routes.auth import auth_bp, oauth
     from routes.customer import customer_bp
     from routes.admin import admin_bp
@@ -312,10 +342,12 @@ def create_app(config_name="default", portal_role=None):
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(delivery_bp, url_prefix="/delivery")
     app.register_blueprint(api_bp, url_prefix="/api")
+    app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
+    if app.config.get("FEATURE_FLAGS", {}).get("api.v2.enabled", False):
+        app.register_blueprint(api_v2_bp, url_prefix="/api/v2")
 
-    # Ensure upload folder exists
-    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
+def register_core_routes(app):
     @app.route("/robots.txt")
     def robots_txt():
         return send_from_directory(
@@ -327,7 +359,7 @@ def create_app(config_name="default", portal_role=None):
         health_state = "ok"
         database_state = "ok"
         try:
-            db.session.execute("SELECT 1")
+            db.session.execute(text("SELECT 1"))
         except Exception:
             health_state = "error"
             database_state = "unhealthy"
@@ -336,7 +368,8 @@ def create_app(config_name="default", portal_role=None):
             200 if health_state == "ok" else 503
         )
 
-    # Context processors
+
+def register_context_processors(app):
     @app.context_processor
     def inject_globals():
         from models import Category, Notification
@@ -393,7 +426,30 @@ def create_app(config_name="default", portal_role=None):
             portal_urls=build_portal_urls(),
             portal_demo_credentials=DEMO_PORTAL_CREDENTIALS,
             show_demo_accounts=app.config.get("SHOW_DEMO_ACCOUNTS", False),
+            feature_flags=app.config.get("FEATURE_FLAGS", {}),
+            auth_admin_2fa_provision={
+                "enabled": app.config.get("AUTH_ADMIN_2FA_PROVISION_ENABLED", False),
+                "providers": app.config.get("AUTH_ADMIN_2FA_PROVIDERS", []),
+                "enforcement": app.config.get("AUTH_ADMIN_2FA_ENFORCEMENT", "off"),
+            },
+            address_query=address_query,
+            map_link_url=map_link_url,
+            map_embed_url=map_embed_url,
         )
+
+
+def create_app(config_name="default", portal_role=None):
+    app = Flask(__name__)
+    configure_app(app, config_name, portal_role)
+    setup_middleware(app)
+    setup_extensions(app)
+    setup_security(app)
+    build_service_container(app)
+    register_blueprints(app)
+    register_core_routes(app)
+    register_context_processors(app)
+
+    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
     if app.config.get("AUTO_INIT_DB"):
         with app.app_context():
@@ -511,156 +567,69 @@ def seed_data(app):
             ("Cupcakes", "🧁"),
             ("Pies", "🥧"),
         ]
+        categories = {}
         for cname, icon in cats_data:
-            if not Category.query.filter_by(name=cname).first():
-                db.session.add(Category(name=cname, icon=icon))
-        db.session.flush()
+            category = Category.query.filter_by(name=cname).first()
+            if not category:
+                category = Category(name=cname, icon=icon)
+                db.session.add(category)
+                db.session.flush()
+            categories[cname] = category
 
-        # Products
-        cake_cat = Category.query.filter_by(name="Cakes").first()
-        pastry_cat = Category.query.filter_by(name="Pastries").first()
-        cookie_cat = Category.query.filter_by(name="Cookies").first()
-        bread_cat = Category.query.filter_by(name="Breads").first()
-        cupcake_cat = Category.query.filter_by(name="Cupcakes").first()
-
-        products_data = [
-            {
-                "name": "Classic Chocolate Cake",
-                "description": "A rich, moist chocolate cake layered with silky ganache and topped with chocolate shavings.",
-                "ingredients": "Dark chocolate, butter, eggs, flour, sugar, cocoa powder, heavy cream",
-                "preparation": "Baked fresh daily. Takes 2-3 hours preparation time.",
-                "base_price": 599,
-                "image": "https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=1200&q=80",
-                "category_id": cake_cat.id if cake_cat else 1,
-                "is_eggless": False,
-                "is_featured": True,
-                "occasion_tags": "birthday,anniversary",
-                "variants": [("0.5 kg", 599, 20), ("1 kg", 999, 15), ("2 kg", 1799, 8)],
-            },
-            {
-                "name": "Red Velvet Cake",
-                "description": "Velvety red sponge with cream cheese frosting. A timeless classic.",
-                "ingredients": "Red velvet mix, cream cheese, vanilla, butter, sugar",
-                "preparation": "Baked to order. Ready in 3 hours.",
-                "base_price": 649,
-                "image": "https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=1200&q=80",
-                "category_id": cake_cat.id if cake_cat else 1,
-                "is_eggless": False,
-                "is_featured": True,
-                "occasion_tags": "birthday,valentines",
-                "variants": [
-                    ("0.5 kg", 649, 18),
-                    ("1 kg", 1099, 12),
-                    ("2 kg", 1899, 6),
-                ],
-            },
-            {
-                "name": "Eggless Vanilla Sponge",
-                "description": "Light and fluffy vanilla sponge, completely egg-free. Perfect for all.",
-                "ingredients": "Flour, milk, vanilla extract, baking powder, vegetable oil, sugar",
-                "preparation": "Prepared fresh for every order.",
-                "base_price": 549,
-                "image": "https://images.unsplash.com/photo-1568051243857-068aa3ea934d?auto=format&fit=crop&w=1200&q=80",
-                "category_id": cake_cat.id if cake_cat else 1,
-                "is_eggless": True,
-                "is_featured": True,
-                "occasion_tags": "birthday,celebration",
-                "variants": [("0.5 kg", 549, 25), ("1 kg", 949, 20)],
-            },
-            {
-                "name": "Butter Croissant",
-                "description": "Flaky, buttery croissant with a golden crust and soft layered interior.",
-                "ingredients": "All-purpose flour, butter, yeast, milk, sugar, salt",
-                "preparation": "Laminated dough, takes 8 hours of cold rest.",
-                "base_price": 80,
-                "image": "https://images.unsplash.com/photo-1758797957671-20943209f1f5?auto=format&fit=crop&w=1200&q=80",
-                "category_id": pastry_cat.id if pastry_cat else 2,
-                "is_eggless": False,
-                "is_featured": False,
-                "occasion_tags": "",
-                "variants": [("Single", 80, 50), ("Box of 6", 450, 30)],
-            },
-            {
-                "name": "Choco Chip Cookies",
-                "description": "Crispy on the outside, chewy on the inside, loaded with chocolate chips.",
-                "ingredients": "Flour, butter, brown sugar, chocolate chips, vanilla, baking soda",
-                "preparation": "Baked fresh in small batches.",
-                "base_price": 150,
-                "image": "https://images.unsplash.com/photo-1639678114429-a915fdb55000?auto=format&fit=crop&w=1200&q=80",
-                "category_id": cookie_cat.id if cookie_cat else 3,
-                "is_eggless": False,
-                "is_featured": True,
-                "occasion_tags": "",
-                "variants": [
-                    ("6 pieces", 150, 40),
-                    ("12 pieces", 280, 30),
-                    ("24 pieces", 520, 20),
-                ],
-            },
-            {
-                "name": "Sourdough Bread",
-                "description": "Naturally fermented sourdough with a crispy crust and tangy flavor.",
-                "ingredients": "Whole wheat flour, sourdough starter, water, salt",
-                "preparation": "24-hour fermentation process for best flavor.",
-                "base_price": 220,
-                "image": "https://images.unsplash.com/photo-1562099870-a3c3f2f3b44d?auto=format&fit=crop&w=1200&q=80",
-                "category_id": bread_cat.id if bread_cat else 4,
-                "is_eggless": True,
-                "is_featured": False,
-                "occasion_tags": "",
-                "variants": [("Small (400g)", 220, 15), ("Large (800g)", 390, 10)],
-            },
-            {
-                "name": "Rainbow Cupcakes",
-                "description": "Colorful cupcakes with swirled frosting, perfect for celebrations.",
-                "ingredients": "Flour, eggs, butter, sugar, food colors, frosting",
-                "preparation": "Made to order for freshness.",
-                "base_price": 60,
-                "image": "https://images.unsplash.com/photo-1486427944299-d1955d23e34d?auto=format&fit=crop&w=1200&q=80",
-                "category_id": cupcake_cat.id if cupcake_cat else 5,
-                "is_eggless": False,
-                "is_featured": True,
-                "occasion_tags": "birthday,celebration,kids",
-                "variants": [
-                    ("Single", 60, 30),
-                    ("Box of 6", 340, 20),
-                    ("Box of 12", 650, 12),
-                ],
-            },
-            {
-                "name": "Black Forest Cake",
-                "description": "German-style cake with cherries, whipped cream and chocolate sponge.",
-                "ingredients": "Chocolate sponge, whipped cream, cherries, kirsch, chocolate shavings",
-                "preparation": "Assembled fresh on order day.",
-                "base_price": 699,
-                "image": "https://images.unsplash.com/photo-1620490448382-d2f51a08596f?auto=format&fit=crop&w=1200&q=80",
-                "category_id": cake_cat.id if cake_cat else 1,
-                "is_eggless": False,
-                "is_featured": False,
-                "occasion_tags": "birthday,anniversary,wedding",
-                "variants": [("0.5 kg", 699, 10), ("1 kg", 1199, 8), ("2 kg", 2099, 4)],
-            },
-        ]
+        products_file = os.path.join(os.path.dirname(__file__), "data", "products.json")
+        if os.path.exists(products_file):
+            with open(products_file, "r", encoding="utf-8") as handle:
+                products_data = json.load(handle)
+        else:
+            products_data = []
 
         placeholder_images = {None, "", "default-product.jpg"}
         for pd in products_data:
-            existing_product = Product.query.filter_by(name=pd["name"]).first()
-            product_payload = {
-                key: value for key, value in pd.items() if key != "variants"
-            }
+            category_name = pd.get("category") or "Cakes"
+            category = categories.get(category_name)
+            if category is None:
+                category = Category(name=category_name, icon="🎂")
+                db.session.add(category)
+                db.session.flush()
+                categories[category_name] = category
 
+            existing_product = Product.query.filter_by(name=pd["name"]).first()
             if existing_product:
-                if existing_product.image in placeholder_images:
+                if existing_product.image in placeholder_images and pd.get("image"):
                     existing_product.image = pd["image"]
+                existing_product.category_id = category.id
+                existing_product.description = pd.get("description", existing_product.description)
+                existing_product.ingredients = pd.get("ingredients", existing_product.ingredients)
+                existing_product.preparation = pd.get("preparation", existing_product.preparation)
+                existing_product.base_price = Decimal(str(pd.get("base_price", existing_product.base_price)))
+                existing_product.is_eggless = pd.get("is_eggless", existing_product.is_eggless)
+                existing_product.is_featured = pd.get("is_featured", existing_product.is_featured)
+                existing_product.occasion_tags = pd.get("occasion_tags", existing_product.occasion_tags)
                 continue
 
+            product_payload = {
+                "name": pd.get("name"),
+                "description": pd.get("description"),
+                "ingredients": pd.get("ingredients"),
+                "preparation": pd.get("preparation"),
+                "base_price": Decimal(str(pd.get("base_price", 0))),
+                "image": pd.get("image"),
+                "category_id": category.id,
+                "is_eggless": pd.get("is_eggless", False),
+                "is_active": pd.get("is_active", True),
+                "is_featured": pd.get("is_featured", False),
+                "occasion_tags": pd.get("occasion_tags", ""),
+            }
             prod = Product(**product_payload)
             db.session.add(prod)
             db.session.flush()
-            for vname, vprice, vstock in pd["variants"]:
+            for variant in pd.get("variants", []):
                 db.session.add(
                     ProductVariant(
-                        product_id=prod.id, name=vname, price=vprice, stock=vstock
+                        product_id=prod.id,
+                        name=variant.get("name", "Default"),
+                        price=Decimal(str(variant.get("price", 0))),
+                        stock=int(variant.get("stock", 0)),
                     )
                 )
 
@@ -790,8 +759,36 @@ def seed_data(app):
 
 
 if __name__ == "__main__":
-    app = create_app("development")
-    with app.app_context():
-        db.create_all()
-        seed_data(app)
-    app.run(debug=True, port=5000)
+    import threading
+
+    def run_customer():
+        customer_app = create_app("development", portal_role="customer")
+        with customer_app.app_context():
+            db.create_all()
+            seed_data(customer_app)
+        customer_app.run(debug=False, use_reloader=False, port=5000)
+
+    def run_admin():
+        admin_app = create_app("development", portal_role="admin")
+        admin_app.run(debug=False, use_reloader=False, port=5001)
+
+    def run_delivery():
+        delivery_app = create_app("development", portal_role="delivery")
+        delivery_app.run(debug=False, use_reloader=False, port=5002)
+
+    customer_thread = threading.Thread(target=run_customer)
+    admin_thread = threading.Thread(target=run_admin)
+    delivery_thread = threading.Thread(target=run_delivery)
+
+    customer_thread.start()
+    admin_thread.start()
+    delivery_thread.start()
+
+    customer_thread.join()
+    admin_thread.join()
+    delivery_thread.join()
+
+
+#cd /Users/sendhanumapathy/Downloads/bakery/customer_app && python app.py
+#cd /Users/sendhanumapathy/Downloads/bakery/admin_app && python app.py
+#cd /Users/sendhanumapathy/Downloads/bakery/delivery_app && python app.py

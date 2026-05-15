@@ -118,7 +118,7 @@
         </div>
         <div class="flex gap-2">
           <button type="submit" class="btn btn-primary btn-lg" style="flex:1">
-            <i class="fa-solid fa-cart-plus"></i> Add to Cart
+            🛒 Add to Cart
           </button>
           {% if current_user.is_authenticated %}
           <a href="{{ url_for('customer.toggle_wishlist', product_id=product.id) }}"

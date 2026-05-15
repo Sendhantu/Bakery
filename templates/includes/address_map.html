@@ -1,20 +1,24 @@
 {% if map_query %}
 <div class="address-map" data-map-card>
+  {% set has_exact_location = latitude is defined and latitude is not none and longitude is defined and longitude is not none %}
   <div class="address-map-actions">
     <button type="button"
             class="btn btn-outline btn-sm"
             data-map-toggle
             data-map-open-label="View map"
             data-map-close-label="Hide map">
-      View map
+      {% if has_exact_location %}View exact location{% else %}View map{% endif %}
     </button>
-    <a href="{{ map_link_url(map_query) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">
+    <a href="{{ map_link_url(map_query, latitude, longitude) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">
       Open in Maps ↗
     </a>
   </div>
+  {% if has_exact_location %}
+  <div class="text-sm text-muted" style="margin-top:0.5rem">Exact customer pin shared for this address.</div>
+  {% endif %}
   <div class="address-map-frame hidden" data-map-frame>
     <iframe
-      data-map-src="{{ map_embed_url(map_query) }}"
+      data-map-src="{{ map_embed_url(map_query, latitude, longitude) }}"
       title="{{ map_title or 'Location map' }}"
       loading="lazy"
       allowfullscreen

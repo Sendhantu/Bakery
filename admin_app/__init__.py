@@ -1,0 +1,1 @@
+"""Admin bakery app package."""

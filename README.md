@@ -2,6 +2,63 @@
 
 A complete Bakery Management & E-Commerce platform built with **Flask + MySQL**.
 
+## Independent Flask Apps
+
+This repository now includes three independent launchers for the bakery platform:
+
+- `customer_app/` runs the customer storefront on `http://127.0.0.1:5000`
+- `admin_app/` runs the admin operations dashboard on `http://127.0.0.1:5001`
+- `delivery_app/` runs the delivery staff panel on `http://127.0.0.1:5002`
+
+Each one has its own:
+
+- `app.py`
+- `requirements.txt`
+- `.env`
+
+The launchers are intentionally thin wrappers around the shared production code in the root app. They each boot the same backend, but with separate portal roles, ports, and session cookies. The customer, admin, and delivery UIs still use the existing shared frontend in root `templates/` and `static/`.
+
+All three connect to the same centralized database and can be started independently:
+
+```bash
+cd customer_app && python app.py
+cd admin_app && python app.py
+cd delivery_app && python app.py
+```
+
+For local development, the provided `.env` files point all three apps at the same SQLite file: `../bakery_portals_shared.db`.
+For production, update each `.env` to the same MySQL URI, for example:
+
+```env
+DATABASE_URL=mysql+pymysql://root:password@localhost/bakery_central
+```
+
+## Mobile Frontend
+
+The shared frontend has been tuned for smaller screens:
+
+- improved mobile navbar layout and tap targets
+- better hero, card, cart, checkout, admin, and delivery spacing
+- horizontal-safe category scrollers and table wrappers
+- full-width action rows on narrow screens
+- phone-friendly form input sizing to reduce zoom issues
+
+These improvements apply automatically to the customer, admin, and delivery portals because they all use the same root `templates/` and `static/css/main.css`.
+
+## GitHub Setup
+
+This project is now GitHub-ready for source hosting and automation:
+
+- `.github/workflows/ci.yml` runs formatting and tests
+- `.github/workflows/docker-publish.yml` builds the Docker image and publishes it to GitHub Container Registry on pushes to `main` or `master`
+- `runtime.txt` pins the Python runtime for common PaaS deployments from GitHub
+
+Important:
+
+- GitHub Pages cannot host this app because it is a dynamic Flask + MySQL application.
+- Use GitHub to store the code and run Actions, then deploy from GitHub to Render, Railway, a VPS, or another Python host.
+- The Docker image published by Actions is designed for that deployment flow.
+
 ---
 
 ## 🚀 Quick Start
@@ -25,6 +82,8 @@ Or paste the contents of `schema.sql` into MySQL Workbench / phpMyAdmin.
 
 This creates the `bakery_db` database with all 20 tables and seed coupons.
 
+The product catalog is now stored in MySQL and seeded from `data/products.json`. Run `python scripts/seed_products.py` after you have created the database to populate `categories`, `products`, and `product_variants`.
+
 ---
 
 ### 3. Configure Environment
@@ -40,9 +99,17 @@ DATABASE_URL=mysql+pymysql://root:YOUR_PASSWORD@localhost/bakery_db
 SECRET_KEY=your-long-random-secret-key
 ```
 
+If your local MySQL root password is `Sendhan@2005`, use:
+
+```
+DATABASE_URL=mysql+pymysql://root:Sendhan@2005@localhost/bakery_db
+```
+
 > In production, `SECRET_KEY` must be a strong random value. The app will refuse to start with the default key in production.
 
-**SQLite (default):** If you leave `DATABASE_URL` unset, the app uses a local **`bakery.db`** SQLite file in the project directory—no MySQL install required for quick local runs. Use MySQL for production or when you need the full `schema.sql` workflow.
+**MySQL (default fallback):** When `DATABASE_URL` is unset, the app now falls back to `MYSQL_DATABASE_URL`, and otherwise uses `mysql+pymysql://root:Sendhan@2005@localhost/bakery`.
+
+If you prefer a local SQLite fallback for quick development, set `DATABASE_URL` explicitly to a `sqlite:///...` URI.
 
 ---
 
@@ -150,6 +217,11 @@ bakery/
 This app stores data in a relational database. If `DATABASE_URL` is set, it will use that database (MySQL is the expected production backend). Otherwise it falls back to a local SQLite file at `bakery.db`.
 
 The full MySQL schema is defined in `schema.sql`, while the ORM models are defined in `models/`.
+
+Product catalog data is now persisted in MySQL using `data/products.json` as the seed source. The relevant tables for products are:
+- `categories` — product categories and icons
+- `products` — main catalog metadata and pricing
+- `product_variants` — variant sizes/options and stock levels
 
 ### Tables and main purpose
 

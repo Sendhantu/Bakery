@@ -30,9 +30,11 @@
       {% endif %}
       <div class="ops-order-actions">
         {% set map_query = address_query(delivery.order.address_line1, delivery.order.address_line2, delivery.order.city, delivery.order.pincode) %}
+        {% set latitude = delivery.order.delivery_latitude %}
+        {% set longitude = delivery.order.delivery_longitude %}
         <a href="tel:{{ delivery.order.phone }}" class="btn btn-outline btn-sm">Call Customer</a>
         {% if map_query %}
-        <a href="{{ map_link_url(map_query) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Open Maps ↗</a>
+        <a href="{{ map_link_url(map_query, latitude, longitude) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Open Maps ↗</a>
         {% endif %}
         <a href="{{ url_for('delivery.order_detail', order_id=delivery.order_id) }}" class="btn btn-ghost btn-sm">View Details</a>
       </div>

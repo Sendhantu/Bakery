@@ -1,0 +1,303 @@
+[
+  {
+    "name": "Classic Chocolate Cake",
+    "description": "A rich, moist chocolate cake layered with silky ganache and topped with chocolate shavings.",
+    "ingredients": "Dark chocolate, butter, eggs, flour, sugar, cocoa powder, heavy cream",
+    "preparation": "Baked fresh daily. Takes 2-3 hours preparation time.",
+    "base_price": 599,
+    "image": "https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cakes",
+    "is_eggless": false,
+    "is_featured": true,
+    "occasion_tags": "birthday,anniversary",
+    "variants": [
+      {"name": "0.5 kg", "price": 599, "stock": 20},
+      {"name": "1 kg", "price": 999, "stock": 15},
+      {"name": "2 kg", "price": 1799, "stock": 8}
+    ]
+  },
+  {
+    "name": "Red Velvet Cake",
+    "description": "Velvety red sponge with cream cheese frosting. A timeless classic.",
+    "ingredients": "Red velvet mix, cream cheese, vanilla, butter, sugar",
+    "preparation": "Baked to order. Ready in 3 hours.",
+    "base_price": 649,
+    "image": "https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cakes",
+    "is_eggless": false,
+    "is_featured": true,
+    "occasion_tags": "birthday,valentines",
+    "variants": [
+      {"name": "0.5 kg", "price": 649, "stock": 18},
+      {"name": "1 kg", "price": 1099, "stock": 12},
+      {"name": "2 kg", "price": 1899, "stock": 6}
+    ]
+  },
+  {
+    "name": "Eggless Vanilla Sponge",
+    "description": "Light and fluffy vanilla sponge, completely egg-free. Perfect for all.",
+    "ingredients": "Flour, milk, vanilla extract, baking powder, vegetable oil, sugar",
+    "preparation": "Prepared fresh for every order.",
+    "base_price": 549,
+    "image": "https://images.unsplash.com/photo-1568051243857-068aa3ea934d?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cakes",
+    "is_eggless": true,
+    "is_featured": true,
+    "occasion_tags": "birthday,celebration",
+    "variants": [
+      {"name": "0.5 kg", "price": 549, "stock": 25},
+      {"name": "1 kg", "price": 949, "stock": 20}
+    ]
+  },
+  {
+    "name": "Black Forest Cake",
+    "description": "German-style cake with cherries, whipped cream and chocolate sponge.",
+    "ingredients": "Chocolate sponge, whipped cream, cherries, kirsch, chocolate shavings",
+    "preparation": "Assembled fresh on order day.",
+    "base_price": 699,
+    "image": "https://images.unsplash.com/photo-1620490448382-d2f51a08596f?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cakes",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "birthday,anniversary,wedding",
+    "variants": [
+      {"name": "0.5 kg", "price": 699, "stock": 10},
+      {"name": "1 kg", "price": 1199, "stock": 8},
+      {"name": "2 kg", "price": 2099, "stock": 4}
+    ]
+  },
+  {
+    "name": "Lemon Drizzle Cake",
+    "description": "Zesty lemon cake with a light drizzle glaze and fresh lemon zest.",
+    "ingredients": "Flour, butter, eggs, lemon zest, sugar, yogurt",
+    "preparation": "Baked fresh with a citrus glaze finish.",
+    "base_price": 620,
+    "image": "https://images.unsplash.com/photo-1527515637465-ec7f1a35f75f?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cakes",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "birthday,summer,celebration",
+    "variants": [
+      {"name": "0.5 kg", "price": 620, "stock": 12},
+      {"name": "1 kg", "price": 1050, "stock": 9}
+    ]
+  },
+  {
+    "name": "Eggless Carrot Cake",
+    "description": "Spiced carrot cake topped with creamy frosting — completely egg-free and moist.",
+    "ingredients": "Flour, carrots, vegetable oil, brown sugar, cinnamon, walnuts",
+    "preparation": "Slow-baked for a moist texture and fresh flavour.",
+    "base_price": 580,
+    "image": "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cakes",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "birthday,eggless,celebration",
+    "variants": [
+      {"name": "0.5 kg", "price": 580, "stock": 15},
+      {"name": "1 kg", "price": 980, "stock": 10}
+    ]
+  },
+  {
+    "name": "Butter Croissant",
+    "description": "Flaky, buttery croissant with a golden crust and soft layered interior.",
+    "ingredients": "All-purpose flour, butter, yeast, milk, sugar, salt",
+    "preparation": "Laminated dough, takes 8 hours of cold rest.",
+    "base_price": 80,
+    "image": "https://images.unsplash.com/photo-1758797957671-20943209f1f5?auto=format&fit=crop&w=1200&q=80",
+    "category": "Pastries",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "",
+    "variants": [
+      {"name": "Single", "price": 80, "stock": 50},
+      {"name": "Box of 6", "price": 450, "stock": 30}
+    ]
+  },
+  {
+    "name": "Raspberry Almond Tart",
+    "description": "Buttery tart shell filled with almond cream and topped with fresh raspberries.",
+    "ingredients": "Flour, butter, almonds, cream, raspberries, sugar",
+    "preparation": "Baked fresh with seasonal berries.",
+    "base_price": 270,
+    "image": "https://images.unsplash.com/photo-1505253214876-1283c1adf04c?auto=format&fit=crop&w=1200&q=80",
+    "category": "Pastries",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "gift,party",
+    "variants": [
+      {"name": "Single", "price": 270, "stock": 20}
+    ]
+  },
+  {
+    "name": "Espresso Brownie",
+    "description": "Rich chocolate brownie infused with espresso and topped with crunchy nuts.",
+    "ingredients": "Dark chocolate, butter, eggs, sugar, espresso powder, walnuts",
+    "preparation": "Baked fresh and served warm for the best taste.",
+    "base_price": 180,
+    "image": "https://images.unsplash.com/photo-1505253214876-1283c1adf04c?auto=format&fit=crop&w=1200&q=80",
+    "category": "Pastries",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "coffee,after-meal",
+    "variants": [
+      {"name": "Single", "price": 180, "stock": 30},
+      {"name": "Box of 4", "price": 680, "stock": 20}
+    ]
+  },
+  {
+    "name": "Classic Apple Pie",
+    "description": "Warm apple pie with cinnamon-spiced filling and a flaky golden crust.",
+    "ingredients": "Apples, flour, butter, sugar, cinnamon, nutmeg",
+    "preparation": "Made fresh and served with a crunchy top layer.",
+    "base_price": 320,
+    "image": "https://images.unsplash.com/photo-1519682337058-a94d519337bc?auto=format&fit=crop&w=1200&q=80",
+    "category": "Pies",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "dessert,party",
+    "variants": [
+      {"name": "Single", "price": 320, "stock": 18}
+    ]
+  },
+  {
+    "name": "Chocolate Pecan Pie",
+    "description": "Decadent pie with chocolate ganache and toasted pecans in a buttery crust.",
+    "ingredients": "Flour, butter, chocolate, pecans, sugar, eggs",
+    "preparation": "Baked fresh to order with crunchy nut topping.",
+    "base_price": 350,
+    "image": "https://images.unsplash.com/photo-1517976487492-5750f3195933?auto=format&fit=crop&w=1200&q=80",
+    "category": "Pies",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "gift,celebration",
+    "variants": [
+      {"name": "Single", "price": 350, "stock": 16}
+    ]
+  },
+  {
+    "name": "Choco Chip Cookies",
+    "description": "Crispy on the outside, chewy on the inside, loaded with chocolate chips.",
+    "ingredients": "Flour, butter, brown sugar, chocolate chips, vanilla, baking soda",
+    "preparation": "Baked fresh in small batches.",
+    "base_price": 150,
+    "image": "https://images.unsplash.com/photo-1639678114429-a915fdb55000?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cookies",
+    "is_eggless": false,
+    "is_featured": true,
+    "occasion_tags": "",
+    "variants": [
+      {"name": "6 pieces", "price": 150, "stock": 40},
+      {"name": "12 pieces", "price": 280, "stock": 30},
+      {"name": "24 pieces", "price": 520, "stock": 20}
+    ]
+  },
+  {
+    "name": "Pistachio Macaron Box",
+    "description": "Six delicate pistachio macarons with a crisp shell and creamy filling.",
+    "ingredients": "Almond flour, sugar, pistachio paste, egg whites",
+    "preparation": "Made fresh and packaged carefully for gifting.",
+    "base_price": 320,
+    "image": "https://images.unsplash.com/photo-1543930694-31a42efb9dff?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cookies",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "gift,wedding,party",
+    "variants": [
+      {"name": "6 pieces", "price": 320, "stock": 25},
+      {"name": "12 pieces", "price": 600, "stock": 18}
+    ]
+  },
+  {
+    "name": "Masala Chai Cookies",
+    "description": "Spiced tea cookies with cardamom, ginger and warm Indian masala flavours.",
+    "ingredients": "Flour, butter, sugar, cardamom, ginger, tea leaves",
+    "preparation": "Baked fresh in small batches for authentic taste.",
+    "base_price": 130,
+    "image": "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=1200&q=80",
+    "category": "Cookies",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "tea time,midnight snack",
+    "variants": [
+      {"name": "6 pieces", "price": 130, "stock": 35},
+      {"name": "12 pieces", "price": 240, "stock": 25}
+    ]
+  },
+  {
+    "name": "Sourdough Bread",
+    "description": "Naturally fermented sourdough with a crispy crust and tangy flavor.",
+    "ingredients": "Whole wheat flour, sourdough starter, water, salt",
+    "preparation": "24-hour fermentation process for best flavor.",
+    "base_price": 220,
+    "image": "https://images.unsplash.com/photo-1562099870-a3c3f2f3b44d?auto=format&fit=crop&w=1200&q=80",
+    "category": "Breads",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "",
+    "variants": [
+      {"name": "Small (400g)", "price": 220, "stock": 15},
+      {"name": "Large (800g)", "price": 390, "stock": 10}
+    ]
+  },
+  {
+    "name": "Black Sesame Baguette",
+    "description": "Crunchy artisan baguette studded with black sesame seeds and baked to a golden crust.",
+    "ingredients": "Flour, yeast, sesame seeds, water, salt",
+    "preparation": "Made fresh daily with a long fermentation process.",
+    "base_price": 140,
+    "image": "https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=1200&q=80",
+    "category": "Breads",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "breakfast,brunch",
+    "variants": [
+      {"name": "Single", "price": 140, "stock": 20}
+    ]
+  },
+  {
+    "name": "Garlic Herb Focaccia",
+    "description": "Thick, fluffy focaccia topped with rosemary, garlic, and a drizzle of olive oil.",
+    "ingredients": "Flour, yeast, olive oil, rosemary, garlic, salt",
+    "preparation": "Hand-pressed and baked until golden.",
+    "base_price": 180,
+    "image": "https://images.unsplash.com/photo-1601924638867-3e3aa9f1b237?auto=format&fit=crop&w=1200&q=80",
+    "category": "Breads",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "brunch,share",
+    "variants": [
+      {"name": "Single", "price": 180, "stock": 18}
+    ]
+  },
+  {
+    "name": "Cinnamon Swirl Bread",
+    "description": "Soft, spiced bread with a buttery cinnamon swirl and sugar glaze.",
+    "ingredients": "Flour, butter, cinnamon, sugar, yeast, milk",
+    "preparation": "Rolled and baked fresh every morning.",
+    "base_price": 210,
+    "image": "https://images.unsplash.com/photo-1512058564366-c9e9bbf5ac37?auto=format&fit=crop&w=1200&q=80",
+    "category": "Breads",
+    "is_eggless": false,
+    "is_featured": false,
+    "occasion_tags": "breakfast,tea time",
+    "variants": [
+      {"name": "Single", "price": 210, "stock": 18}
+    ]
+  },
+  {
+    "name": "Multigrain Whole Wheat Loaf",
+    "description": "Nutty whole wheat loaf loaded with seeds, oats, and a hearty texture.",
+    "ingredients": "Whole wheat flour, seeds, oats, honey, yeast, salt",
+    "preparation": "Slow-proofed for a rich, nutty flavour.",
+    "base_price": 190,
+    "image": "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?auto=format&fit=crop&w=1200&q=80",
+    "category": "Breads",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "breakfast,healthy",
+    "variants": [
+      {"name": "Single", "price": 190, "stock": 16}
+    ]
+  }
+]

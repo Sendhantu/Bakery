@@ -27,7 +27,9 @@
                      data-address-line2="{{ address.address_line2 or '' }}"
                      data-city="{{ address.city }}"
                      data-pincode="{{ address.pincode }}"
-                     data-phone="{{ address.phone }}">
+                     data-phone="{{ address.phone }}"
+                     data-latitude="{{ address.latitude or '' }}"
+                     data-longitude="{{ address.longitude or '' }}">
                 <input type="radio" name="selected_address_id" value="{{ address.id }}" {% if selected_address_id == address.id %}checked{% endif %}>
                 <div>
                   <div style="font-weight:700;color:var(--brown)">{{ address.label }} {% if address.is_default %}<span class="badge badge-green">Default</span>{% endif %}</div>
@@ -42,7 +44,9 @@
                      data-address-line2=""
                      data-city=""
                      data-pincode=""
-                     data-phone="{{ current_user.phone or '' }}">
+                     data-phone="{{ current_user.phone or '' }}"
+                     data-latitude=""
+                     data-longitude="">
                 <input type="radio" name="selected_address_id" value="" {% if not selected_address_id %}checked{% endif %}>
                 <div>
                   <div style="font-weight:700;color:var(--brown)">Use a new address</div>
@@ -88,9 +92,15 @@
               Make this my default address
             </label>
           </div>
+          <input type="hidden" id="checkout-latitude" name="latitude" value="{{ checkout_address.latitude or '' }}">
+          <input type="hidden" id="checkout-longitude" name="longitude" value="{{ checkout_address.longitude or '' }}">
+          <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-top:1rem">
+            <button type="button" class="btn btn-outline btn-sm" id="checkout-use-location">Use Exact Location</button>
+            <span class="text-sm text-muted" id="checkout-location-status">Share your live location to place the map pin exactly on your address.</span>
+          </div>
           {% set customer_map_query = address_query(checkout_address.address_line1, checkout_address.address_line2, checkout_address.city, checkout_address.pincode) %}
           <div class="address-map" id="checkout-address-map"
-               data-empty-text="Enter the customer delivery address to preview it on the map.">
+               data-empty-text="Enter the customer delivery address or share live location to preview it on the map.">
             <div class="text-sm text-muted" style="font-weight:600;color:var(--brown)">Map Preview</div>
             <div class="address-map-actions">
               <button type="button"
@@ -118,7 +128,7 @@
                 allowfullscreen
                 referrerpolicy="no-referrer-when-downgrade"></iframe>
               <div class="address-map-empty{% if customer_map_query %} hidden{% endif %}" id="checkout-address-map-empty">
-                Enter the customer delivery address to preview it on the map.
+                Enter the customer delivery address or share live location to preview it on the map.
               </div>
             </div>
           </div>

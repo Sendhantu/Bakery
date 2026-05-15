@@ -30,6 +30,8 @@ class SavedAddress(db.Model):
     city          = db.Column(db.String(100), nullable=False)
     pincode       = db.Column(db.String(10), nullable=False)
     phone         = db.Column(db.String(20), nullable=False)
+    latitude      = db.Column(db.Float)
+    longitude     = db.Column(db.Float)
     is_default    = db.Column(db.Boolean, default=False)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

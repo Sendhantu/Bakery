@@ -1,11 +1,11 @@
 {% extends 'admin/base_admin.html' %}
 {% block title %}Dashboard — Admin{% endblock %}
 {% block content %}
-<div data-live-refresh="15000" data-live-refresh-source="{{ url_for('admin.dashboard') }}">
+<div data-live-refresh="1000" data-live-refresh-source="{{ url_for('admin.dashboard') }}">
 <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
   <div>
     <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">Dashboard</h1>
-    <span class="badge badge-green">Live updates every 15s</span>
+    <span class="badge badge-green">Live updates every 1s</span>
   </div>
   <span class="text-muted text-sm">{{ current_date_label }}</span>
 </div>

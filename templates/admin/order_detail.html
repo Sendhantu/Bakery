@@ -40,6 +40,8 @@
         <p class="text-muted">📞 {{ order.phone }} · 🕐 {{ order.delivery_slot }} · 📅 {{ order.delivery_date }}</p>
         {% if order.special_note %}<p class="text-sm text-muted mt-1">💬 {{ order.special_note }}</p>{% endif %}
         {% set map_query = address_query(order.address_line1, order.address_line2, order.city, order.pincode) %}
+        {% set latitude = order.delivery_latitude %}
+        {% set longitude = order.delivery_longitude %}
         {% set map_title = 'Admin order delivery map for ' ~ order.order_number %}
         {% include 'includes/address_map.html' %}
         {% if addr_hist %}

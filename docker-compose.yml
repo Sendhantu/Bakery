@@ -15,7 +15,7 @@ services:
   customer_web:
     build: .
     environment:
-      - SERVICE_ROLE=customer
+      - PORTAL_ROLE=customer
       - FLASK_ENV=production
       - DATABASE_URL=mysql+pymysql://bakery_user:bakery_pass@db/bakery_db
       - REDIS_URL=redis://redis:6379/0
@@ -31,7 +31,7 @@ services:
   admin_web:
     build: .
     environment:
-      - SERVICE_ROLE=admin
+      - PORTAL_ROLE=admin
       - FLASK_ENV=production
       - DATABASE_URL=mysql+pymysql://bakery_user:bakery_pass@db/bakery_db
       - REDIS_URL=redis://redis:6379/0
@@ -45,7 +45,7 @@ services:
   delivery_web:
     build: .
     environment:
-      - SERVICE_ROLE=delivery
+      - PORTAL_ROLE=delivery
       - FLASK_ENV=production
       - DATABASE_URL=mysql+pymysql://bakery_user:bakery_pass@db/bakery_db
       - REDIS_URL=redis://redis:6379/0

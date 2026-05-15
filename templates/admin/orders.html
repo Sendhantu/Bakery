@@ -1,11 +1,11 @@
 {% extends 'admin/base_admin.html' %}
 {% block title %}Orders — Admin{% endblock %}
 {% block content %}
-<div data-live-refresh="15000" data-live-refresh-source="{{ url_for('admin.orders', status=status_filter, scope=scope_filter, q=search) }}">
+<div data-live-refresh="1000" data-live-refresh-source="{{ url_for('admin.orders', status=status_filter, scope=scope_filter, q=search) }}">
 <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
   <div>
     <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">Orders</h1>
-    <span class="badge badge-green">Live updates every 15s</span>
+    <span class="badge badge-green">Live updates every 1s</span>
   </div>
   <form method="GET" action="{{ url_for('admin.orders') }}" class="admin-toolbar-search">
     <input type="hidden" name="status" value="{{ status_filter }}">

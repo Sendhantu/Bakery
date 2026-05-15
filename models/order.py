@@ -16,7 +16,7 @@ ORDER_STATUS_TRANSITIONS = {
 def get_allowed_order_statuses(current_status, actor='admin'):
     current_status = (current_status or 'PLACED').strip().upper()
     if actor == 'delivery':
-        allowed = [status for status in ORDER_STATUS_TRANSITIONS.get(current_status, []) if status in {'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED'}]
+        allowed = [status for status in ORDER_STATUS_TRANSITIONS.get(current_status, []) if status in {'OUT_FOR_DELIVERY', 'DELIVERED'}]
     else:
         allowed = list(ORDER_STATUS_TRANSITIONS.get(current_status, []))
     return [current_status] + [status for status in allowed if status != current_status]
@@ -44,6 +44,8 @@ class Order(db.Model):
     city           = db.Column(db.String(100))
     pincode        = db.Column(db.String(10))
     phone          = db.Column(db.String(20))
+    delivery_latitude = db.Column(db.Float)
+    delivery_longitude = db.Column(db.Float)
 
     delivery_slot  = db.Column(db.String(50))
     delivery_date  = db.Column(db.Date)

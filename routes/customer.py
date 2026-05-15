@@ -57,6 +57,22 @@ def wants_json_response():
         request.accept_mimetypes.best == 'application/json'
 
 
+def build_order_detail_context(order):
+    return {
+        'order': order,
+        'items': order.items.all(),
+        'can_cancel': order.can_cancel(),
+        'can_modify': order.can_modify(),
+        'can_change_addr': order.can_change_address(),
+        'pending_payment_link': PaymentLink.query.filter_by(
+            user_id=order.user_id,
+            order_id=order.id,
+            purpose='ORDER',
+            status='PENDING',
+        ).order_by(PaymentLink.id.desc()).first(),
+    }
+
+
 def split_preparation_steps(text):
     if not text:
         return []
@@ -751,6 +767,8 @@ def checkout():
         order.city            = checkout_address['city']
         order.pincode         = checkout_address['pincode']
         order.phone           = checkout_address['phone'] or current_user.phone
+        order.delivery_latitude = checkout_address.get('latitude')
+        order.delivery_longitude = checkout_address.get('longitude')
         order.delivery_slot   = selected_time_slot
         order.delivery_date   = delivery_date
         order.special_note    = request.form.get('special_note')
@@ -846,6 +864,16 @@ def checkout():
 def order_history():
     page, per_page = page_args(default_per_page=8, max_per_page=16)
     pagination = get_customer_orders_page(current_user.id, page, per_page)
+    if wants_json_response():
+        return jsonify({
+            'fragments': {
+                '#customer-orders-live': render_template(
+                    'customer/_orders_live.html',
+                    orders=pagination.items,
+                    pagination=pagination,
+                ),
+            }
+        })
     return render_template('customer/orders.html', orders=pagination.items, pagination=pagination)
 
 
@@ -853,22 +881,17 @@ def order_history():
 @login_required
 def order_detail(order_id):
     order = Order.query.filter_by(id=order_id, user_id=current_user.id).first_or_404()
-    items = order.items.all()
-    can_cancel = order.can_cancel()
-    can_modify = order.can_modify()
-    can_change_addr = order.can_change_address()
-    pending_payment_link = PaymentLink.query.filter_by(
-        user_id=current_user.id,
-        order_id=order.id,
-        purpose='ORDER',
-        status='PENDING',
-    ).order_by(PaymentLink.id.desc()).first()
-    return render_template('customer/order_detail.html',
-                           order=order, items=items,
-                           can_cancel=can_cancel,
-                           can_modify=can_modify,
-                           can_change_addr=can_change_addr,
-                           pending_payment_link=pending_payment_link)
+    context = build_order_detail_context(order)
+    if wants_json_response():
+        return jsonify({
+            'fragments': {
+                '#customer-order-live': render_template(
+                    'customer/_order_detail_live.html',
+                    **context,
+                ),
+            }
+        })
+    return render_template('customer/order_detail.html', **context)
 
 
 @customer_bp.route('/payments/<token>')
@@ -1056,7 +1079,6 @@ def send_message():
 
 
 @customer_bp.route('/chat/ai', methods=['POST'])
-@login_required
 @csrf.exempt
 def ai_recommend():
     payload = request.get_json(silent=True) or {}
@@ -1064,8 +1086,9 @@ def ai_recommend():
     if not query:
         return jsonify({'ok': False, 'message': 'Tell us what kind of bakery item you are looking for.'}), 400
 
+    user_id = current_user.id if current_user.is_authenticated else None
     engine = get_recommendation_engine()
-    products, message = engine.recommend(current_user.id, query, limit=6)
+    products, message = engine.recommend(user_id, query, limit=6)
     result = {
         'ok': True,
         'message': message,

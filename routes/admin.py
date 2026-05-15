@@ -10,6 +10,8 @@ from flask import (
     abort,
 )
 from flask_login import login_required, current_user
+from bootstrap import get_container
+from exceptions import ValidationError
 from functools import wraps
 from models import (
     db,
@@ -32,13 +34,19 @@ from models import (
     ModificationRequest,
     RawMaterial,
     ProductMaterial,
+    Supplier,
+    Branch,
+    ProductionPlan,
+    ProductionBatch,
     PaymentLink,
     LoyaltyLedger,
+    can_transition_order_status,
+    get_allowed_order_statuses,
 )
+from services import enrich_orders
 from utils import (
     parse_decimal,
     notify,
-    send_status_update_email,
     check_and_send_inventory_alerts,
     validate_password,
 )
@@ -71,6 +79,46 @@ def admin_required(f):
         return f(*args, **kwargs)
 
     return decorated
+
+
+def wants_live_fragment_response():
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest" or (
+        request.accept_mimetypes.best == "application/json"
+    )
+
+
+def sync_delivery_status(order, new_status):
+    delivery = order.delivery
+    if delivery is None:
+        return
+
+    new_status = (new_status or "").strip().upper()
+    agent = delivery.agent
+
+    if new_status == "DELIVERED":
+        delivery.status = "DELIVERED"
+        delivery.delivered_time = datetime.utcnow()
+        if agent:
+            agent.availability = True
+        return
+
+    delivery.delivered_time = None
+    if new_status == "OUT_FOR_DELIVERY":
+        delivery.status = "OUT_FOR_DELIVERY"
+        if agent:
+            agent.availability = False
+    elif new_status == "PACKED":
+        delivery.status = "PACKED"
+        if agent:
+            agent.availability = False
+    elif new_status == "CANCELLED":
+        delivery.status = "CANCELLED"
+        if agent:
+            agent.availability = True
+    else:
+        delivery.status = "ASSIGNED"
+        if agent:
+            agent.availability = False
 
 
 @admin_bp.context_processor
@@ -202,6 +250,7 @@ def dashboard():
     )
 
     recent_orders = Order.query.order_by(Order.placed_at.desc()).limit(8).all()
+    enrich_orders(recent_orders)
 
     # Compare with previous 7-day window for quick trend badges
     window_start = today - timedelta(days=6)
@@ -294,9 +343,11 @@ def dashboard():
         receiver_id=current_user.id, is_read=False
     ).count()
     mod_requests = ModificationRequest.query.filter_by(status="PENDING").count()
+    branch_count = Branch.query.count()
+    supplier_count = Supplier.query.count()
+    supplier_alerts = Supplier.query.filter_by(is_active=False).count()
 
-    return render_template(
-        "admin/dashboard.html",
+    context = dict(
         total_orders=total_orders,
         today_orders=today_orders,
         total_revenue=total_revenue,
@@ -308,6 +359,10 @@ def dashboard():
         inactive_products=inactive_products,
         low_stock_materials=low_stock_materials,
         out_of_stock_materials=out_of_stock_materials,
+        material_alerts=low_stock_materials + out_of_stock_materials,
+        branch_count=branch_count,
+        supplier_count=supplier_count,
+        supplier_alerts=supplier_alerts,
         total_loyalty_points=int(total_loyalty_points),
         recent_orders=recent_orders,
         chart_labels=labels,
@@ -319,7 +374,19 @@ def dashboard():
         trend_revenue=trend_revenue,
         trend_orders=trend_orders,
         trend_customers=trend_customers,
+        current_date_label=today.strftime("%A, %d %B %Y"),
     )
+    if wants_live_fragment_response():
+        return jsonify(
+            {
+                "fragments": {
+                    "#admin-dashboard-live": render_template(
+                        "admin/_dashboard_live.html", **context
+                    )
+                }
+            }
+        )
+    return render_template("admin/dashboard.html", **context)
 
 
 # ── PRODUCT MANAGEMENT ───────────────────────────────────────
@@ -461,16 +528,43 @@ def delete_product(product_id):
 def orders():
     status = request.args.get("status", "")
     scope = request.args.get("scope", "")
-    q = Order.query
+    search = (request.args.get("q") or "").strip()
+    query = Order.query.join(User, Order.user_id == User.id)
     if status:
-        q = q.filter_by(status=status)
+        query = query.filter(Order.status == status)
     if scope == "today":
-        q = q.filter(func.date(Order.placed_at) == datetime.utcnow().date())
+        query = query.filter(func.date(Order.placed_at) == datetime.utcnow().date())
     elif scope == "pending":
-        q = q.filter(Order.status.in_(["PLACED", "PREPARING"]))
-    orders = q.order_by(Order.placed_at.desc()).all()
+        query = query.filter(Order.status.in_(["PLACED", "PREPARING"]))
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            or_(
+                Order.order_number.ilike(like),
+                Order.phone.ilike(like),
+                User.name.ilike(like),
+                User.email.ilike(like),
+            )
+        )
+    orders = query.order_by(Order.placed_at.desc()).all()
+    enrich_orders(orders)
+    if wants_live_fragment_response():
+        return jsonify(
+            {
+                "fragments": {
+                    "#admin-orders-live": render_template(
+                        "admin/_orders_live.html",
+                        orders=orders,
+                    )
+                }
+            }
+        )
     return render_template(
-        "admin/orders.html", orders=orders, status_filter=status, scope_filter=scope
+        "admin/orders.html",
+        orders=orders,
+        status_filter=status,
+        scope_filter=scope,
+        search=search,
     )
 
 
@@ -499,46 +593,27 @@ def order_detail(order_id):
         mod_reqs=mod_reqs,
         addr_hist=addr_hist,
         payment_link=payment_link,
+        allowed_statuses=get_allowed_order_statuses(order.status, actor="admin"),
     )
 
 
 @admin_bp.route("/orders/<int:order_id>/update-status", methods=["POST"])
 @admin_required
 def update_order_status(order_id):
-    order = Order.query.get_or_404(order_id)
-    status = request.form.get("status")
-    old_status = order.status
-    order.status = status
-    order.updated_at = datetime.utcnow()
-
-    # In-app notification
-    notify(
-        order.user_id,
-        f"Order Update: {status}",
-        f"Your order #{order.order_number} is now {status}.",
-        "order",
-        url_for("customer.order_detail", order_id=order.id),
-    )
-
-    # Award loyalty points on delivery
-    if status == "DELIVERED" and old_status != "DELIVERED":
-        pts = LoyaltyLedger.earn(order.user_id, order.id, order.total)
-        if pts:
-            notify(
-                order.user_id,
-                "🎉 Loyalty Points Earned!",
-                f"You earned {pts} points for order #{order.order_number}.",
-                "loyalty",
-                url_for("customer.loyalty"),
-            )
-
-    db.session.commit()
-
-    # Email + SMS notifications
+    status = (request.form.get("status") or "").strip().upper()
     try:
-        send_status_update_email(order, status)
-    except Exception:
-        pass
+        order = get_container().order_service.update_order_status(
+            order_id,
+            status,
+            actor="admin",
+        )
+    except ValueError:
+        flash("Please choose a valid status.", "danger")
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+    except ValidationError as exc:
+        message = str(exc) or "That status change is not allowed right now."
+        flash(message, "danger")
+        return redirect(url_for("admin.order_detail", order_id=order_id))
 
     flash(f"Order status updated to {status}.", "success")
     return redirect(url_for("admin.order_detail", order_id=order_id))
@@ -787,6 +862,207 @@ def update_raw_material_stock():
         pass
     flash("Raw material stock updated!", "success")
     return redirect(url_for("admin.inventory"))
+
+
+@admin_bp.route("/suppliers")
+@admin_required
+def suppliers():
+    search = (request.args.get("q") or "").strip()
+    query = Supplier.query
+    if search:
+        query = query.filter(Supplier.name.ilike(f"%{search}%"))
+    suppliers = query.order_by(Supplier.is_active.desc(), Supplier.name).all()
+    return render_template("admin/suppliers.html", suppliers=suppliers, search=search)
+
+
+@admin_bp.route("/suppliers/add", methods=["POST"])
+@admin_required
+def add_supplier():
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Supplier name is required.", "danger")
+        return redirect(url_for("admin.suppliers"))
+    if Supplier.query.filter(func.lower(Supplier.name) == name.lower()).first():
+        flash("Supplier already exists.", "warning")
+        return redirect(url_for("admin.suppliers"))
+    supplier = Supplier(
+        name=name,
+        contact_name=(request.form.get("contact_name") or "").strip(),
+        email=(request.form.get("email") or "").strip(),
+        phone=(request.form.get("phone") or "").strip(),
+        address=(request.form.get("address") or "").strip(),
+        payment_terms=(request.form.get("payment_terms") or "").strip(),
+        notes=(request.form.get("notes") or "").strip(),
+    )
+    db.session.add(supplier)
+    db.session.commit()
+    flash("Supplier added successfully.", "success")
+    return redirect(url_for("admin.suppliers"))
+
+
+@admin_bp.route("/suppliers/<int:supplier_id>/toggle", methods=["POST"])
+@admin_required
+def toggle_supplier_status(supplier_id):
+    supplier = Supplier.query.get_or_404(supplier_id)
+    supplier.is_active = not supplier.is_active
+    db.session.commit()
+    flash(
+        f"Supplier {'activated' if supplier.is_active else 'paused'}.",
+        "success" if supplier.is_active else "info",
+    )
+    return redirect(url_for("admin.suppliers"))
+
+
+@admin_bp.route("/branches")
+@admin_required
+def branches():
+    branches = Branch.query.order_by(Branch.is_active.desc(), Branch.name).all()
+    return render_template("admin/branches.html", branches=branches)
+
+
+@admin_bp.route("/branches/add", methods=["POST"])
+@admin_required
+def add_branch():
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Branch name is required.", "danger")
+        return redirect(url_for("admin.branches"))
+    if Branch.query.filter(func.lower(Branch.name) == name.lower()).first():
+        flash("Branch already exists.", "warning")
+        return redirect(url_for("admin.branches"))
+    branch = Branch(
+        name=name,
+        manager_name=(request.form.get("manager_name") or "").strip(),
+        phone=(request.form.get("phone") or "").strip(),
+        address=(request.form.get("address") or "").strip(),
+    )
+    db.session.add(branch)
+    db.session.commit()
+    flash("Branch added successfully.", "success")
+    return redirect(url_for("admin.branches"))
+
+
+@admin_bp.route("/branches/<int:branch_id>/toggle", methods=["POST"])
+@admin_required
+def toggle_branch_status(branch_id):
+    branch = Branch.query.get_or_404(branch_id)
+    branch.is_active = not branch.is_active
+    db.session.commit()
+    flash(
+        f"Branch {'opened' if branch.is_active else 'closed'}.",
+        "success" if branch.is_active else "warning",
+    )
+    return redirect(url_for("admin.branches"))
+
+
+@admin_bp.route("/production")
+@admin_required
+def production():
+    plans = ProductionPlan.query.order_by(ProductionPlan.planned_date.desc()).all()
+    batches = ProductionBatch.query.order_by(ProductionBatch.produced_at.desc()).limit(25).all()
+    products = Product.query.order_by(Product.name).all()
+    branches = Branch.query.order_by(Branch.name).all()
+    return render_template(
+        "admin/production.html",
+        plans=plans,
+        batches=batches,
+        products=products,
+        branches=branches,
+    )
+
+
+@admin_bp.route("/production/add", methods=["POST"])
+@admin_required
+def add_production_plan():
+    product_id = request.form.get("product_id", type=int)
+    planned_date = request.form.get("planned_date")
+    quantity = request.form.get("quantity", type=int)
+    branch_id = request.form.get("branch_id", type=int)
+    if not product_id or not planned_date or quantity is None:
+        flash("Product, date, and quantity are required.", "danger")
+        return redirect(url_for("admin.production"))
+    try:
+        planned_date = datetime.strptime(planned_date, "%Y-%m-%d")
+    except ValueError:
+        flash("Invalid production date.", "danger")
+        return redirect(url_for("admin.production"))
+    plan = ProductionPlan(
+        product_id=product_id,
+        branch_id=branch_id if branch_id else None,
+        planned_date=planned_date,
+        quantity=quantity,
+        status=request.form.get("status", "Scheduled"),
+        notes=(request.form.get("notes") or "").strip(),
+    )
+    db.session.add(plan)
+    db.session.commit()
+    flash("Production plan created.", "success")
+    return redirect(url_for("admin.production"))
+
+
+@admin_bp.route("/batches")
+@admin_required
+def batches():
+    batches = ProductionBatch.query.order_by(ProductionBatch.produced_at.desc()).all()
+    products = Product.query.order_by(Product.name).all()
+    branches = Branch.query.order_by(Branch.name).all()
+    return render_template("admin/batches.html", batches=batches, products=products, branches=branches)
+
+
+@admin_bp.route("/batches/add", methods=["POST"])
+@admin_required
+def add_batch():
+    product_id = request.form.get("product_id", type=int)
+    branch_id = request.form.get("branch_id", type=int)
+    produced_at = request.form.get("produced_at")
+    expiry_date = request.form.get("expiry_date")
+    quantity = request.form.get("quantity", type=int)
+    waste_percentage = request.form.get("waste_percentage", type=float) or 0
+    if not product_id or not produced_at or quantity is None:
+        flash("Product, production date, and quantity are required.", "danger")
+        return redirect(url_for("admin.batches"))
+    try:
+        produced_at = datetime.strptime(produced_at, "%Y-%m-%d")
+    except ValueError:
+        flash("Invalid production date.", "danger")
+        return redirect(url_for("admin.batches"))
+    expiry_dt = None
+    if expiry_date:
+        try:
+            expiry_dt = datetime.strptime(expiry_date, "%Y-%m-%d")
+        except ValueError:
+            flash("Invalid expiry date.", "danger")
+            return redirect(url_for("admin.batches"))
+    batch = ProductionBatch(
+        product_id=product_id,
+        branch_id=branch_id if branch_id else None,
+        produced_at=produced_at,
+        expiry_date=expiry_dt,
+        quantity=quantity,
+        waste_percentage=waste_percentage,
+        status=request.form.get("status", "Produced"),
+        notes=(request.form.get("notes") or "").strip(),
+    )
+    db.session.add(batch)
+    db.session.commit()
+    flash("Production batch logged.", "success")
+    return redirect(url_for("admin.batches"))
+
+
+@admin_bp.route("/batches/<int:batch_id>/update", methods=["POST"])
+@admin_required
+def update_batch(batch_id):
+    batch = ProductionBatch.query.get_or_404(batch_id)
+    batch.status = request.form.get("status", batch.status)
+    batch.notes = (request.form.get("notes") or "").strip()
+    try:
+        batch.waste_percentage = float(request.form.get("waste_percentage", batch.waste_percentage) or 0)
+    except ValueError:
+        flash("Invalid waste percentage.", "danger")
+        return redirect(url_for("admin.batches"))
+    db.session.commit()
+    flash("Batch updated.", "success")
+    return redirect(url_for("admin.batches"))
 
 
 @admin_bp.route("/raw-materials")

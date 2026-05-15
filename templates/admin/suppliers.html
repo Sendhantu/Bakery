@@ -1,0 +1,65 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Suppliers — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">🤝 Suppliers</h1>
+    <p class="text-muted text-sm">Manage supplier contacts, payment terms, and active procurement partners.</p>
+  </div>
+</div>
+<form method="GET" action="{{ url_for('admin.suppliers') }}" class="admin-toolbar-search" style="margin-bottom:1rem">
+  <input class="form-control" type="search" name="q" value="{{ search or '' }}" placeholder="Search suppliers">
+  <button type="submit" class="btn btn-outline btn-sm">Search</button>
+</form>
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card green"><span class="stat-icon">📇</span><div class="stat-value">{{ suppliers|length }}</div><div class="stat-label">Suppliers</div></div>
+  <div class="stat-card orange"><span class="stat-icon">⚠️</span><div class="stat-value">{{ suppliers|selectattr('is_active','equalto',False)|list|length }}</div><div class="stat-label">Paused Suppliers</div></div>
+</div>
+<div style="display:grid;grid-template-columns:360px 1fr;gap:1.5rem;align-items:start">
+  <div class="card" style="position:sticky;top:90px">
+    <div class="card-header">Add Supplier</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.add_supplier') }}">
+        <div class="form-group"><label class="form-label">Supplier Name *</label><input class="form-control" name="name" required></div>
+        <div class="form-group"><label class="form-label">Contact Person</label><input class="form-control" name="contact_name"></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" name="email"></div>
+          <div class="form-group"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
+        </div>
+        <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" name="address"></textarea></div>
+        <div class="form-group"><label class="form-label">Payment Terms</label><input class="form-control" name="payment_terms" placeholder="Net 30, Prepaid, COD"></div>
+        <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" name="notes"></textarea></div>
+        <button type="submit" class="btn btn-primary btn-block">Add Supplier</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Supplier Directory</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for supplier in suppliers %}
+          <tr>
+            <td><strong>{{ supplier.name }}</strong><br><span class="text-muted text-sm">{{ supplier.payment_terms or 'No terms set' }}</span></td>
+            <td>{{ supplier.contact_name or '—' }}<br><span class="text-muted text-sm">{{ supplier.email or 'No email' }}</span></td>
+            <td>{{ supplier.phone or '—' }}</td>
+            <td><span class="badge {% if supplier.is_active %}badge-green{% else %}badge-red{% endif %}">{{ supplier.status }}</span></td>
+            <td>
+              <form method="POST" action="{{ url_for('admin.toggle_supplier_status', supplier_id=supplier.id) }}">
+                <button type="submit" class="btn btn-ghost btn-sm">
+                  {% if supplier.is_active %}Pause{% else %}Activate{% endif %}
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted" style="padding:1.5rem">No suppliers setup yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

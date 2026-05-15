@@ -1,53 +1,15 @@
 {% extends 'base.html' %}
 {% block title %}My Orders — {{ bakery_name }}{% endblock %}
 {% block content %}
-<div class="page-wrap" data-live-refresh="30000">
+<div class="page-wrap" data-live-refresh="1000" data-live-refresh-source="{{ request.full_path.rstrip('?') }}">
 <div class="container">
   <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
     <h1 class="section-title" style="margin-bottom:0">📦 My Orders</h1>
-    <span class="badge badge-green">Live updates every 30s</span>
+    <span class="badge badge-green">Live updates every 1s</span>
   </div>
-  {% if orders %}
-  <div style="display:flex;flex-direction:column;gap:1rem">
-    {% for order in orders %}
-    <div class="card" style="border-radius:var(--radius-lg)">
-      <div style="padding:1.25rem 1.5rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)">
-        <div>
-          <a href="{{ url_for('customer.order_detail', order_id=order.id) }}" style="font-family:var(--font-display);font-size:1.1rem;font-weight:600;color:var(--brown)">#{{ order.order_number }}</a>
-          <span class="text-sm text-muted" style="margin-left:0.75rem">{{ order.placed_at.strftime('%d %b %Y, %I:%M %p') }}</span>
-        </div>
-        <div class="flex gap-2 items-center flex-wrap">
-          <span class="badge
-            {% if order.status == 'DELIVERED' %}badge-green
-            {% elif order.status == 'CANCELLED' %}badge-red
-            {% elif order.status == 'OUT_FOR_DELIVERY' %}badge-blue
-            {% elif order.status == 'ON_HOLD' %}badge-orange
-            {% else %}badge-brown{% endif %}">
-            {{ order.status.replace('_',' ') }}
-          </span>
-          <span style="font-family:var(--font-display);font-weight:700;color:var(--caramel)">₹{{ order.total|int }}</span>
-          <a href="{{ url_for('customer.order_detail', order_id=order.id) }}" class="btn btn-outline btn-sm">View Details</a>
-          <a href="{{ url_for('customer.reorder', order_id=order.id) }}" class="btn btn-ghost btn-sm">🔄 Reorder</a>
-        </div>
-      </div>
-      <div style="padding:1rem 1.5rem;display:flex;flex-wrap:wrap;gap:0.5rem">
-        {% for item in order.preview_items %}
-        <span class="badge badge-brown">{{ item.product_name }} ×{{ item.quantity }}</span>
-        {% endfor %}
-        {% if order.preview_remaining > 0 %}<span class="text-sm text-muted">+{{ order.preview_remaining }} more</span>{% endif %}
-      </div>
-    </div>
-    {% endfor %}
+  <div id="customer-orders-live">
+    {% include 'customer/_orders_live.html' %}
   </div>
-  {% include 'includes/pagination.html' %}
-  {% else %}
-  <div class="empty-state">
-    <div class="empty-icon">📦</div>
-    <h3>No orders yet</h3>
-    <p class="text-muted">You haven't placed any orders. Start shopping!</p>
-    <a href="{{ url_for('customer.products') }}" class="btn btn-primary mt-3">Shop Now</a>
-  </div>
-  {% endif %}
 </div>
 </div>
 {% endblock %}

@@ -1,6 +1,8 @@
 """Route and portal smoke tests."""
 
-from models import DeliveryAgent, User
+from datetime import datetime, timedelta
+
+from models import Delivery, DeliveryAgent, Order, User, db
 
 
 def sign_in(test_client, email, password):
@@ -9,6 +11,43 @@ def sign_in(test_client, email, password):
         data={'email': email, 'password': password},
         follow_redirects=False,
     )
+
+
+def create_order(app, status='PLACED', assign_delivery=False):
+    with app.app_context():
+        customer = User.query.filter_by(email='customer@test.com').first()
+        assert customer is not None
+
+        order = Order(
+            order_number=Order.generate_order_number(),
+            user_id=customer.id,
+            status=status,
+            subtotal=250,
+            total=250,
+            address_line1='12 Test Street',
+            city='Coimbatore',
+            pincode='641002',
+            phone='9999999999',
+            delivery_slot='09:00 - 11:00',
+            delivery_date=datetime.utcnow().date() + timedelta(days=1),
+        )
+        db.session.add(order)
+        db.session.flush()
+
+        if assign_delivery:
+            agent = DeliveryAgent.query.first()
+            assert agent is not None
+            db.session.add(
+                Delivery(
+                    order_id=order.id,
+                    agent_id=agent.id,
+                    assigned_time=datetime.utcnow(),
+                    status='ASSIGNED',
+                )
+            )
+
+        db.session.commit()
+        return order.id
 
 
 def test_homepage(client):
@@ -20,6 +59,23 @@ def test_homepage(client):
 def test_products_page(client):
     response = client.get('/products')
     assert response.status_code == 200
+
+
+def test_customer_checkout_page_loads(client):
+    sign_in(client, 'customer@test.com', 'customer123')
+
+    add_response = client.post(
+        '/cart/add',
+        data={'product_id': '1', 'variant_id': '1', 'quantity': '1'},
+        follow_redirects=False,
+    )
+    assert add_response.status_code in {200, 302}
+
+    response = client.get('/checkout')
+    assert response.status_code == 200
+    assert b'Checkout' in response.data
+    assert b'Delivery Address' in response.data
+    assert b'Use Exact Location' in response.data
 
 
 def test_robots_txt(client):
@@ -51,13 +107,13 @@ def test_delivery_login_page(delivery_client):
 def test_wrong_role_login_redirects_admin_to_admin_portal(client):
     response = sign_in(client, 'admin@bakery.com', 'Admin@bakery')
     assert response.status_code == 302
-    assert response.headers['Location'] == 'http://127.0.0.1:5002/admin/'
+    assert response.headers['Location'] == 'http://127.0.0.1:5001/admin/'
 
 
 def test_wrong_role_login_redirects_delivery_to_delivery_portal(admin_client):
     response = sign_in(admin_client, 'delivery@bakery.com', 'delivery123')
     assert response.status_code == 302
-    assert response.headers['Location'] == 'http://127.0.0.1:5003/delivery/'
+    assert response.headers['Location'] == 'http://127.0.0.1:5002/delivery/'
 
 
 def test_admin_can_create_delivery_account(admin_client):
@@ -84,3 +140,55 @@ def test_admin_can_create_delivery_account(admin_client):
         agent = DeliveryAgent.query.filter_by(user_id=user.id).first()
         assert agent is not None
         assert agent.name == 'Rider One'
+
+
+def test_admin_dashboard_live_refresh_returns_fragments(admin_client):
+    login_response = sign_in(admin_client, 'admin@bakery.com', 'Admin@bakery')
+    assert login_response.status_code == 302
+
+    response = admin_client.get(
+        '/admin/',
+        headers={
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+        },
+    )
+    assert response.status_code == 200
+    assert response.is_json
+    assert '#admin-dashboard-live' in response.json['fragments']
+
+
+def test_admin_order_detail_shows_valid_status_choices(admin_client):
+    login_response = sign_in(admin_client, 'admin@bakery.com', 'Admin@bakery')
+    assert login_response.status_code == 302
+
+    order_id = create_order(admin_client.application, status='PREPARING')
+    response = admin_client.get(f'/admin/orders/{order_id}')
+
+    assert response.status_code == 200
+    assert b'name="status"' in response.data
+    assert b'value="PACKED"' in response.data
+
+
+def test_delivery_cannot_set_packed_status(delivery_client):
+    login_response = sign_in(delivery_client, 'delivery@bakery.com', 'delivery123')
+    assert login_response.status_code == 302
+
+    order_id = create_order(
+        delivery_client.application,
+        status='PREPARING',
+        assign_delivery=True,
+    )
+    response = delivery_client.post(
+        f'/delivery/order/{order_id}/update',
+        data={'status': 'PACKED'},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b'Invalid delivery status.' in response.data
+
+    with delivery_client.application.app_context():
+        order = Order.query.get(order_id)
+        assert order is not None
+        assert order.status == 'PREPARING'

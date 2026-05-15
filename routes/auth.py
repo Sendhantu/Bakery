@@ -8,10 +8,12 @@ from flask import (
     current_app,
 )
 from flask_login import login_user, logout_user, login_required, current_user
+from bootstrap import get_container
 from models import db, User, LoginHistory, SavedAddress, limiter
 from datetime import datetime, timedelta
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from utils import (
+    get_login_lockout_window as resolve_login_lockout_window,
     save_address_for_customer,
     get_saved_addresses_for_user,
     send_email,
@@ -89,62 +91,21 @@ def build_password_reset_link(token):
 
 
 def record_login(user, status="success"):
-    ua = request.headers.get("User-Agent", "")[:200]
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    db.session.add(
-        LoginHistory(user_id=user.id, ip_address=ip, device=ua, status=status)
-    )
+    get_container().auth_service.record_login(user, request, status=status)
 
 
 def get_login_lockout_window():
-    minutes = current_app.config.get("LOGIN_LOCKOUT_MINUTES", 15)
-    try:
-        minutes = int(minutes)
-    except (TypeError, ValueError):
-        minutes = 15
-    return timedelta(minutes=max(1, minutes))
+    return resolve_login_lockout_window(current_app.config)
 
 
 def get_recent_failed_attempts(user):
-    window_start = datetime.utcnow() - get_login_lockout_window()
-    last_success = (
-        LoginHistory.query.filter_by(user_id=user.id, status="success")
-        .filter(LoginHistory.login_time >= window_start)
-        .order_by(LoginHistory.login_time.desc())
-        .first()
+    return get_container().auth_service.get_recent_failed_attempts(
+        user, current_app.config
     )
-
-    failures = LoginHistory.query.filter(
-        LoginHistory.user_id == user.id,
-        LoginHistory.login_time >= window_start,
-        LoginHistory.status.in_(["failed", "inactive"]),
-    )
-    if last_success:
-        failures = failures.filter(LoginHistory.login_time > last_success.login_time)
-    return failures
 
 
 def is_user_locked_out(user):
-    try:
-        max_attempts = int(current_app.config.get("LOGIN_MAX_ATTEMPTS", 5))
-    except (TypeError, ValueError):
-        max_attempts = 5
-    if max_attempts <= 0:
-        return False, 0
-
-    failures = get_recent_failed_attempts(user)
-    last_failed = failures.order_by(LoginHistory.login_time.desc()).first()
-    failure_count = failures.count()
-    if failure_count < max_attempts or last_failed is None:
-        return False, 0
-
-    unlock_at = last_failed.login_time + get_login_lockout_window()
-    if unlock_at <= datetime.utcnow():
-        return False, 0
-
-    remaining_seconds = int((unlock_at - datetime.utcnow()).total_seconds())
-    remaining_minutes = max(1, (remaining_seconds + 59) // 60)
-    return True, remaining_minutes
+    return get_container().auth_service.is_user_locked_out(user, current_app.config)
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -158,7 +119,7 @@ def login():
         password = request.form.get("password", "")
         remember = bool(request.form.get("remember"))
 
-        user = User.query.filter_by(email=email).first()
+        user = get_container().auth_service.get_user_by_email(email)
         password_ok = user.check_password(password) if user else False
 
         if user:

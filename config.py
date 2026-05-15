@@ -13,13 +13,22 @@ class Config:
         "SECRET_KEY", "bakery-secret-key-2024-change-in-production"
     )
     SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE_PATH}"
+        "DATABASE_URL",
+        os.environ.get(
+            "MYSQL_DATABASE_URL",
+            f"sqlite:///{DEFAULT_SQLITE_PATH}"
+        ),
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,  # auto-reconnect on stale connections
         "pool_recycle": 300,
     }
+    READ_REPLICA_URLS = [
+        url.strip()
+        for url in os.environ.get("DATABASE_READ_REPLICAS", "").split(",")
+        if url.strip()
+    ]
 
     # ── Uploads ────────────────────────────────────────
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "images", "products")
@@ -53,10 +62,12 @@ class Config:
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: https://images.unsplash.com; "
+        "frame-src 'self' https://www.google.com https://maps.google.com; "
         "connect-src 'self'; "
         "object-src 'none'; "
         "upgrade-insecure-requests"
     )
+    ALLOW_GEOLOCATION = True
 
     # ── Business config ────────────────────────────────
     BAKERY_NAME = "Sweet Crumbs Bakery"
@@ -108,6 +119,12 @@ class Config:
     TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
     SMS_ENABLED = bool(os.environ.get("TWILIO_ACCOUNT_SID"))
 
+    # ── Async / Queue ──────────────────────────────────
+    REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", REDIS_URL)
+    CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", REDIS_URL)
+    SOCKETIO_MESSAGE_QUEUE = os.environ.get("SOCKETIO_MESSAGE_QUEUE")
+
     # ── Loyalty / Rewards ──────────────────────────────
     LOYALTY_EARN_RATE = 1  # points earned per LOYALTY_EARN_PER rupees
     LOYALTY_EARN_PER = 10  # ₹10 = 1 point
@@ -118,6 +135,30 @@ class Config:
     # ── Rate limiting (for login brute-force) ──────────
     LOGIN_MAX_ATTEMPTS = 5
     LOGIN_LOCKOUT_MINUTES = 15
+
+    # ── Feature Flags / Modular Config ─────────────────
+    FEATURE_FLAGS = {
+        "auth.admin_2fa_provision": False,
+        "api.v2.enabled": True,
+        "plugins.enabled": True,
+        "events.enabled": True,
+        "orders.service_layer": True,
+    }
+    ENABLED_PLUGINS = []
+    API_VERSIONS = ("v1", "v2")
+    AUTH_ADMIN_2FA_PROVISION_ENABLED = False
+    AUTH_ADMIN_2FA_PROVIDERS = []
+    AUTH_ADMIN_2FA_ENFORCEMENT = "off"
+    PROVIDER_REGISTRY = {
+        "sms": "twilio",
+        "email": "flask_mail",
+        "payment": "demo",
+        "maps": "google_maps",
+        "storage": "local",
+        "notifications": "in_app",
+        "authentication": "local",
+    }
+    MIGRATIONS_ENABLED = True
 
 
 class DevelopmentConfig(Config):

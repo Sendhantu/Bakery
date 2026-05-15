@@ -139,12 +139,46 @@ document.addEventListener('DOMContentLoaded', () => {
     sync();
   };
 
+  const initCancelTimers = (root = document) => {
+    root.querySelectorAll('[data-cancel-timer], #cancel-timer').forEach((cancelTimer) => {
+      if (cancelTimer.dataset.cancelTimerBound === 'true') return;
+      cancelTimer.dataset.cancelTimerBound = 'true';
+
+      const targetTime = new Date(cancelTimer.dataset.placedAt);
+      targetTime.setMinutes(targetTime.getMinutes() + 2);
+      let intervalId = null;
+
+      const tick = () => {
+        if (!document.body.contains(cancelTimer)) {
+          if (intervalId) window.clearInterval(intervalId);
+          return;
+        }
+
+        const remaining = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
+        if (remaining > 0) {
+          const m = Math.floor(remaining / 60);
+          const s = remaining % 60;
+          cancelTimer.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+          return;
+        }
+
+        if (intervalId) window.clearInterval(intervalId);
+        cancelTimer.closest('.cancel-window')?.remove();
+        document.querySelector('.cancel-btn')?.remove();
+      };
+
+      tick();
+      intervalId = window.setInterval(tick, 1000);
+    });
+  };
+
   const initializeUiBindings = (root = document) => {
     applyCsrfToForms(root);
     initImageFallbacks(root);
     initConfirmDialogs(root);
     initToggleTargets(root);
     initMapToggles(root);
+    initCancelTimers(root);
     if (root === document) {
       initPaymentOptions();
     }
@@ -636,7 +670,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const setCartBadge = (count) => {
     if (!cartCountEl) return;
     cartCountEl.textContent = count;
-    cartCountEl.style.display = count > 0 ? 'flex' : 'none';
+    cartCountEl.classList.toggle('hidden', count <= 0);
   };
 
   if (cartCountEl) {
@@ -788,27 +822,6 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => btn.closest('.material-row')?.remove());
   });
 
-  // ─── Order Cancellation Countdown ───────────────
-  const cancelTimer = document.querySelector('#cancel-timer');
-  if (cancelTimer) {
-    const targetTime = new Date(cancelTimer.dataset.placedAt);
-    targetTime.setMinutes(targetTime.getMinutes() + 2);
-
-    const tick = () => {
-      const remaining = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
-      if (remaining > 0) {
-        const m = Math.floor(remaining / 60);
-        const s = remaining % 60;
-        cancelTimer.textContent = `${m}:${s.toString().padStart(2,'0')}`;
-      } else {
-        cancelTimer.closest('.cancel-window')?.remove();
-        document.querySelector('.cancel-btn')?.remove();
-      }
-    };
-    tick();
-    setInterval(tick, 1000);
-  }
-
   // ─── Charts (Admin) ──────────────────────────────
   initCharts();
 
@@ -829,12 +842,17 @@ document.addEventListener('DOMContentLoaded', () => {
     city: document.querySelector('#checkout-city'),
     pincode: document.querySelector('#checkout-pincode'),
     phone: document.querySelector('#checkout-phone'),
+    latitude: document.querySelector('#checkout-latitude'),
+    longitude: document.querySelector('#checkout-longitude'),
   };
   if (addressInputs.addressLine1 || addressCards.length) {
     const checkoutMapFrame = document.querySelector('#checkout-address-map-frame');
     const checkoutMapLink = document.querySelector('#checkout-address-map-link');
     const checkoutMapEmpty = document.querySelector('#checkout-address-map-empty');
     const checkoutMapToggle = document.querySelector('#checkout-address-map-toggle');
+    const checkoutLocationStatus = document.querySelector('#checkout-location-status');
+    const checkoutUseLocationButton = document.querySelector('#checkout-use-location');
+    let suppressExactLocationReset = false;
 
     const buildAddressQuery = () => {
       const parts = [
@@ -846,11 +864,40 @@ document.addEventListener('DOMContentLoaded', () => {
       return parts.join(', ');
     };
 
+    const getExactLocation = () => {
+      const rawLatitude = addressInputs.latitude?.value?.trim() || '';
+      const rawLongitude = addressInputs.longitude?.value?.trim() || '';
+      if (!rawLatitude || !rawLongitude) return null;
+
+      const latitude = Number(rawLatitude);
+      const longitude = Number(rawLongitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+
+      return {
+        latitude: Number(latitude.toFixed(7)),
+        longitude: Number(longitude.toFixed(7)),
+      };
+    };
+
+    const setLocationStatus = (message) => {
+      if (checkoutLocationStatus) {
+        checkoutLocationStatus.textContent = message;
+      }
+    };
+
+    const clearExactLocation = (message = 'Share your live location to place the map pin exactly on your address.') => {
+      if (addressInputs.latitude) addressInputs.latitude.value = '';
+      if (addressInputs.longitude) addressInputs.longitude.value = '';
+      setLocationStatus(message);
+    };
+
     const updateCheckoutAddressMap = () => {
       const query = buildAddressQuery();
+      const exactLocation = getExactLocation();
       if (!checkoutMapFrame || !checkoutMapLink || !checkoutMapEmpty) return;
 
-      if (!query) {
+      if (!query && !exactLocation) {
         checkoutMapFrame.src = '';
         checkoutMapFrame.dataset.mapSrc = '';
         checkoutMapLink.href = '#';
@@ -864,27 +911,41 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      const encodedQuery = encodeURIComponent(query);
-      checkoutMapFrame.dataset.mapSrc = `https://maps.google.com/maps?q=${encodedQuery}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+      const mapTarget = exactLocation
+        ? `${exactLocation.latitude},${exactLocation.longitude}`
+        : query;
+      const encodedTarget = encodeURIComponent(mapTarget);
+      const zoomLevel = exactLocation ? 17 : 15;
+
+      checkoutMapFrame.dataset.mapSrc = `https://www.google.com/maps?q=${encodedTarget}&z=${zoomLevel}&output=embed`;
       if (!checkoutMapFrame.closest('[data-map-frame]')?.classList.contains('hidden')) {
         checkoutMapFrame.src = checkoutMapFrame.dataset.mapSrc;
       }
-      checkoutMapLink.href = `https://www.google.com/maps/search/?api=1&query=${encodedQuery}`;
+      checkoutMapLink.href = `https://www.google.com/maps/search/?api=1&query=${encodedTarget}`;
       checkoutMapLink.classList.remove('hidden');
       checkoutMapEmpty.classList.add('hidden');
       if (checkoutMapToggle) {
         checkoutMapToggle.disabled = false;
       }
+      if (exactLocation) {
+        setLocationStatus('Exact location captured. The map pin will open at the customer’s precise location.');
+      } else {
+        setLocationStatus('Map preview is based on the typed delivery address. Share live location for an exact pin.');
+      }
     };
 
     const applyAddressCard = (card) => {
       if (!card) return;
+      suppressExactLocationReset = true;
       if (addressInputs.label) addressInputs.label.value = card.dataset.label || '';
       if (addressInputs.addressLine1) addressInputs.addressLine1.value = card.dataset.addressLine1 || '';
       if (addressInputs.addressLine2) addressInputs.addressLine2.value = card.dataset.addressLine2 || '';
       if (addressInputs.city) addressInputs.city.value = card.dataset.city || '';
       if (addressInputs.pincode) addressInputs.pincode.value = card.dataset.pincode || '';
       if (addressInputs.phone) addressInputs.phone.value = card.dataset.phone || '';
+      if (addressInputs.latitude) addressInputs.latitude.value = card.dataset.latitude || '';
+      if (addressInputs.longitude) addressInputs.longitude.value = card.dataset.longitude || '';
+      suppressExactLocationReset = false;
       updateCheckoutAddressMap();
     };
 
@@ -916,9 +977,67 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    Object.values(addressInputs).forEach((input) => {
+    [
+      addressInputs.addressLine1,
+      addressInputs.addressLine2,
+      addressInputs.city,
+      addressInputs.pincode,
+    ].forEach((input) => {
+      input?.addEventListener('input', () => {
+        if (!suppressExactLocationReset) {
+          clearExactLocation();
+        }
+        updateCheckoutAddressMap();
+      });
+      input?.addEventListener('change', () => {
+        if (!suppressExactLocationReset) {
+          clearExactLocation();
+        }
+        updateCheckoutAddressMap();
+      });
+    });
+
+    [addressInputs.label, addressInputs.phone].forEach((input) => {
       input?.addEventListener('input', updateCheckoutAddressMap);
       input?.addEventListener('change', updateCheckoutAddressMap);
+    });
+
+    checkoutUseLocationButton?.addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        setLocationStatus('Live location is not supported in this browser.');
+        return;
+      }
+
+      const originalLabel = checkoutUseLocationButton.textContent;
+      checkoutUseLocationButton.disabled = true;
+      checkoutUseLocationButton.textContent = 'Locating...';
+      setLocationStatus('Requesting your current location...');
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          if (addressInputs.latitude) addressInputs.latitude.value = String(position.coords.latitude);
+          if (addressInputs.longitude) addressInputs.longitude.value = String(position.coords.longitude);
+          checkoutUseLocationButton.disabled = false;
+          checkoutUseLocationButton.textContent = originalLabel;
+          updateCheckoutAddressMap();
+        },
+        (error) => {
+          checkoutUseLocationButton.disabled = false;
+          checkoutUseLocationButton.textContent = originalLabel;
+          if (error.code === error.PERMISSION_DENIED) {
+            setLocationStatus('Location access was denied. Allow location access to pin the exact delivery spot.');
+          } else if (error.code === error.TIMEOUT) {
+            setLocationStatus('Location lookup timed out. Please try again.');
+          } else {
+            setLocationStatus('Unable to fetch your live location right now.');
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        },
+      );
     });
 
     updateCheckoutAddressMap();

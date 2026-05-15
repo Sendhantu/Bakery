@@ -10,13 +10,15 @@
     <a href="{{ url_for('delivery.dashboard') }}" class="btn btn-ghost btn-sm">← Back</a>
   </div>
   <div style="display:flex;flex-direction:column;gap:1.5rem">
-    <div class="card"><div class="card-header">Customer & Delivery Info</div>
+    <div class="card"><div class="card-header">Customer &amp; Delivery Info</div>
       <div class="card-body">
         <div class="ops-order-actions mb-2">
           <a href="tel:{{ order.phone }}" class="btn btn-primary btn-sm">Call Customer</a>
           {% set map_query = address_query(order.address_line1, order.address_line2, order.city, order.pincode) %}
+          {% set latitude = order.delivery_latitude %}
+          {% set longitude = order.delivery_longitude %}
           {% if map_query %}
-          <a href="{{ map_link_url(map_query) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Open Maps ↗</a>
+          <a href="{{ map_link_url(map_query, latitude, longitude) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Open Maps ↗</a>
           {% endif %}
         </div>
         <p><strong>Customer:</strong> {{ order.customer.name }}</p>

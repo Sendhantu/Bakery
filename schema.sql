@@ -139,6 +139,8 @@ CREATE TABLE IF NOT EXISTS saved_addresses (
     city           VARCHAR(100)   NOT NULL,
     pincode        VARCHAR(10)    NOT NULL,
     phone          VARCHAR(20)    NOT NULL,
+    latitude       DECIMAL(10,7),
+    longitude      DECIMAL(10,7),
     is_default     TINYINT(1)     DEFAULT 0,
     created_at     DATETIME       DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -166,6 +168,8 @@ CREATE TABLE IF NOT EXISTS orders (
     city             VARCHAR(100),
     pincode          VARCHAR(10),
     phone            VARCHAR(20),
+    delivery_latitude DECIMAL(10,7),
+    delivery_longitude DECIMAL(10,7),
     -- Delivery schedule
     delivery_slot    VARCHAR(50),
     delivery_date    DATE,

@@ -1,0 +1,53 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Branches — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">🏬 Branches</h1>
+    <p class="text-muted text-sm">Manage branch locations, contacts, and active store status.</p>
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:360px 1fr;gap:1.5rem;align-items:start">
+  <div class="card" style="position:sticky;top:90px">
+    <div class="card-header">Add Branch</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.add_branch') }}">
+        <div class="form-group"><label class="form-label">Branch Name *</label><input class="form-control" name="name" required></div>
+        <div class="form-group"><label class="form-label">Manager</label><input class="form-control" name="manager_name"></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
+        </div>
+        <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" name="address"></textarea></div>
+        <button type="submit" class="btn btn-primary btn-block">Add Branch</button>
+      </form>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Branch Network</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Branch</th><th>Manager</th><th>Contact</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for branch in branches %}
+          <tr>
+            <td><strong>{{ branch.name }}</strong><br><span class="text-muted text-sm">{{ branch.address or 'Address not set' }}</span></td>
+            <td>{{ branch.manager_name or '—' }}</td>
+            <td>{{ branch.phone or '—' }}</td>
+            <td><span class="badge {% if branch.is_active %}badge-green{% else %}badge-red{% endif %}">{{ branch.status }}</span></td>
+            <td>
+              <form method="POST" action="{{ url_for('admin.toggle_branch_status', branch_id=branch.id) }}">
+                <button type="submit" class="btn btn-ghost btn-sm">
+                  {% if branch.is_active %}Close{% else %}Open{% endif %}
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted" style="padding:1.5rem">No branches defined yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

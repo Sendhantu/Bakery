@@ -1,0 +1,69 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Production Planning — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">🛠️ Production Planning</h1>
+    <p class="text-muted text-sm">Schedule product batches, assign branches, and track production status.</p>
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:360px 1fr;gap:1.5rem;align-items:start">
+  <div class="card" style="position:sticky;top:90px">
+    <div class="card-header">New Production Plan</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.add_production_plan') }}">
+        <div class="form-group"><label class="form-label">Product *</label>
+          <select class="form-control" name="product_id" required>
+            <option value="">Select product</option>
+            {% for product in products %}
+            <option value="{{ product.id }}">{{ product.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Branch</label>
+          <select class="form-control" name="branch_id">
+            <option value="">Main Kitchen</option>
+            {% for branch in branches %}
+            <option value="{{ branch.id }}">{{ branch.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Planned Date *</label><input class="form-control" type="date" name="planned_date" required></div>
+          <div class="form-group"><label class="form-label">Quantity *</label><input class="form-control" type="number" min="1" name="quantity" required></div>
+        </div>
+        <div class="form-group"><label class="form-label">Status</label>
+          <select class="form-control" name="status">
+            <option value="Scheduled">Scheduled</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Completed">Completed</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" name="notes"></textarea></div>
+        <button type="submit" class="btn btn-primary btn-block">Save Plan</button>
+      </form>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Upcoming Production</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Product</th><th>Branch</th><th>Date</th><th>Qty</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for plan in plans %}
+          <tr>
+            <td><strong>{{ plan.product.name }}</strong></td>
+            <td>{{ plan.branch.name if plan.branch else 'Main Kitchen' }}</td>
+            <td>{{ plan.planned_date.strftime('%d %b %Y') }}</td>
+            <td>{{ plan.quantity }}</td>
+            <td><span class="badge {% if plan.status == 'Completed' %}badge-green{% elif plan.status == 'In Progress' %}badge-orange{% else %}badge-brown{% endif %}">{{ plan.status }}</span></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted" style="padding:1.5rem">No production plans scheduled yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

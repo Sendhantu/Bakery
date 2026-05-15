@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
+from bootstrap import get_container
 from models import Product, ProductVariant, Coupon, Notification, calculate_loyalty_redemption, get_loyalty_config
 from decimal import Decimal, InvalidOperation
 
@@ -9,24 +10,12 @@ api_bp = Blueprint('api', __name__)
 @api_bp.route('/validate-coupon', methods=['POST'])
 @login_required
 def validate_coupon():
-    data     = request.get_json() or {}
-    code     = data.get('code', '').strip().upper()
-    subtotal = float(data.get('subtotal', 0))
-
-    coupon = Coupon.query.filter_by(code=code).first()
-    if not coupon or not coupon.is_valid():
-        return jsonify({'valid': False, 'message': 'Invalid or expired coupon.'})
-    if subtotal < float(coupon.min_order_value):
-        return jsonify({'valid': False,
-                        'message': f'Minimum order ₹{coupon.min_order_value} required.'})
-
-    if coupon.discount_type == 'percentage':
-        discount = round(subtotal * float(coupon.discount_value) / 100, 2)
-    else:
-        discount = float(coupon.discount_value)
-
-    return jsonify({'valid': True, 'discount': discount,
-                    'message': f'Coupon applied! You save ₹{discount:.0f}'})
+    data = request.get_json() or {}
+    result = get_container().payment_service.validate_coupon(
+        data.get('code', ''),
+        data.get('subtotal', 0),
+    )
+    return jsonify(result)
 
 
 @api_bp.route('/notifications/unread-count')
@@ -63,9 +52,7 @@ def search_suggestions():
     q = request.args.get('q', '').strip()
     if len(q) < 2:
         return jsonify([])
-    products = Product.query.filter(
-        Product.name.ilike(f'%{q}%'), Product.is_active == True
-    ).limit(5).all()
+    products = get_container().product_repository.active_search(q, limit=5)
     return jsonify([{'id': p.id, 'name': p.name, 'price': float(p.base_price)} for p in products])
 
 

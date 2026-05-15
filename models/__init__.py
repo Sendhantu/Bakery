@@ -5,7 +5,7 @@ from .product import PRODUCT_FALLBACK_IMAGES, Category, Product, ProductVariant,
 from .cart import Cart, Wishlist, SavedAddress
 from .order import ORDER_STATUSES, ORDER_STATUS_TRANSITIONS, get_allowed_order_statuses, can_transition_order_status, Order, OrderItem, AddressChange, ModificationRequest
 from .payment import Payment, PaymentLink, Refund, Coupon
-from .inventory import RawMaterial, ProductMaterial
+from .inventory import RawMaterial, ProductMaterial, Supplier, Branch, ProductionPlan, ProductionBatch
 from .delivery import DeliveryAgent, Delivery
 from .communication import Message, Notification, EmailLog
 
@@ -17,7 +17,7 @@ __all__ = [
     'Cart', 'Wishlist', 'SavedAddress',
     'ORDER_STATUSES', 'ORDER_STATUS_TRANSITIONS', 'get_allowed_order_statuses', 'can_transition_order_status', 'Order', 'OrderItem', 'AddressChange', 'ModificationRequest',
     'Payment', 'PaymentLink', 'Refund', 'Coupon',
-    'RawMaterial', 'ProductMaterial',
+    'RawMaterial', 'ProductMaterial', 'Supplier', 'Branch', 'ProductionPlan', 'ProductionBatch',
     'DeliveryAgent', 'Delivery',
     'Message', 'Notification', 'EmailLog'
 ]

@@ -57,6 +57,16 @@
       <div class="stat-value">{{ inactive_products }}</div>
       <div class="stat-label">Inactive Products</div>
     </a>
+    <a href="{{ url_for('admin.branches') }}" class="stat-card green" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">🏬</span>
+      <div class="stat-value">{{ branch_count }}</div>
+      <div class="stat-label">Branches</div>
+    </a>
+    <a href="{{ url_for('admin.suppliers') }}" class="stat-card brown" style="text-decoration:none;color:inherit">
+      <span class="stat-icon">🤝</span>
+      <div class="stat-value">{{ supplier_count }}</div>
+      <div class="stat-label">Suppliers</div>
+    </a>
     <a href="{{ url_for('admin.chat') }}" class="stat-card brown" style="text-decoration:none;color:inherit">
       <span class="stat-icon">💬</span>
       <div class="stat-value">{{ pending_msgs }}</div>
