@@ -14,3 +14,4 @@ sqlalchemy
 Authlib
 gevent
 celery
+python-dotenv
