@@ -799,6 +799,19 @@ def seed_data(app):
         print("✅ Seed data inserted successfully.")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point — works for both local dev and Render production
+#
+# On Render:   gunicorn reads `app` directly → production config
+# Locally:     python app.py → reads FLASK_ENV, defaults to development
+#              which runs 3 portals on ports 5000 / 5001 / 5002
+# ─────────────────────────────────────────────────────────────────────────────
+_config_name = os.environ.get("FLASK_ENV", "development").strip().lower()
+if _config_name not in ("production", "development", "testing"):
+    _config_name = "development"
+
+app = create_app(_config_name)
+
 if __name__ == "__main__":
     import threading
 
@@ -828,8 +841,7 @@ if __name__ == "__main__":
     customer_thread.join()
     admin_thread.join()
     delivery_thread.join()
-
-
+    
 #cd /Users/sendhanumapathy/Downloads/bakery/customer_app && python app.py
 #cd /Users/sendhanumapathy/Downloads/bakery/admin_app && python app.py
 #cd /Users/sendhanumapathy/Downloads/bakery/delivery_app && python app.py
