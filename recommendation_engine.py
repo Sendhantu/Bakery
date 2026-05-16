@@ -1,14 +1,24 @@
+"""
+Recommendation engine — works with or without ML packages.
+On Render (no numpy/faiss/sentence-transformers), falls back to
+trending-score + rules-based ranking which works well for a bakery.
+"""
 import os
 import re
-from datetime import datetime
-from math import exp
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 
 from models import Order, OrderItem, Product, db
+
+# ── optional heavy deps ──────────────────────────────────────────────────────
+try:
+    import numpy as np
+    _NUMPY = True
+except ImportError:
+    np = None
+    _NUMPY = False
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -24,6 +34,7 @@ try:
     from llama_cpp import Llama
 except ImportError:
     Llama = None
+# ─────────────────────────────────────────────────────────────────────────────
 
 EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
 LLM_MODEL_PATH = os.environ.get('LLM_MODEL_PATH', '')
@@ -32,13 +43,16 @@ LLM_MODEL_PATH = os.environ.get('LLM_MODEL_PATH', '')
 def _normalize_vector(values: List[float]) -> List[float]:
     if not values:
         return []
-    array = np.array(values, dtype=float)
-    low = array.min()
-    high = array.max()
+    if _NUMPY:
+        array = np.array(values, dtype=float)
+        low = float(array.min())
+        high = float(array.max())
+    else:
+        low = min(values)
+        high = max(values)
     if high <= low:
-        return [1.0 if v > 0 else 0.0 for v in array]
-    scaled = (array - low) / (high - low)
-    return scaled.tolist()
+        return [1.0 if v > 0 else 0.0 for v in values]
+    return [(v - low) / (high - low) for v in values]
 
 
 def _parse_budget(query: str) -> Optional[float]:
@@ -72,32 +86,26 @@ class RecommendationEngine:
         self.products: List[Product] = []
         self.product_ids: List[int] = []
         self.product_index: Dict[int, int] = {}
-        self.product_embeddings: Optional[np.ndarray] = None
+        self.product_embeddings = None  # np.ndarray when numpy available
         self.index = None
         self.trending_scores: Dict[int, float] = {}
         self.order_counts: Dict[int, int] = {}
 
     def _build_text(self, product: Product) -> str:
-        parts = [product.name, getattr(product.category, 'name', None), product.occasion_tags,
-                 product.description, product.ingredients]
+        parts = [product.name, getattr(product.category, 'name', None),
+                 product.occasion_tags, product.description, product.ingredients]
         return ' '.join([p.strip() for p in parts if p]).lower()
 
     def _ensure_embedding_model(self):
         if self.embedding_model is not None:
             return
         if SentenceTransformer is None:
-            raise RuntimeError(
-                'sentence-transformers is required for recommendation embeddings. '
-                'Install with `pip install sentence-transformers`.'
-            )
+            raise RuntimeError('sentence-transformers not available')
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
 
     def _ensure_faiss(self):
         if faiss is None:
-            raise RuntimeError(
-                'faiss-cpu is required for vector search. '
-                'Install with `pip install faiss-cpu`.'
-            )
+            raise RuntimeError('faiss-cpu not available')
 
     def _ensure_llm(self):
         if self.llm is not None:
@@ -106,38 +114,27 @@ class RecommendationEngine:
             return
         self.llm = Llama(model_path=LLM_MODEL_PATH)
 
-    def build(self, rebuild: bool = False):
-        if self.index is not None and self.product_embeddings is not None and not rebuild:
-            return
-        self._ensure_embedding_model()
-        self._ensure_faiss()
+    def _ml_available(self) -> bool:
+        return _NUMPY and SentenceTransformer is not None and faiss is not None
 
-        products = Product.query.options(selectinload(Product.category)).filter_by(is_active=True).all()
+    def build(self, rebuild: bool = False):
+        # Always load products and trending scores (no ML needed)
+        if self.products and not rebuild:
+            return
+
+        products = Product.query.options(
+            selectinload(Product.category)
+        ).filter_by(is_active=True).all()
         self.products = products
-        self.product_ids = [product.id for product in products]
-        self.product_index = {product.id: idx for idx, product in enumerate(products)}
+        self.product_ids = [p.id for p in products]
+        self.product_index = {p.id: idx for idx, p in enumerate(products)}
 
         if not products:
-            self.product_embeddings = np.zeros((0, 0), dtype='float32')
-            self.index = None
             self.trending_scores = {}
             self.order_counts = {}
+            self.index = None
+            self.product_embeddings = None
             return
-
-        product_texts = [self._build_text(product) for product in products]
-        embeddings = self.embedding_model.encode(
-            product_texts,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-            normalize_embeddings=True,
-        )
-        if embeddings.ndim == 1:
-            embeddings = embeddings.reshape(1, -1)
-        embeddings = embeddings.astype('float32')
-
-        self.product_embeddings = embeddings
-        self.index = faiss.IndexFlatIP(embeddings.shape[1])
-        self.index.add(embeddings)
 
         ordered_data = db.session.query(
             OrderItem.product_id,
@@ -146,27 +143,64 @@ class RecommendationEngine:
             Order.status == 'DELIVERED'
         ).group_by(OrderItem.product_id).all()
 
-        self.order_counts = {product_id: int(count) for product_id, count in ordered_data}
-        raw_scores = [self.order_counts.get(product.id, 0) + (3 if product.is_featured else 0)
-                      for product in products]
+        self.order_counts = {pid: int(cnt) for pid, cnt in ordered_data}
+        raw_scores = [
+            self.order_counts.get(p.id, 0) + (3 if p.is_featured else 0)
+            for p in products
+        ]
         normalized = _normalize_vector(raw_scores)
-        self.trending_scores = {product.id: normalized[idx] for idx, product in enumerate(products)}
+        self.trending_scores = {p.id: normalized[idx] for idx, p in enumerate(products)}
+
+        # Build ML index only if all packages available
+        if self._ml_available() and (self.index is None or rebuild):
+            try:
+                self._ensure_embedding_model()
+                product_texts = [self._build_text(p) for p in products]
+                embeddings = self.embedding_model.encode(
+                    product_texts,
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                    normalize_embeddings=True,
+                )
+                if embeddings.ndim == 1:
+                    embeddings = embeddings.reshape(1, -1)
+                embeddings = embeddings.astype('float32')
+                self.product_embeddings = embeddings
+                self.index = faiss.IndexFlatIP(embeddings.shape[1])
+                self.index.add(embeddings)
+            except Exception:
+                self.index = None
+                self.product_embeddings = None
 
     def search_similar(self, query: str, k: int = 12) -> List[Tuple[int, float]]:
-        if not query or self.index is None or self.index.ntotal == 0:
+        if not query or self.index is None:
             return []
-        self._ensure_embedding_model()
-        vector = self.embedding_model.encode(
-            [query], convert_to_numpy=True, normalize_embeddings=True
-        ).astype('float32')
-        k = min(k, int(self.index.ntotal))
-        distances, indices = self.index.search(vector, k)
-        results = []
-        for score, idx in zip(distances[0].tolist(), indices[0].tolist()):
-            if idx < 0:
-                continue
-            results.append((self.product_ids[idx], float(score)))
-        return results
+        try:
+            self._ensure_embedding_model()
+            vector = self.embedding_model.encode(
+                [query], convert_to_numpy=True, normalize_embeddings=True
+            ).astype('float32')
+            k = min(k, int(self.index.ntotal))
+            distances, indices = self.index.search(vector, k)
+            results = []
+            for score, idx in zip(distances[0].tolist(), indices[0].tolist()):
+                if idx < 0:
+                    continue
+                results.append((self.product_ids[idx], float(score)))
+            return results
+        except Exception:
+            return []
+
+    def _text_similarity(self, query: str, product: Product) -> float:
+        """Simple keyword overlap score — used when faiss/numpy not available."""
+        if not query:
+            return 0.0
+        text = self._build_text(product)
+        tokens = set(re.findall(r'\b[a-z0-9]+\b', query.lower()))
+        if not tokens:
+            return 0.0
+        hits = sum(1 for t in tokens if t in text)
+        return hits / len(tokens)
 
     def _user_profile(self, user_id: Optional[int]) -> Dict[str, Dict[str, float]]:
         if not user_id:
@@ -179,14 +213,14 @@ class RecommendationEngine:
             Order.status == 'DELIVERED'
         ).group_by(OrderItem.product_id).all()
 
-        product_counts = {product_id: int(count) for product_id, count in rows}
+        product_counts = {pid: int(cnt) for pid, cnt in rows}
         category_counts: Dict[str, float] = {}
         tag_counts: Dict[str, float] = {}
 
         for product_id, count in product_counts.items():
-            product = self.products[self.product_index.get(product_id)] if product_id in self.product_index else None
-            if not product:
+            if product_id not in self.product_index:
                 continue
+            product = self.products[self.product_index[product_id]]
             category = _safe_text(getattr(product.category, 'name', ''))
             if category:
                 category_counts[category] = category_counts.get(category, 0.0) + count
@@ -214,122 +248,65 @@ class RecommendationEngine:
                 score += min(weight * 0.1, 2.0)
         return float(score)
 
-    def _parse_query(self, query: str) -> Dict[str, Optional[str]]:
+    def _parse_query(self, query: str) -> Dict:
         q = query.lower()
-        budget = _parse_budget(q)
-        sweet_intent = 'less' if re.search(r'less sweet|not too sweet|light sweet|low sugar', q) else None
-        eggless = 'eggless' if 'eggless' in q or 'no egg' in q else None
-        flavor = _find_keyword(q, [
-            'chocolate', 'vanilla', 'strawberry', 'coffee', 'berry', 'nut', 'caramel', 'lemon', 'citrus',
-            'berry', 'mango', 'cookies', 'cream', 'salted', 'butter', 'brownie', 'red velvet'
-        ])
-        occasion = _find_keyword(q, [
-            'birthday', 'wedding', 'anniversary', 'baby shower', 'valentine', 'christmas',
-            'new year', 'festival', 'party', 'picnic', 'corporate', 'graduation'
-        ])
-        season = _find_keyword(q, [
-            'summer', 'winter', 'spring', 'autumn', 'fall', 'festive', 'seasonal'
-        ])
         return {
-            'budget': budget,
-            'sweetness': sweet_intent,
-            'eggless': eggless,
-            'flavor': flavor,
-            'occasion': occasion,
-            'season': season,
+            'budget': _parse_budget(q),
+            'sweetness': 'less' if re.search(r'less sweet|not too sweet|light sweet|low sugar', q) else None,
+            'eggless': 'eggless' if 'eggless' in q or 'no egg' in q else None,
+            'flavor': _find_keyword(q, [
+                'chocolate', 'vanilla', 'strawberry', 'coffee', 'berry', 'nut',
+                'caramel', 'lemon', 'citrus', 'mango', 'cookies', 'cream',
+                'salted', 'butter', 'brownie', 'red velvet'
+            ]),
+            'occasion': _find_keyword(q, [
+                'birthday', 'wedding', 'anniversary', 'baby shower', 'valentine',
+                'christmas', 'new year', 'festival', 'party', 'picnic',
+                'corporate', 'graduation'
+            ]),
+            'season': _find_keyword(q, [
+                'summer', 'winter', 'spring', 'autumn', 'fall', 'festive', 'seasonal'
+            ]),
             'raw_query': q,
         }
 
-    def _rules_score(self, parsed: Dict[str, Optional[str]], product: Product) -> float:
+    def _rules_score(self, parsed: Dict, product: Product) -> float:
         score = 0.0
         text = self._build_text(product)
         price = float(product.base_price or 0)
-
         if parsed['budget'] is not None:
-            budget = parsed['budget']
-            if price <= budget:
+            if price <= parsed['budget']:
                 score += 1.0
-            elif price <= budget * 1.15:
+            elif price <= parsed['budget'] * 1.15:
                 score += 0.4
             else:
                 score -= 0.2
-
         if parsed['occasion'] and parsed['occasion'] in text:
             score += 1.2
-
         if parsed['eggless'] and product.is_eggless:
             score += 1.0
-
         if parsed['flavor'] and parsed['flavor'] in text:
             score += 1.0
-
-        if parsed['sweetness'] == 'less' and ('less sweet' in text or 'light' in text or 'low sugar' in text):
+        if parsed['sweetness'] == 'less' and any(w in text for w in ('less sweet', 'light', 'low sugar')):
             score += 1.0
-
         if parsed['season'] and parsed['season'] in text:
             score += 0.8
-
         return max(0.0, min(score / 4.0, 1.0))
-
-    def _seasonal_score(self, parsed: Dict[str, Optional[str]], product: Product) -> float:
-        if not parsed['season']:
-            return 0.0
-        text = self._build_text(product)
-        return 1.0 if parsed['season'] in text else 0.0
 
     def _build_message(self, query: str, products: List[Product], is_new_customer: bool) -> str:
         if not products:
             return 'We are still learning your taste. Try browsing our bakery collections for fresh recommendations.'
-
-        product_lines = []
-        for product in products[:4]:
-            product_lines.append(
-                f"{product.name} ({product.category.name if product.category else 'Bakery'}) — ₹{float(product.base_price):.0f}"
-            )
-        product_details = '\n'.join(product_lines)
-        prompt = f'''
-You are a friendly bakery sales assistant.
-Customer request: {query}
-Customer type: {'new customer' if is_new_customer else 'returning customer'}.
-Recommend 3 or 4 products from the list below. Mention the main pick and one upsell idea.
-Products:
-{product_details}
-Explain these recommendations naturally in one or two sentences.
-'''
-        if self._llm_enabled():
-            try:
-                self._ensure_llm()
-                if self.llm:
-                    response = self.llm.create(
-                        prompt=prompt,
-                        max_tokens=180,
-                        temperature=0.72,
-                        stop=['\n\n'],
-                    )
-                    text = response.get('choices', [{}])[0].get('text', '')
-                    if text and text.strip():
-                        return text.strip().replace('\n', ' ')
-            except Exception:
-                pass
-
         primary = products[0]
         secondary = products[1] if len(products) > 1 else None
         upsell = products[2] if len(products) > 2 else None
-
         lines = [
-            f"For your request, {primary.name} is a strong choice because it matches the occasion and budget constraints.",
+            f"For your request, {primary.name} is a great choice!"
         ]
         if secondary:
-            lines.append(
-                f"You may also enjoy {secondary.name} as a second pick, especially if you are looking for something that pairs well with a celebration." 
-                if secondary else ''
-            )
+            lines.append(f"You may also enjoy {secondary.name}.")
         if upsell:
-            lines.append(
-                f"If you want a small upsell, {upsell.name} makes a perfect complement for guests or as a gift." 
-                if upsell else ''
-            )
-        return ' '.join([line for line in lines if line]).strip()
+            lines.append(f"{upsell.name} makes a perfect complement as well.")
+        return ' '.join(lines)
 
     def _llm_enabled(self) -> bool:
         return Llama is not None and bool(LLM_MODEL_PATH)
@@ -337,58 +314,57 @@ Explain these recommendations naturally in one or two sentences.
     def recommend(self, user_id: Optional[int], query: str, limit: int = 6) -> Tuple[List[Product], str]:
         self.build()
         parsed = self._parse_query(query or '')
-        is_new_customer = not bool(self._user_profile(user_id)['product_counts'])
-
-        semantic_candidates = self.search_similar(query, k=40) if query else []
-        candidate_ids = {pid for pid, _ in semantic_candidates}
-
         profile = self._user_profile(user_id)
+        is_new_customer = not bool(profile['product_counts'])
+
+        # Use ML semantic search if available, else keyword similarity
+        if self._ml_available() and self.index is not None:
+            semantic_candidates = self.search_similar(query, k=40) if query else []
+            semantic_scores = {pid: score for pid, score in semantic_candidates}
+            candidate_ids = set(semantic_scores.keys())
+        else:
+            semantic_scores = {}
+            candidate_ids = set()
+
         if profile['product_counts']:
             candidate_ids.update(profile['product_counts'].keys())
 
-        trending_ids = sorted(self.product_ids, key=lambda pid: self.trending_scores.get(pid, 0.0), reverse=True)[:30]
+        trending_ids = sorted(
+            self.product_ids,
+            key=lambda pid: self.trending_scores.get(pid, 0.0),
+            reverse=True
+        )[:30]
         candidate_ids.update(trending_ids)
 
         if not candidate_ids:
             candidate_ids = set(self.product_ids)
 
-        semantic_scores = {pid: score for pid, score in semantic_candidates}
         scores = []
         for pid in candidate_ids:
+            if pid not in self.product_index:
+                continue
             product = self.products[self.product_index[pid]]
-            content_score = semantic_scores.get(pid, 0.0)
+            content_score = semantic_scores.get(pid) or self._text_similarity(query, product)
             cf_score = self._history_score(profile, product)
             rule_score = self._rules_score(parsed, product)
             trending_score = self.trending_scores.get(pid, 0.0)
-            seasonal_score = self._seasonal_score(parsed, product)
 
             if is_new_customer:
-                total_score = (
-                    0.5 * trending_score +
-                    0.3 * content_score +
-                    0.2 * seasonal_score
-                )
+                total = 0.5 * trending_score + 0.3 * content_score + 0.2 * rule_score
             else:
-                total_score = (
-                    0.4 * cf_score +
-                    0.3 * content_score +
-                    0.2 * rule_score +
-                    0.1 * trending_score
-                )
+                total = 0.4 * cf_score + 0.3 * content_score + 0.2 * rule_score + 0.1 * trending_score
 
-            if parsed['budget'] is not None and float(product.base_price or 0) > parsed['budget'] * 1.4:
-                total_score *= 0.6
-
+            if parsed['budget'] and float(product.base_price or 0) > parsed['budget'] * 1.4:
+                total *= 0.6
             if query and parsed['flavor'] and parsed['flavor'] not in self._build_text(product):
-                total_score *= 0.92
+                total *= 0.92
+            if getattr(product, 'total_stock', 1) == 0:
+                total *= 0.5
 
-            if product.total_stock == 0:
-                total_score *= 0.5
+            scores.append((total, product))
 
-            scores.append((total_score, product))
-
-        scores.sort(key=lambda item: item[0], reverse=True)
-        recommended = [product for _, product in scores][:limit]
+        scores.sort(key=lambda x: x[0], reverse=True)
+        recommended = [p for _, p in scores][:limit]
         message = self._build_message(query, recommended, is_new_customer)
         return recommended, message
 
