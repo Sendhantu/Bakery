@@ -1,6 +1,13 @@
 from events import EventBus, handle_order_status_updated
 from repositories import OrderRepository, ProductRepository, UserRepository
-from services import AuthService, InventoryService, OrderService, PaymentService
+from services import (
+    AuthService,
+    DeliveryService,
+    InventoryService,
+    OrderService,
+    PaymentService,
+    SlotService,
+)
 
 from .feature_flags import FeatureFlagService
 from .plugins import PluginRegistry
@@ -19,6 +26,11 @@ class ServiceContainer:
         self.payment_service = PaymentService()
         self.inventory_service = InventoryService()
         self.order_service = OrderService(self.order_repository, self.event_bus)
+        self.slot_service = SlotService(
+            time_slots=app.config.get("TIME_SLOTS", []),
+            pickup_buffer_minutes=app.config.get("PICKUP_BUFFER_MINUTES", 20),
+        )
+        self.delivery_service = DeliveryService(self.order_repository)
         self._register_default_handlers()
 
     def _register_default_handlers(self):

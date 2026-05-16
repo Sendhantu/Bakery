@@ -28,7 +28,13 @@
         <div class="flex gap-3 flex-wrap">
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_eggless" {% if product and product.is_eggless %}checked{% endif %}> 🌿 Eggless</label>
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_featured" {% if product and product.is_featured %}checked{% endif %}> ⭐ Featured</label>
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="preorder_required" {% if product and product.preorder_required %}checked{% endif %}> ⏰ Requires Preorder</label>
           {% if product %}<label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_active" {% if product.is_active %}checked{% endif %}> ✅ Active</label>{% endif %}
+        </div>
+        <div class="form-group mt-2">
+          <label class="form-label">Minimum Notice Hours</label>
+          <input class="form-control" type="number" name="minimum_notice_hours" min="1" value="{{ product.minimum_notice_hours if product else 24 }}">
+          <p class="text-sm text-muted mt-1">Only used when preorder is required.</p>
         </div>
       </div>
     </div>

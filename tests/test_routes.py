@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from models import Delivery, DeliveryAgent, Order, User, db
+from models import Coupon, Delivery, DeliveryAgent, Order, Product, ProductVariant, User, db
 
 
 def sign_in(test_client, email, password):
@@ -192,3 +192,167 @@ def test_delivery_cannot_set_packed_status(delivery_client):
         order = Order.query.get(order_id)
         assert order is not None
         assert order.status == 'PREPARING'
+
+
+def test_admin_loyalty_page_renders_config(admin_client):
+    login_response = sign_in(admin_client, 'admin@bakery.com', 'Admin@bakery')
+    assert login_response.status_code == 302
+
+    response = admin_client.get('/admin/loyalty')
+    assert response.status_code == 200
+    assert b'100 pts = \xe2\x82\xb910 off' in response.data or b'100 pts = Rs' in response.data
+
+
+def test_admin_can_toggle_coupon(admin_client):
+    login_response = sign_in(admin_client, 'admin@bakery.com', 'Admin@bakery')
+    assert login_response.status_code == 302
+
+    with admin_client.application.app_context():
+        coupon = Coupon(
+            code='PHASE1',
+            discount_type='flat',
+            discount_value=25,
+            min_order_value=0,
+            max_uses=10,
+        )
+        db.session.add(coupon)
+        db.session.commit()
+        coupon_id = coupon.id
+
+    response = admin_client.post(f'/admin/coupons/{coupon_id}/toggle', follow_redirects=True)
+    assert response.status_code == 200
+
+    with admin_client.application.app_context():
+        coupon = Coupon.query.get(coupon_id)
+        assert coupon is not None
+        assert coupon.is_active is False
+
+
+def test_inventory_page_backfills_missing_product_variant(admin_client):
+    login_response = sign_in(admin_client, 'admin@bakery.com', 'Admin@bakery')
+    assert login_response.status_code == 302
+
+    with admin_client.application.app_context():
+        product = Product(name='Inventory Sync Cake', base_price=399, is_active=True)
+        db.session.add(product)
+        db.session.commit()
+        product_id = product.id
+        assert ProductVariant.query.filter_by(product_id=product_id).count() == 0
+
+    response = admin_client.get('/admin/inventory')
+    assert response.status_code == 200
+
+    with admin_client.application.app_context():
+        variants = ProductVariant.query.filter_by(product_id=product_id).all()
+        assert len(variants) == 1
+        assert variants[0].name == 'Standard'
+
+
+def test_reverse_geocode_api_validates_coordinates(client):
+    sign_in(client, 'customer@test.com', 'customer123')
+
+    response = client.get('/api/location/reverse-geocode?lat=abc&lng=123')
+    assert response.status_code == 400
+    assert response.is_json
+    assert response.json['ok'] is False
+
+
+def test_customer_can_place_pickup_order(client):
+    sign_in(client, 'customer@test.com', 'customer123')
+
+    add_response = client.post(
+        '/cart/add',
+        data={'product_id': '1', 'variant_id': '1', 'quantity': '1'},
+        follow_redirects=False,
+    )
+    assert add_response.status_code in {200, 302}
+
+    tomorrow = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
+    response = client.post(
+        '/checkout',
+        data={
+            'fulfillment_type': 'PICKUP',
+            'pickup_date': tomorrow,
+            'pickup_slot': '09:00 - 11:00',
+            'pickup_phone': '9999999999',
+            'payment_method': 'COD',
+            'occasion': 'Birthday',
+            'special_note': 'Pickup at the front counter',
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b'placed successfully' in response.data
+
+    with client.application.app_context():
+        order = Order.query.order_by(Order.id.desc()).first()
+        assert order is not None
+        assert order.fulfillment_type == 'PICKUP'
+        assert order.delivery_charge == 0
+        assert order.delivery_slot == '09:00 - 11:00'
+
+
+def test_preorder_product_blocks_insufficient_notice_pickup(client):
+    sign_in(client, 'customer@test.com', 'customer123')
+
+    with client.application.app_context():
+        product = Product(
+            name='Wedding Signature Cake',
+            base_price=999,
+            preorder_required=True,
+            minimum_notice_hours=48,
+            is_active=True,
+        )
+        db.session.add(product)
+        db.session.flush()
+        variant = ProductVariant(product_id=product.id, name='Standard', price=999, stock=5)
+        db.session.add(variant)
+        db.session.commit()
+        product_id = product.id
+        variant_id = variant.id
+
+    add_response = client.post(
+        '/cart/add',
+        data={'product_id': str(product_id), 'variant_id': str(variant_id), 'quantity': '1'},
+        follow_redirects=False,
+    )
+    assert add_response.status_code in {200, 302}
+
+    tomorrow = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
+    response = client.post(
+        '/checkout',
+        data={
+            'fulfillment_type': 'PICKUP',
+            'pickup_date': tomorrow,
+            'pickup_slot': '09:00 - 11:00',
+            'pickup_phone': '9999999999',
+            'payment_method': 'COD',
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b'requires at least 48 hours of preorder notice' in response.data
+
+
+def test_delivery_can_collect_cod_payment(delivery_client):
+    login_response = sign_in(delivery_client, 'delivery@bakery.com', 'delivery123')
+    assert login_response.status_code == 302
+
+    order_id = create_order(
+        delivery_client.application,
+        status='OUT_FOR_DELIVERY',
+        assign_delivery=True,
+    )
+    response = delivery_client.post(
+        f'/delivery/order/{order_id}/collect-payment',
+        data={'amount_received': '250', 'payment_mode': 'CASH'},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b'COD payment marked as collected.' in response.data
+
+    with delivery_client.application.app_context():
+        order = Order.query.get(order_id)
+        assert order is not None
+        assert order.payment_status == 'PAID'

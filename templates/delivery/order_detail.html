@@ -23,6 +23,7 @@
         </div>
         <p><strong>Customer:</strong> {{ order.customer.name }}</p>
         <p><strong>Phone:</strong> <a href="tel:{{ order.phone }}">{{ order.phone }}</a></p>
+        <p><strong>Order Type:</strong> {{ order.fulfillment_type.replace('_', ' ').title() if order.fulfillment_type else 'Delivery' }}</p>
         <p><strong>Address:</strong> {{ order.address_line1 }}{% if order.address_line2 %}, {{ order.address_line2 }}{% endif %}, {{ order.city }} — {{ order.pincode }}</p>
         <p><strong>Slot:</strong> {{ order.delivery_slot }} | <strong>Date:</strong> {{ order.delivery_date }}</p>
         {% if order.special_note %}<p><strong>Note:</strong> {{ order.special_note }}</p>{% endif %}
@@ -55,6 +56,29 @@
         </div>
       </div>
     </div>
+    {% if order.payment_method == 'COD' and order.payment_status != 'PAID' %}
+    <div class="card"><div class="card-header">💵 COD Collection</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('delivery.collect_payment', order_id=order.id) }}">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Amount Received</label>
+              <input class="form-control" type="number" step="0.01" name="amount_received" value="{{ order.total }}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Payment Mode</label>
+              <select class="form-control" name="payment_mode">
+                <option value="CASH">Cash</option>
+                <option value="UPI">UPI</option>
+                <option value="CARD">Card</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Mark Payment Collected</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div></div>
 {% endblock %}

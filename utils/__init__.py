@@ -5,7 +5,7 @@ from .addresses import (
     save_address_for_customer,
 )
 from .formatters import parse_coordinate, parse_decimal
-from .maps import address_query, map_embed_url, map_link_url
+from .maps import address_query, map_embed_url, map_link_url, reverse_geocode
 from .notifications import (
     check_and_send_inventory_alerts,
     notify,
@@ -43,6 +43,7 @@ __all__ = [
     "notify_order_status_change",
     "parse_coordinate",
     "parse_decimal",
+    "reverse_geocode",
     "save_address_for_customer",
     "send_email",
     "send_low_stock_alert_email",

@@ -124,6 +124,24 @@ def update_status(order_id):
     return redirect(url_for('delivery.order_detail', order_id=order.id))
 
 
+@delivery_bp.route('/order/<int:order_id>/collect-payment', methods=['POST'])
+@delivery_required
+def collect_payment(order_id):
+    _agent, _delivery, order = get_assigned_delivery_or_404(order_id)
+    try:
+        order = get_container().delivery_service.collect_cod_payment(
+            order_id,
+            request.form.get('amount_received'),
+            payment_mode=request.form.get('payment_mode', 'CASH'),
+        )
+    except ValidationError as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('delivery.order_detail', order_id=order_id))
+
+    flash('COD payment marked as collected.', 'success')
+    return redirect(url_for('delivery.order_detail', order_id=order.id))
+
+
 @delivery_bp.route('/history')
 @delivery_required
 def history():

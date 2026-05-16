@@ -468,13 +468,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const pricingState = {
     couponDiscount: 0,
     loyaltyDiscount: 0,
+    fulfillmentType: document.querySelector('input[name="fulfillment_type"]:checked')?.value || 'DELIVERY',
   };
 
   const renderCheckoutPricing = () => {
     if (!checkoutTotalEl) return;
 
     const baseTotal = parseFloat(checkoutTotalEl.dataset.baseTotal || 0);
-    const total = Math.max(0, baseTotal - pricingState.couponDiscount - pricingState.loyaltyDiscount);
+    const deliveryCharge = parseFloat(checkoutTotalEl.dataset.deliveryCharge || 0);
+    const effectiveBaseTotal = baseTotal - (pricingState.fulfillmentType === 'PICKUP' ? deliveryCharge : 0);
+    const total = Math.max(0, effectiveBaseTotal - pricingState.couponDiscount - pricingState.loyaltyDiscount);
 
     const couponRow = document.querySelector('#coupon-discount-row');
     const couponVal = document.querySelector('#coupon-discount-val');
@@ -488,6 +491,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loyaltyRow && loyaltyVal) {
       loyaltyRow.style.display = pricingState.loyaltyDiscount > 0 ? 'flex' : 'none';
       loyaltyVal.textContent = `−${formatCurrency(pricingState.loyaltyDiscount)}`;
+    }
+
+    const fulfillmentChargeLabel = document.querySelector('#checkout-fulfillment-charge-label');
+    const fulfillmentChargeValue = document.querySelector('#checkout-fulfillment-charge-value');
+    const fulfillmentChargeNote = document.querySelector('#checkout-fulfillment-charge-note');
+    if (fulfillmentChargeLabel && fulfillmentChargeValue && fulfillmentChargeNote) {
+      if (!fulfillmentChargeNote.dataset.deliveryNote) {
+        fulfillmentChargeNote.dataset.deliveryNote = fulfillmentChargeNote.textContent.trim();
+      }
+      if (pricingState.fulfillmentType === 'PICKUP') {
+        fulfillmentChargeLabel.textContent = 'Pickup';
+        fulfillmentChargeValue.innerHTML = '<span style="color:var(--sage)">FREE</span>';
+        fulfillmentChargeNote.textContent = 'Pickup orders do not include a delivery charge.';
+      } else {
+        fulfillmentChargeLabel.textContent = 'Delivery';
+        fulfillmentChargeValue.innerHTML = deliveryCharge > 0
+          ? formatCurrency(deliveryCharge)
+          : '<span style="color:var(--sage)">FREE</span>';
+        fulfillmentChargeNote.textContent = fulfillmentChargeNote.dataset.deliveryNote;
+      }
     }
 
     checkoutTotalEl.textContent = formatCurrency(total);
@@ -827,11 +850,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Delivery date min ───────────────────────────
   const deliveryDate = document.querySelector('#delivery_date');
+  const pickupDate = document.querySelector('#pickup_date');
   if (deliveryDate) {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     deliveryDate.min = tomorrow.toISOString().split('T')[0];
   }
+  if (pickupDate) {
+    pickupDate.min = new Date().toISOString().split('T')[0];
+  }
+
+  const initCheckoutFulfillment = () => {
+    const deliverySection = document.querySelector('#delivery-schedule-fields');
+    const pickupSection = document.querySelector('#pickup-schedule-fields');
+    const addressCard = document.querySelector('#checkout-address-card');
+    const deliverySlot = document.querySelector('#delivery_time_slot');
+    const pickupSlot = document.querySelector('#pickup_slot');
+    const customPickupTime = document.querySelector('#custom_pickup_time');
+    const pickupPhone = document.querySelector('#pickup_phone');
+
+    const syncFulfillmentState = () => {
+      const selectedValue = document.querySelector('input[name="fulfillment_type"]:checked')?.value || 'DELIVERY';
+      pricingState.fulfillmentType = selectedValue;
+      const isPickup = selectedValue === 'PICKUP';
+
+      if (deliverySection) deliverySection.classList.toggle('hidden', isPickup);
+      if (pickupSection) pickupSection.classList.toggle('hidden', !isPickup);
+      if (addressCard) addressCard.classList.toggle('hidden', isPickup);
+
+      if (deliveryDate) deliveryDate.required = !isPickup;
+      if (deliverySlot) deliverySlot.required = !isPickup;
+      if (pickupDate) pickupDate.required = isPickup;
+      if (pickupPhone) pickupPhone.required = isPickup;
+
+      if (isPickup) {
+        deliveryDate?.removeAttribute('aria-required');
+        deliverySlot?.removeAttribute('aria-required');
+      }
+
+      if (!isPickup) {
+        pickupSlot && (pickupSlot.value = pickupSlot.value);
+        customPickupTime && (customPickupTime.value = customPickupTime.value);
+      }
+
+      renderCheckoutPricing();
+    };
+
+    document.querySelectorAll('input[name="fulfillment_type"]').forEach((input) => {
+      input.addEventListener('change', syncFulfillmentState);
+    });
+    syncFulfillmentState();
+  };
+
+  initCheckoutFulfillment();
 
   // ─── Checkout Saved Addresses ───────────────────
   const addressCards = document.querySelectorAll('.saved-address-card');
@@ -884,6 +955,25 @@ document.addEventListener('DOMContentLoaded', () => {
       if (checkoutLocationStatus) {
         checkoutLocationStatus.textContent = message;
       }
+    };
+
+    const fillAddressFromReverseGeocode = (location) => {
+      if (!location) return;
+
+      suppressExactLocationReset = true;
+      if (addressInputs.addressLine1 && location.address_line1) {
+        addressInputs.addressLine1.value = location.address_line1;
+      }
+      if (addressInputs.addressLine2 && location.address_line2) {
+        addressInputs.addressLine2.value = location.address_line2;
+      }
+      if (addressInputs.city && location.city) {
+        addressInputs.city.value = location.city;
+      }
+      if (addressInputs.pincode && location.pincode) {
+        addressInputs.pincode.value = String(location.pincode).slice(0, 6);
+      }
+      suppressExactLocationReset = false;
     };
 
     const clearExactLocation = (message = 'Share your live location to place the map pin exactly on your address.') => {
@@ -1014,11 +1104,37 @@ document.addEventListener('DOMContentLoaded', () => {
       setLocationStatus('Requesting your current location...');
 
       navigator.geolocation.getCurrentPosition(
-        (position) => {
+        async (position) => {
           if (addressInputs.latitude) addressInputs.latitude.value = String(position.coords.latitude);
           if (addressInputs.longitude) addressInputs.longitude.value = String(position.coords.longitude);
-          checkoutUseLocationButton.disabled = false;
-          checkoutUseLocationButton.textContent = originalLabel;
+          setLocationStatus('Exact map pin captured. Looking up the address...');
+
+          try {
+            const params = new URLSearchParams({
+              lat: String(position.coords.latitude),
+              lng: String(position.coords.longitude),
+            });
+            const response = await fetch(`/api/location/reverse-geocode?${params.toString()}`, {
+              headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+              },
+              cache: 'no-store',
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.ok && data.ok) {
+              fillAddressFromReverseGeocode(data.location);
+              setLocationStatus(data.message || 'Exact location captured and address fields updated.');
+            } else {
+              setLocationStatus(data.message || 'Exact location captured. Please check the address fields manually.');
+            }
+          } catch (error) {
+            console.error('Reverse geocoding failed.', error);
+            setLocationStatus('Exact location captured. Please review the address fields before placing the order.');
+          } finally {
+            checkoutUseLocationButton.disabled = false;
+            checkoutUseLocationButton.textContent = originalLabel;
+          }
           updateCheckoutAddressMap();
         },
         (error) => {

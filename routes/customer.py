@@ -1,6 +1,8 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, current_app, abort, session
 from flask_login import login_required, current_user
 from app import csrf
+from bootstrap import get_container
+from exceptions import ValidationError
 from models import (db, Product, ProductVariant, Category, Cart, Wishlist,
                     Order, OrderItem, Payment, Refund, Coupon, Subscription,
                     Review, Message, Notification, AddressChange, ModificationRequest,
@@ -87,6 +89,20 @@ def split_preparation_steps(text):
             if step:
                 steps.append(step)
     return steps
+
+
+def validate_preorder_requirements(cart_items, scheduled_for):
+    for item in cart_items:
+        product = item.product
+        if not product or not getattr(product, 'preorder_required', False):
+            continue
+
+        minimum_notice_hours = max(1, int(getattr(product, 'minimum_notice_hours', 24) or 24))
+        hours_until_fulfillment = (scheduled_for - datetime.utcnow()).total_seconds() / 3600
+        if hours_until_fulfillment < minimum_notice_hours:
+            raise ValueError(
+                f"{product.name} requires at least {minimum_notice_hours} hours of preorder notice."
+            )
 
 
 def has_delivered_product_order(user_id, product_id):
@@ -665,10 +681,14 @@ def checkout():
     loyalty_rules = get_loyalty_config()
     total = subtotal - discount + delivery_charge
 
+    slot_service = get_container().slot_service
     time_slots = current_app.config['TIME_SLOTS']
+    pickup_available_slots = slot_service.get_available_slots(datetime.utcnow().date())
+    pickup_opening_time, pickup_closing_time = slot_service.business_hours_range()
     saved_addresses = get_saved_addresses_for_user(current_user.id)
     default_saved_address = next((addr for addr in saved_addresses if addr.is_default), saved_addresses[0] if saved_addresses else None)
     selected_address_id = default_saved_address.id if default_saved_address else None
+    fulfillment_type = 'DELIVERY'
     checkout_address = extract_address_payload({}, fallback_address=default_saved_address, default_phone=current_user.phone or '') if default_saved_address else {
         'label': 'Saved Address',
         'address_line1': '',
@@ -676,15 +696,21 @@ def checkout():
         'city': '',
         'pincode': '',
         'phone': current_user.phone or '',
+        'latitude': None,
+        'longitude': None,
     }
 
     if request.method == 'POST':
+        fulfillment_type = (request.form.get('fulfillment_type') or 'DELIVERY').strip().upper()
+        if fulfillment_type not in {'DELIVERY', 'PICKUP'}:
+            flash('Please choose whether this order is for delivery or pickup.', 'danger')
+            return redirect(url_for('customer.checkout'))
+
         coupon_code = request.form.get('coupon_code', '').strip().upper()
         coupon_discount = Decimal('0')
         loyalty_points_requested = request.form.get('loyalty_points', type=int) or 0
         loyalty_points_applied = 0
         loyalty_discount = Decimal('0')
-        delivery_date_raw = request.form.get('delivery_date', '').strip()
         selected_address_id = request.form.get('selected_address_id', type=int)
         selected_saved_address = get_selected_saved_address(current_user.id, selected_address_id)
         checkout_address = extract_address_payload(
@@ -692,26 +718,74 @@ def checkout():
             fallback_address=selected_saved_address,
             default_phone=current_user.phone or '',
         )
+        selected_time_slot = ''
+        scheduled_for = None
+        order_contact_phone = (current_user.phone or checkout_address.get('phone') or '').strip()
+        delivery_target_date = None
+        applied_delivery_charge = delivery_charge
+
+        if fulfillment_type == 'DELIVERY':
+            delivery_date_raw = request.form.get('delivery_date', '').strip()
+            try:
+                delivery_target_date = datetime.strptime(delivery_date_raw, '%Y-%m-%d').date()
+            except ValueError:
+                flash('Please select a valid delivery date.', 'danger')
+                return redirect(url_for('customer.checkout'))
+
+            try:
+                selected_time_slot = slot_service.validate_delivery_selection(
+                    delivery_target_date,
+                    request.form.get('time_slot', ''),
+                )
+            except ValidationError as exc:
+                flash(str(exc), 'danger')
+                return redirect(url_for('customer.checkout'))
+
+            address_errors = validate_address_payload(checkout_address)
+            if address_errors:
+                flash(address_errors[0], 'danger')
+                return redirect(url_for('customer.checkout'))
+
+            order_contact_phone = (checkout_address.get('phone') or current_user.phone or '').strip()
+            scheduled_for = slot_service.scheduled_datetime_for_selection(
+                delivery_target_date,
+                selected_slot=selected_time_slot,
+            )
+        else:
+            pickup_date_raw = request.form.get('pickup_date', '').strip()
+            custom_pickup_time = request.form.get('custom_pickup_time', '').strip()
+            pickup_phone = (request.form.get('pickup_phone') or current_user.phone or '').strip()
+            if not pickup_phone:
+                flash('Please provide a phone number for pickup updates.', 'danger')
+                return redirect(url_for('customer.checkout'))
+            try:
+                delivery_target_date = datetime.strptime(pickup_date_raw, '%Y-%m-%d').date()
+            except ValueError:
+                flash('Please choose a valid pickup date.', 'danger')
+                return redirect(url_for('customer.checkout'))
+
+            try:
+                selected_time_slot = slot_service.validate_pickup_selection(
+                    delivery_target_date,
+                    selected_slot=request.form.get('pickup_slot', ''),
+                    custom_time=custom_pickup_time,
+                )
+                scheduled_for = slot_service.scheduled_datetime_for_selection(
+                    delivery_target_date,
+                    selected_slot=request.form.get('pickup_slot', ''),
+                    custom_time=custom_pickup_time,
+                )
+            except ValidationError as exc:
+                flash(str(exc), 'danger')
+                return redirect(url_for('customer.checkout'))
+
+            order_contact_phone = pickup_phone
+            applied_delivery_charge = Decimal('0')
 
         try:
-            delivery_date = datetime.strptime(delivery_date_raw, '%Y-%m-%d').date()
-        except ValueError:
-            flash('Please select a valid delivery date.', 'danger')
-            return redirect(url_for('customer.checkout'))
-
-        earliest_delivery_date = datetime.utcnow().date() + timedelta(days=1)
-        if delivery_date < earliest_delivery_date:
-            flash('Please choose a delivery date from tomorrow onward.', 'danger')
-            return redirect(url_for('customer.checkout'))
-
-        selected_time_slot = request.form.get('time_slot', '').strip()
-        if selected_time_slot not in time_slots:
-            flash('Please choose a valid delivery time slot.', 'danger')
-            return redirect(url_for('customer.checkout'))
-
-        address_errors = validate_address_payload(checkout_address)
-        if address_errors:
-            flash(address_errors[0], 'danger')
+            validate_preorder_requirements(cart_items, scheduled_for)
+        except ValueError as exc:
+            flash(str(exc), 'danger')
             return redirect(url_for('customer.checkout'))
 
         if coupon_code:
@@ -733,7 +807,7 @@ def checkout():
             return redirect(url_for('customer.checkout'))
 
         total_discount = discount + coupon_discount + loyalty_discount
-        final_total = subtotal - total_discount + delivery_charge
+        final_total = subtotal - total_discount + applied_delivery_charge
 
         # Lock rows to prevent race conditions during checkout
         for item in cart_items:
@@ -760,17 +834,27 @@ def checkout():
         order.subtotal        = subtotal
         order.discount        = discount + coupon_discount
         order.loyalty_discount = loyalty_discount
-        order.delivery_charge = delivery_charge
+        order.delivery_charge = applied_delivery_charge
         order.total           = final_total
-        order.address_line1   = checkout_address['address_line1']
-        order.address_line2   = checkout_address['address_line2']
-        order.city            = checkout_address['city']
-        order.pincode         = checkout_address['pincode']
-        order.phone           = checkout_address['phone'] or current_user.phone
-        order.delivery_latitude = checkout_address.get('latitude')
-        order.delivery_longitude = checkout_address.get('longitude')
+        order.fulfillment_type = fulfillment_type
+        if fulfillment_type == 'PICKUP':
+            order.address_line1 = current_app.config['STORE_DETAILS'].get('address_line1', '')
+            order.address_line2 = current_app.config['STORE_DETAILS'].get('address_line2', '')
+            order.city = current_app.config['STORE_DETAILS'].get('city', '')
+            order.pincode = current_app.config['STORE_DETAILS'].get('pincode', '')
+            order.phone = order_contact_phone
+            order.delivery_latitude = None
+            order.delivery_longitude = None
+        else:
+            order.address_line1   = checkout_address['address_line1']
+            order.address_line2   = checkout_address['address_line2']
+            order.city            = checkout_address['city']
+            order.pincode         = checkout_address['pincode']
+            order.phone           = order_contact_phone
+            order.delivery_latitude = checkout_address.get('latitude')
+            order.delivery_longitude = checkout_address.get('longitude')
         order.delivery_slot   = selected_time_slot
-        order.delivery_date   = delivery_date
+        order.delivery_date   = delivery_target_date
         order.special_note    = request.form.get('special_note')
         order.occasion        = request.form.get('occasion')
         order.payment_method  = request.form.get('payment_method', 'COD')
@@ -847,15 +931,21 @@ def checkout():
                            cart_items=cart_items, subtotal=subtotal,
                            discount=discount, delivery_charge=delivery_charge,
                            total=total, time_slots=time_slots,
+                           pickup_available_slots=pickup_available_slots,
+                           pickup_opening_time=pickup_opening_time.strftime('%H:%M'),
+                           pickup_closing_time=pickup_closing_time.strftime('%H:%M'),
+                           pickup_buffer_minutes=current_app.config.get('PICKUP_BUFFER_MINUTES', 20),
                            has_subscription=bool(sub),
                            saved_addresses=saved_addresses,
                            selected_address_id=selected_address_id,
+                           fulfillment_type=fulfillment_type,
                            checkout_address=checkout_address,
                            loyalty_balance=loyalty_balance,
                            loyalty_preview=loyalty_preview,
                            loyalty_rules=loyalty_rules,
                            delivery_threshold=delivery_threshold,
                            delivery_fee=delivery_fee,
+                           earliest_pickup_date=datetime.utcnow().date().isoformat(),
                            earliest_delivery_date=(datetime.utcnow().date() + timedelta(days=1)).isoformat())
 
 

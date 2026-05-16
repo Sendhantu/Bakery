@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 from bootstrap import get_container
 from models import Product, ProductVariant, Coupon, Notification, calculate_loyalty_redemption, get_loyalty_config
 from decimal import Decimal, InvalidOperation
+from utils import reverse_geocode
 
 api_bp = Blueprint('api', __name__)
 
@@ -45,6 +46,31 @@ def product_variants(product_id):
         'id': v.id, 'name': v.name,
         'price': float(v.price), 'stock': v.stock
     } for v in variants])
+
+
+@api_bp.route('/location/reverse-geocode')
+@login_required
+def reverse_geocode_location():
+    latitude = request.args.get('lat')
+    longitude = request.args.get('lng')
+
+    try:
+        payload = reverse_geocode(latitude, longitude)
+    except ValueError as exc:
+        return jsonify({'ok': False, 'message': str(exc)}), 400
+    except Exception:
+        return jsonify({
+            'ok': False,
+            'message': 'We found the map pin, but could not auto-fill the address right now. Please check the address fields manually.',
+        }), 502
+
+    return jsonify(
+        {
+            'ok': True,
+            'location': payload,
+            'message': 'Exact location captured and address fields updated.',
+        }
+    )
 
 
 @api_bp.route('/search/suggestions')

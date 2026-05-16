@@ -30,6 +30,8 @@ class Product(db.Model):
     is_eggless    = db.Column(db.Boolean, default=False)
     is_active     = db.Column(db.Boolean, default=True)
     is_featured   = db.Column(db.Boolean, default=False)
+    preorder_required = db.Column(db.Boolean, default=False)
+    minimum_notice_hours = db.Column(db.Integer, default=24)
     occasion_tags = db.Column(db.String(300))
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
 

@@ -15,7 +15,7 @@
 <div class="card">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Featured</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Preorder</th><th>Featured</th><th>Actions</th></tr></thead>
       <tbody>
         {% for p in products %}
         <tr>
@@ -36,6 +36,13 @@
             </span>
           </td>
           <td><span class="badge {% if p.is_active %}badge-green{% else %}badge-red{% endif %}">{% if p.is_active %}Active{% else %}Inactive{% endif %}</span></td>
+          <td>
+            {% if p.preorder_required %}
+            <span class="badge badge-orange">{{ p.minimum_notice_hours }}h notice</span>
+            {% else %}
+            <span class="text-muted">No</span>
+            {% endif %}
+          </td>
           <td>{% if p.is_featured %}⭐{% else %}—{% endif %}</td>
           <td>
             <div class="flex gap-1">
@@ -52,7 +59,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">No products found for this search.</td></tr>
+        <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted)">No products found for this search.</td></tr>
         {% endfor %}
       </tbody>
     </table>

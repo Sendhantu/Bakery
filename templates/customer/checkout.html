@@ -12,8 +12,27 @@
     <!-- LEFT: Address & Slot -->
     <div style="display:flex;flex-direction:column;gap:1.5rem">
 
-      <!-- Delivery Address -->
       <div class="card">
+        <div class="card-header">🛍 Order Type</div>
+        <div class="card-body">
+          <div class="flex gap-2 flex-wrap" id="checkout-fulfillment-options">
+            <label class="payment-option" data-payment-option style="max-width:none">
+              <input type="radio" name="fulfillment_type" value="DELIVERY" {% if fulfillment_type != 'PICKUP' %}checked{% endif %}>
+              <span style="font-size:1.25rem">🚚</span>
+              <span style="font-weight:500">Delivery</span>
+            </label>
+            <label class="payment-option" data-payment-option style="max-width:none">
+              <input type="radio" name="fulfillment_type" value="PICKUP" {% if fulfillment_type == 'PICKUP' %}checked{% endif %}>
+              <span style="font-size:1.25rem">🏪</span>
+              <span style="font-weight:500">Pickup from Store</span>
+            </label>
+          </div>
+          <p class="text-sm text-muted mt-1">Delivery keeps the address form active. Pickup removes delivery charges and lets the customer choose a pickup slot or exact pickup time.</p>
+        </div>
+      </div>
+
+      <!-- Delivery Address -->
+      <div class="card" id="checkout-address-card">
         <div class="card-header">📍 Delivery Address</div>
         <div class="card-body">
           {% if saved_addresses %}
@@ -137,22 +156,55 @@
 
       <!-- Delivery Slot -->
       <div class="card">
-        <div class="card-header">⏰ Delivery Schedule</div>
+        <div class="card-header">⏰ Schedule</div>
         <div class="card-body">
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Delivery Date *</label>
-              <input class="form-control" type="date" name="delivery_date" id="delivery_date" required min="{{ earliest_delivery_date }}">
-              <p class="text-sm text-muted mt-1">Earliest delivery is tomorrow. Available slots are confirmed at checkout.</p>
+          <div id="delivery-schedule-fields">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Delivery Date *</label>
+                <input class="form-control" type="date" name="delivery_date" id="delivery_date" required min="{{ earliest_delivery_date }}">
+                <p class="text-sm text-muted mt-1">Earliest delivery is tomorrow. Available slots are confirmed at checkout.</p>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Time Slot *</label>
+                <select class="form-control" name="time_slot" required id="delivery_time_slot">
+                  <option value="">— Select Slot —</option>
+                  {% for slot in time_slots %}
+                  <option value="{{ slot }}">{{ slot }}</option>
+                  {% endfor %}
+                </select>
+              </div>
             </div>
-            <div class="form-group">
-              <label class="form-label">Time Slot *</label>
-              <select class="form-control" name="time_slot" required>
-                <option value="">— Select Slot —</option>
-                {% for slot in time_slots %}
-                <option value="{{ slot }}">{{ slot }}</option>
-                {% endfor %}
-              </select>
+          </div>
+          <div id="pickup-schedule-fields" class="hidden">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Pickup Date *</label>
+                <input class="form-control" type="date" name="pickup_date" id="pickup_date" min="{{ earliest_pickup_date }}">
+                <p class="text-sm text-muted mt-1">Same-day pickup is allowed if the chosen slot or time is at least {{ pickup_buffer_minutes }} minutes ahead.</p>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Pickup Slot</label>
+                <select class="form-control" name="pickup_slot" id="pickup_slot">
+                  <option value="">— Select Pickup Slot —</option>
+                  {% for slot in time_slots %}
+                  <option value="{{ slot }}">{{ slot }}</option>
+                  {% endfor %}
+                </select>
+                <p class="text-sm text-muted mt-1">For today, only future slots are valid.</p>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Custom Pickup Time</label>
+                <input class="form-control" type="time" name="custom_pickup_time" id="custom_pickup_time" min="{{ pickup_opening_time }}" max="{{ pickup_closing_time }}">
+                <p class="text-sm text-muted mt-1">Use this when the customer wants an exact time like 10:30 AM.</p>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Pickup Contact Phone *</label>
+                <input class="form-control" name="pickup_phone" id="pickup_phone" value="{{ current_user.phone or checkout_address.phone or '' }}" placeholder="+91 9999999999">
+                <p class="text-sm text-muted mt-1">Store hours: {{ pickup_opening_time }} to {{ pickup_closing_time }}.</p>
+              </div>
             </div>
           </div>
           <div class="form-group">
@@ -251,10 +303,10 @@
             <span id="loyalty-discount-val">−₹0</span>
           </div>
           <div class="flex justify-between mb-2">
-            <span class="text-muted">Delivery</span>
-            <span>{% if delivery_charge == 0 %}<span style="color:var(--sage)">FREE</span>{% else %}₹{{ delivery_charge|int }}{% endif %}</span>
+            <span class="text-muted" id="checkout-fulfillment-charge-label">Delivery</span>
+            <span id="checkout-fulfillment-charge-value">{% if delivery_charge == 0 %}<span style="color:var(--sage)">FREE</span>{% else %}₹{{ delivery_charge|int }}{% endif %}</span>
           </div>
-          <p class="text-sm text-muted" style="margin-bottom:0.75rem">
+          <p class="text-sm text-muted" style="margin-bottom:0.75rem" id="checkout-fulfillment-charge-note">
             {% if delivery_charge == 0 %}
             Free delivery unlocked on this order.
             {% else %}
@@ -264,7 +316,7 @@
           <div class="divider"></div>
           <div class="flex justify-between mb-3">
             <span style="font-weight:600;font-size:1rem">Total</span>
-            <span id="order-total" data-base-total="{{ total }}" style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--caramel)">
+            <span id="order-total" data-base-total="{{ total }}" data-delivery-charge="{{ delivery_charge }}" style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--caramel)">
               ₹{{ total|int }}
             </span>
           </div>
@@ -289,7 +341,7 @@
           <span>{{ store_details.address_line1 }}, {{ store_details.address_line2 }}</span>
           <span>{{ store_details.city }} - {{ store_details.pincode }}</span>
           <span>{{ store_details.phone }}</span>
-          <span>If you want pickup instead of delivery, add that note in Special Instructions.</span>
+          <span>Pickup orders can use a future slot or an exact custom pickup time after the preparation buffer.</span>
         </div>
         {% set map_query = address_query(store_details.name, store_details.address_line1, store_details.address_line2, store_details.city, store_details.pincode) %}
         {% set map_title = store_details.name ~ ' pickup map' %}

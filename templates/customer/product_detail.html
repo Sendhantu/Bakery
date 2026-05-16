@@ -36,6 +36,9 @@
     <div>
       <div class="flex gap-2 items-center mb-2">
         <span class="badge badge-brown">{{ product.category.name if product.category else '—' }}</span>
+        {% if product.preorder_required %}
+        <span class="badge badge-orange">Requires {{ product.minimum_notice_hours }}h preorder</span>
+        {% endif %}
         {% if product.occasion_tags %}
         {% for tag in product.occasion_tags.split(',') %}
         <span class="badge badge-purple">{{ tag.strip()|title }}</span>
@@ -145,7 +148,7 @@
         <div class="flex gap-3 flex-wrap">
           <span class="text-sm"><i class="fa-solid fa-truck" style="color:var(--caramel)"></i> Free delivery above ₹500</span>
           <span class="text-sm"><i class="fa-solid fa-phone" style="color:var(--caramel)"></i> <a href="tel:{{ store_details.phone_tel }}">Call to customise</a></span>
-          <span class="text-sm"><i class="fa-solid fa-clock" style="color:var(--caramel)"></i> Order 24hrs in advance</span>
+          <span class="text-sm"><i class="fa-solid fa-clock" style="color:var(--caramel)"></i> {% if product.preorder_required %}Order {{ product.minimum_notice_hours }}hrs in advance{% else %}Freshly prepared to order{% endif %}</span>
         </div>
       </div>
     </div>

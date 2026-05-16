@@ -44,6 +44,7 @@ class Order(db.Model):
     city           = db.Column(db.String(100))
     pincode        = db.Column(db.String(10))
     phone          = db.Column(db.String(20))
+    fulfillment_type = db.Column(db.String(20), default='DELIVERY')
     delivery_latitude = db.Column(db.Float)
     delivery_longitude = db.Column(db.Float)
 
@@ -84,6 +85,8 @@ class Order(db.Model):
         return self.status in ['PLACED'] and not self.is_locked
 
     def can_change_address(self):
+        if (self.fulfillment_type or 'DELIVERY').upper() == 'PICKUP':
+            return False
         return self.status not in ['OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'] \
                and self.address_changes < 2
 

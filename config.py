@@ -85,6 +85,7 @@ class Config:
         "17:00 - 19:00",
         "19:00 - 21:00",
     ]
+    PICKUP_BUFFER_MINUTES = 20
     STORE_DETAILS = {
         "name": "SweetCrumbs Studio Bakery",
         "address_line1": "12 Baker Street",

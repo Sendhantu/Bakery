@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="page-wrap">
-<div class="container">
+<div class="container shop-page">
 
   <!-- Header & Search -->
   <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
@@ -133,6 +133,9 @@
             {% if product.is_eggless %}
             <span class="badge eggless-badge badge-green" style="top:auto;bottom:10px;right:10px">🌿</span>
             {% endif %}
+            {% if product.preorder_required %}
+            <span class="badge badge-orange" style="position:absolute;left:10px;bottom:10px">Preorder {{ product.minimum_notice_hours }}h</span>
+            {% endif %}
           </div>
           <div class="product-card-body">
             <div class="product-card-meta-row">
@@ -155,6 +158,9 @@
             <p class="product-card-text">
               {{ product.description[:88] }}{% if product.description|length > 88 %}…{% endif %}
             </p>
+            {% if product.preorder_required %}
+            <p class="text-sm text-muted" style="margin-bottom:0.8rem">Requires {{ product.minimum_notice_hours }} hours notice.</p>
+            {% endif %}
             <div class="product-card-footer">
               <span class="product-price">₹{{ product.base_price|int }}</span>
               {% if product.stock_status != 'out_of_stock' %}

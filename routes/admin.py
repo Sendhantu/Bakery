@@ -40,6 +40,7 @@ from models import (
     ProductionBatch,
     PaymentLink,
     LoyaltyLedger,
+    get_loyalty_config,
     can_transition_order_status,
     get_allowed_order_statuses,
 )
@@ -393,10 +394,15 @@ def dashboard():
 @admin_bp.route("/products")
 @admin_required
 def products():
-    products = Product.query.order_by(
+    search = (request.args.get("q") or "").strip()
+    get_container().inventory_service.backfill_missing_product_variants()
+    query = Product.query
+    if search:
+        query = query.filter(Product.name.ilike(f"%{search}%"))
+    products = query.order_by(
         Product.is_active.desc(), Product.created_at.desc()
     ).all()
-    return render_template("admin/products.html", products=products)
+    return render_template("admin/products.html", products=products, search=search)
 
 
 @admin_bp.route("/products/add", methods=["GET", "POST"])
@@ -416,22 +422,32 @@ def add_product():
             category_id=request.form.get("category_id", type=int),
             is_eggless=bool(request.form.get("is_eggless")),
             is_featured=bool(request.form.get("is_featured")),
+            preorder_required=bool(request.form.get("preorder_required")),
+            minimum_notice_hours=max(1, request.form.get("minimum_notice_hours", type=int) or 24),
             occasion_tags=request.form.get("occasion_tags", ""),
         )
         apply_product_image(p)
         db.session.add(p)
         db.session.flush()
-        for vn, vp, vs in zip(
-            request.form.getlist("variant_name[]"),
-            request.form.getlist("variant_price[]"),
-            request.form.getlist("variant_stock[]"),
-        ):
-            if vn and vp:
-                db.session.add(
-                    ProductVariant(
-                        product_id=p.id, name=vn, price=float(vp), stock=int(vs or 0)
-                    )
-                )
+        variant_rows = [
+            {"id": None, "name": vn, "price": vp, "stock": vs}
+            for vn, vp, vs in zip(
+                request.form.getlist("variant_name[]"),
+                request.form.getlist("variant_price[]"),
+                request.form.getlist("variant_stock[]"),
+            )
+        ]
+        try:
+            get_container().inventory_service.sync_product_variants(p, variant_rows)
+        except ValidationError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return render_template(
+                "admin/product_form.html",
+                product=None,
+                categories=categories,
+                raw_materials=raw_materials,
+            )
         sync_product_materials(p)
         db.session.commit()
         flash("Product added!", "success")
@@ -462,32 +478,30 @@ def edit_product(product_id):
         p.is_eggless = bool(request.form.get("is_eggless"))
         p.is_featured = bool(request.form.get("is_featured"))
         p.is_active = bool(request.form.get("is_active"))
+        p.preorder_required = bool(request.form.get("preorder_required"))
+        p.minimum_notice_hours = max(1, request.form.get("minimum_notice_hours", type=int) or 24)
         p.occasion_tags = request.form.get("occasion_tags", "")
         apply_product_image(p)
-
-        vid_list = request.form.getlist("variant_id[]")
-        vname_list = request.form.getlist("variant_name[]")
-        vprice_list = request.form.getlist("variant_price[]")
-        vstock_list = request.form.getlist("variant_stock[]")
-        submitted_variant_ids = {int(v) for v in vid_list if v}
-
-        for vid, vn, vp, vs in zip(vid_list, vname_list, vprice_list, vstock_list):
-            if vid:
-                v = ProductVariant.query.get(int(vid))
-                if v:
-                    v.name = vn
-                    v.price = float(vp)
-                    v.stock = int(vs or 0)
-            elif vn and vp:
-                db.session.add(
-                    ProductVariant(
-                        product_id=p.id, name=vn, price=float(vp), stock=int(vs or 0)
-                    )
-                )
-
-        for ev in p.variants.all():
-            if ev.id not in submitted_variant_ids:
-                db.session.delete(ev)
+        variant_rows = [
+            {"id": vid, "name": vn, "price": vp, "stock": vs}
+            for vid, vn, vp, vs in zip(
+                request.form.getlist("variant_id[]"),
+                request.form.getlist("variant_name[]"),
+                request.form.getlist("variant_price[]"),
+                request.form.getlist("variant_stock[]"),
+            )
+        ]
+        try:
+            get_container().inventory_service.sync_product_variants(p, variant_rows)
+        except ValidationError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return render_template(
+                "admin/product_form.html",
+                product=p,
+                categories=categories,
+                raw_materials=raw_materials,
+            )
 
         sync_product_materials(p)
         db.session.commit()
@@ -802,6 +816,7 @@ def admin_send_message(receiver_id):
 @admin_bp.route("/inventory")
 @admin_required
 def inventory():
+    get_container().inventory_service.backfill_missing_product_variants()
     variants = (
         ProductVariant.query.join(Product)
         .order_by(Product.is_active.desc(), ProductVariant.stock.asc(), Product.name)
@@ -1187,8 +1202,14 @@ def toggle_raw_material_status(material_id):
 @admin_bp.route("/coupons")
 @admin_required
 def coupons():
-    coupons = Coupon.query.order_by(Coupon.id.desc()).all()
-    return render_template("admin/coupons.html", coupons=coupons)
+    search = (request.args.get("q") or "").strip()
+    query = Coupon.query
+    if search:
+        query = query.filter(Coupon.code.ilike(f"%{search}%"))
+    coupons = query.order_by(Coupon.id.desc()).all()
+    for coupon in coupons:
+        coupon.is_currently_valid = coupon.is_valid()
+    return render_template("admin/coupons.html", coupons=coupons, search=search)
 
 
 @admin_bp.route("/coupons/add", methods=["POST"])
@@ -1231,6 +1252,20 @@ def add_coupon():
     db.session.commit()
     flash("Coupon created!", "success")
     return redirect(url_for("admin.coupons"))
+
+
+@admin_bp.route("/coupons/<int:coupon_id>/toggle", methods=["POST"])
+@admin_required
+def toggle_coupon(coupon_id):
+    coupon = Coupon.query.get_or_404(coupon_id)
+    coupon.is_active = not coupon.is_active
+    db.session.commit()
+    flash(
+        f"Coupon {'enabled' if coupon.is_active else 'paused'}.",
+        "success" if coupon.is_active else "info",
+    )
+    search = (request.args.get("q") or "").strip()
+    return redirect(url_for("admin.coupons", q=search) if search else url_for("admin.coupons"))
 
 
 # ── DELIVERY AGENTS ──────────────────────────────────────────
@@ -1566,6 +1601,7 @@ def loyalty():
         top_users=top_users,
         total_issued=int(total_issued),
         total_redeemed=int(total_redeemed),
+        loyalty_config=get_loyalty_config(),
     )
 
 

@@ -7,7 +7,7 @@ from flask import Flask, request, send_from_directory, url_for, jsonify, current
 from flask_login import LoginManager
 from flask_mail import Mail
 from flask_wtf import CSRFProtect
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from api.v1 import api_v1_bp
@@ -372,7 +372,7 @@ def register_core_routes(app):
 def register_context_processors(app):
     @app.context_processor
     def inject_globals():
-        from models import Category, Notification
+        from models import Category, Notification, get_loyalty_config
         from flask_login import current_user
 
         current_portal_role = app.config.get("PORTAL_ROLE", "customer")
@@ -427,6 +427,7 @@ def register_context_processors(app):
             portal_demo_credentials=DEMO_PORTAL_CREDENTIALS,
             show_demo_accounts=app.config.get("SHOW_DEMO_ACCOUNTS", False),
             feature_flags=app.config.get("FEATURE_FLAGS", {}),
+            loyalty_config=get_loyalty_config(),
             auth_admin_2fa_provision={
                 "enabled": app.config.get("AUTH_ADMIN_2FA_PROVISION_ENABLED", False),
                 "providers": app.config.get("AUTH_ADMIN_2FA_PROVIDERS", []),
@@ -436,6 +437,45 @@ def register_context_processors(app):
             map_link_url=map_link_url,
             map_embed_url=map_embed_url,
         )
+
+
+def apply_schema_compatibility_updates(app):
+    if not app.config.get("AUTO_INIT_DB"):
+        return
+
+    with app.app_context():
+        compatibility_updates = {
+            "products": [
+                ("preorder_required", "ALTER TABLE products ADD COLUMN preorder_required BOOLEAN DEFAULT 0"),
+                ("minimum_notice_hours", "ALTER TABLE products ADD COLUMN minimum_notice_hours INTEGER DEFAULT 24"),
+            ],
+            "orders": [
+                ("fulfillment_type", "ALTER TABLE orders ADD COLUMN fulfillment_type VARCHAR(20) DEFAULT 'DELIVERY'"),
+            ],
+        }
+
+        inspector = inspect(db.engine)
+        for table_name, operations in compatibility_updates.items():
+            existing_columns = {
+                column["name"] for column in inspector.get_columns(table_name)
+            }
+            for column_name, ddl in operations:
+                if column_name in existing_columns:
+                    continue
+                db.session.execute(text(ddl))
+                db.session.commit()
+                existing_columns.add(column_name)
+
+        db.session.execute(
+            text("UPDATE products SET preorder_required = COALESCE(preorder_required, 0)")
+        )
+        db.session.execute(
+            text("UPDATE products SET minimum_notice_hours = COALESCE(minimum_notice_hours, 24)")
+        )
+        db.session.execute(
+            text("UPDATE orders SET fulfillment_type = COALESCE(fulfillment_type, 'DELIVERY')")
+        )
+        db.session.commit()
 
 
 def create_app(config_name="default", portal_role=None):
@@ -454,6 +494,7 @@ def create_app(config_name="default", portal_role=None):
     if app.config.get("AUTO_INIT_DB"):
         with app.app_context():
             db.create_all()
+            apply_schema_compatibility_updates(app)
             seed_data(app)
     print_development_startup_banner(app)
 

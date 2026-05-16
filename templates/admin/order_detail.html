@@ -33,11 +33,11 @@
 
     <!-- Address -->
     <div class="card">
-      <div class="card-header">📍 Delivery Address</div>
+      <div class="card-header">{% if order.fulfillment_type == 'PICKUP' %}🏪 Pickup Details{% else %}📍 Delivery Address{% endif %}</div>
       <div class="card-body">
         <p>{{ order.address_line1 }}{% if order.address_line2 %}, {{ order.address_line2 }}{% endif %}</p>
         <p>{{ order.city }} — {{ order.pincode }}</p>
-        <p class="text-muted">📞 {{ order.phone }} · 🕐 {{ order.delivery_slot }} · 📅 {{ order.delivery_date }}</p>
+        <p class="text-muted">📞 {{ order.phone }} · {{ order.fulfillment_type.replace('_', ' ').title() if order.fulfillment_type else 'Delivery' }} · 🕐 {{ order.delivery_slot }} · 📅 {{ order.delivery_date }}</p>
         {% if order.special_note %}<p class="text-sm text-muted mt-1">💬 {{ order.special_note }}</p>{% endif %}
         {% set map_query = address_query(order.address_line1, order.address_line2, order.city, order.pincode) %}
         {% set latitude = order.delivery_latitude %}
@@ -100,7 +100,7 @@
     </div>
 
     <!-- Assign Delivery -->
-    {% if agents %}
+    {% if agents and order.fulfillment_type != 'PICKUP' %}
     <div class="card">
       <div class="card-header">🚚 Assign Delivery</div>
       <div class="card-body">
@@ -134,6 +134,9 @@
         <div class="mt-2 flex gap-1 flex-wrap">
           <span class="badge {% if order.payment_status=='PAID' %}badge-green{% else %}badge-orange{% endif %}">{{ order.payment_status }}</span>
           <span class="badge badge-brown">{{ order.payment_method }}</span>
+          {% if order.payment and order.payment.method and order.payment_method == 'COD' and order.payment_status == 'PAID' %}
+          <span class="badge badge-blue">{{ order.payment.method.replace('COD_', 'Collected via ') }}</span>
+          {% endif %}
         </div>
         {% if payment_link %}
         <a href="{{ url_for('customer.payment_link_page', token=payment_link.token) }}" class="btn btn-outline btn-block mt-3">Open Payment Page</a>

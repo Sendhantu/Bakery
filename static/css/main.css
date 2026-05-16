@@ -723,10 +723,10 @@ h1, h2, h3, h4 { font-family: var(--font-display); color: var(--brown); }
 .hero {
   background: linear-gradient(135deg, var(--brown) 0%, #3A2418 60%, var(--charcoal) 100%);
   color: var(--cream);
-  padding: 6rem 0;
+  padding: 4.5rem 0 4rem;
   position: relative;
   overflow: hidden;
-  min-height: calc(100vh - 70px);
+  min-height: calc(100vh - 88px);
   display: flex;
   align-items: center;
 }
@@ -777,6 +777,10 @@ h1, h2, h3, h4 { font-family: var(--font-display); color: var(--brown); }
   border-radius: 100px;
   font-size: 0.85rem;
   color: var(--cream);
+}
+
+.shop-page {
+  padding-top: 0.35rem;
 }
 
 /* ─── HOME PAGE SECTIONS ─────────────────────────── */
@@ -2274,7 +2278,7 @@ tbody tr:last-child td { border-bottom: none; }
   .hamburger { display: flex; }
   .hero {
     min-height: auto;
-    padding: 2.75rem 0 3rem;
+    padding: 2.2rem 0 2.6rem;
   }
   .hero-title { font-size: 2.2rem; }
   .hero-subtitle,

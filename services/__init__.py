@@ -1,4 +1,5 @@
 from .auth_service import AuthService
+from .delivery_service import DeliveryService
 from .inventory_service import InventoryService
 from .order_service import OrderService
 from .payment_service import PaymentService
@@ -19,12 +20,15 @@ from .query_helpers import (
     page_args,
     paginate_query,
 )
+from .slot_service import SlotService
 
 __all__ = [
     "AuthService",
+    "DeliveryService",
     "InventoryService",
     "OrderService",
     "PaymentService",
+    "SlotService",
     "build_category_revenue_rows",
     "enrich_orders",
     "enrich_products",
