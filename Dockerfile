@@ -6,6 +6,12 @@ ENV FLASK_ENV=production
 
 WORKDIR /app
 
+# Install build dependencies needed for gevent
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt /app/
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
