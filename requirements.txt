@@ -12,5 +12,4 @@ gunicorn
 eventlet
 sqlalchemy
 Authlib
-requestsgevent
 gevent
