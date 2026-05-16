@@ -298,7 +298,7 @@ def setup_extensions(app):
     csrf.init_app(app)
     socketio.init_app(
         app,
-        async_mode="threading",
+        async_mode="gevent" if os.environ.get("FLASK_ENV") == "production" else "threading",
         cors_allowed_origins=build_socketio_origins(app),
         message_queue=app.config.get("SOCKETIO_MESSAGE_QUEUE"),
     )
@@ -798,23 +798,9 @@ def seed_data(app):
         db.session.commit()
         print("✅ Seed data inserted successfully.")
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Entry point — works for both local dev and Render production
-#
-# On Render:   gunicorn reads `app` directly → production config
-# Locally:     python app.py → reads FLASK_ENV, defaults to development
-#              which runs 3 portals on ports 5000 / 5001 / 5002
-# ─────────────────────────────────────────────────────────────────────────────
-_config_name = os.environ.get("FLASK_ENV", "development").strip().lower()
-if _config_name not in ("production", "development", "testing"):
-    _config_name = "development"
-
-app = create_app(_config_name)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Local development only — run 3 portals on separate ports
-# Production uses wsgi.py via gunicorn
+# Local development only — python app.py starts 3 portals on separate ports
+# Production uses wsgi.py via gunicorn (Render)
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import threading
@@ -845,7 +831,7 @@ if __name__ == "__main__":
     customer_thread.join()
     admin_thread.join()
     delivery_thread.join()
-    
+
 #cd /Users/sendhanumapathy/Downloads/bakery/customer_app && python app.py
 #cd /Users/sendhanumapathy/Downloads/bakery/admin_app && python app.py
 #cd /Users/sendhanumapathy/Downloads/bakery/delivery_app && python app.py
