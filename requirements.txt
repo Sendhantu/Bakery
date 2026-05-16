@@ -13,3 +13,4 @@ eventlet
 sqlalchemy
 Authlib
 gevent
+celery
