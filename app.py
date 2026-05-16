@@ -812,6 +812,10 @@ if _config_name not in ("production", "development", "testing"):
 
 app = create_app(_config_name)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Local development only — run 3 portals on separate ports
+# Production uses wsgi.py via gunicorn
+# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import threading
 
