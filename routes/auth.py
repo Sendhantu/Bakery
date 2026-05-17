@@ -109,7 +109,7 @@ def is_user_locked_out(user):
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
-@limiter.limit("5 per minute")
+@limiter.limit("10 per minute", methods=["POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(role_home(current_user))
@@ -220,7 +220,7 @@ def authorize_google():
 
 
 @auth_bp.route("/register", methods=["GET", "POST"])
-@limiter.limit("5 per minute")
+@limiter.limit("10 per minute", methods=["POST"])
 def register():
     if current_user.is_authenticated:
         return redirect(role_home(current_user))

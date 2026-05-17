@@ -37,9 +37,13 @@ DATABASE_URL=mysql+pymysql://root:password@localhost/bakery_central
 
 This repo now includes a Render Blueprint in [`render.yaml`](render.yaml) that deploys only the customer portal plus a managed Render Postgres database.
 
+The app no longer needs Render-hosted MySQL specifically. Because it uses SQLAlchemy, the same backend code can run against MySQL locally and Render Postgres in deployment without rewriting the customer or admin flows.
+
 - The Render customer service uses the database's internal connection string automatically.
 - `python scripts/bootstrap_database.py` runs as the Render `preDeployCommand` to create tables and seed the shared catalog/users before the app starts.
 - Registration and other production POST actions now work with CSRF enabled because the shared base template exposes the CSRF token used by the existing frontend JavaScript.
+- Customer orders, registrations, and status changes are stored first in the shared Render database, so if your laptop is sleeping or offline nothing is lost.
+- When your local admin app is running again, it reads the same remote database and the live pages refresh every second, so it catches up from the remote source of truth automatically.
 
 If you want your locally running admin portal to see customer orders from the deployed website:
 

@@ -12,6 +12,7 @@
     </div>
     <div class="portal-auth-card-body">
       <form method="POST" action="{{ url_for('auth.register') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
           <label class="form-label">Full Name</label>
           <input class="form-control" type="text" name="name" required placeholder="Your name" autofocus autocomplete="name">

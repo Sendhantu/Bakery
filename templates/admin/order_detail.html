@@ -1,6 +1,7 @@
 {% extends 'admin/base_admin.html' %}
 {% block title %}Order #{{ order.order_number }} — Admin{% endblock %}
 {% block content %}
+<div data-live-refresh="1000">
 <div>
 <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
   <div>
@@ -8,6 +9,7 @@
     <p class="text-muted">{{ order.placed_at.strftime('%d %B %Y, %I:%M %p') }} · {{ order.customer.name }}</p>
   </div>
   <div class="flex gap-2 flex-wrap">
+    <span class="badge badge-green">Live updates every 1s</span>
     <a href="{{ url_for('customer.invoice', order_id=order.id) }}" class="btn btn-outline btn-sm" target="_blank">🧾 Invoice</a>
     <a href="{{ url_for('admin.orders') }}" class="btn btn-ghost btn-sm">← Back</a>
   </div>
@@ -153,6 +155,7 @@
         <a href="{{ url_for('admin.chat_thread', customer_id=order.user_id) }}" class="btn btn-outline btn-block">💬 Open Chat</a>
         <a href="tel:{{ order.phone }}" class="btn btn-ghost btn-block">📞 Call</a>
       </div>
+    </div>
     </div>
   </div>
 </div>

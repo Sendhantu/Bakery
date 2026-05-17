@@ -94,6 +94,12 @@ def test_customer_register_page_exposes_csrf_token_meta(client):
     response = client.get('/auth/register')
     assert response.status_code == 200
     assert b'name="csrf-token"' in response.data
+    assert b'name="csrf_token"' in response.data
+
+
+def test_customer_register_page_get_requests_do_not_hit_rate_limit(client):
+    responses = [client.get('/auth/register') for _ in range(8)]
+    assert all(response.status_code == 200 for response in responses)
 
 
 def test_admin_login_page(admin_client):
