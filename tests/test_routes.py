@@ -90,6 +90,12 @@ def test_customer_login_page(client):
     assert b'Welcome Back' in response.data
 
 
+def test_customer_register_page_exposes_csrf_token_meta(client):
+    response = client.get('/auth/register')
+    assert response.status_code == 200
+    assert b'name="csrf-token"' in response.data
+
+
 def test_admin_login_page(admin_client):
     response = admin_client.get('/auth/login')
     assert response.status_code == 200

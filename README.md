@@ -33,6 +33,23 @@ For production, update each `.env` to the same MySQL URI, for example:
 DATABASE_URL=mysql+pymysql://root:password@localhost/bakery_central
 ```
 
+## Render Customer Deployment With Local Admin
+
+This repo now includes a Render Blueprint in [`render.yaml`](render.yaml) that deploys only the customer portal plus a managed Render Postgres database.
+
+- The Render customer service uses the database's internal connection string automatically.
+- `python scripts/bootstrap_database.py` runs as the Render `preDeployCommand` to create tables and seed the shared catalog/users before the app starts.
+- Registration and other production POST actions now work with CSRF enabled because the shared base template exposes the CSRF token used by the existing frontend JavaScript.
+
+If you want your locally running admin portal to see customer orders from the deployed website:
+
+1. Deploy the Blueprint from this repo on Render.
+2. Open the Render Postgres database's `Connect` menu and copy the `External Database URL`.
+3. Paste that URL into `admin_app/.env` as `DATABASE_URL=...`.
+4. Start your local admin app with `cd admin_app && python app.py`.
+
+After that, new customer registrations and orders created on the Render website will be stored in the shared Render database, and your laptop's admin portal will read the same data.
+
 ## Mobile Frontend
 
 The shared frontend has been tuned for smaller screens:

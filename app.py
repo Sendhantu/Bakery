@@ -478,6 +478,20 @@ def apply_schema_compatibility_updates(app):
         db.session.commit()
 
 
+def initialize_database(app, seed=False):
+    with app.app_context():
+        db.create_all()
+        auto_init_original = app.config.get("AUTO_INIT_DB")
+        app.config["AUTO_INIT_DB"] = True
+        try:
+            apply_schema_compatibility_updates(app)
+        finally:
+            app.config["AUTO_INIT_DB"] = auto_init_original
+
+        if seed:
+            seed_data(app)
+
+
 def create_app(config_name="default", portal_role=None):
     app = Flask(__name__)
     configure_app(app, config_name, portal_role)
@@ -492,10 +506,7 @@ def create_app(config_name="default", portal_role=None):
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
     if app.config.get("AUTO_INIT_DB"):
-        with app.app_context():
-            db.create_all()
-            apply_schema_compatibility_updates(app)
-            seed_data(app)
+        initialize_database(app, seed=True)
     print_development_startup_banner(app)
 
     return app

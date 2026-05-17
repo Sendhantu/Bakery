@@ -11,6 +11,8 @@ Flask-SocketIO
 gunicorn
 gevent
 sqlalchemy
+psycopg[binary]
+PyMySQL
 Authlib
 celery
 python-dotenv

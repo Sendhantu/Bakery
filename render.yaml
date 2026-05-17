@@ -1,21 +1,30 @@
 services:
   - type: web
-    name: sweetcrumbs-bakery
+    name: sweetcrumbs-customer
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
+    preDeployCommand: python scripts/bootstrap_database.py
     startCommand: gunicorn --config gunicorn.conf.py wsgi:app
     healthCheckPath: /healthz
     envVars:
       - key: FLASK_ENV
         value: production
-      - key: USE_PROXY_FIX
-        value: "true"
       - key: PORTAL_ROLE
         value: customer
+      - key: USE_PROXY_FIX
+        value: "true"
       - key: SHOW_DEMO_ACCOUNTS
         value: "false"
       - key: SHOW_LOCAL_SESSION_HELPER
         value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sweetcrumbs-db
+          property: connectionString
       - key: SECRET_KEY
         generateValue: true
+
+databases:
+  - name: sweetcrumbs-db
+    plan: basic-256mb
