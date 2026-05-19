@@ -150,6 +150,18 @@
 
     <!-- Contact Customer -->
     <div class="card">
+      <div class="card-header">🔐 Pickup / Delivery QR</div>
+      <div class="card-body" style="text-align:center">
+        {% if order_qr_data_uri %}
+        <img src="{{ order_qr_data_uri }}" alt="Order verification QR" style="width:180px;height:180px;margin:0 auto 0.75rem;border-radius:1rem;border:1px solid var(--border);padding:0.75rem;background:white">
+        {% endif %}
+        <p class="text-sm text-muted">Scan to verify pickup or final delivery without duplicate completion.</p>
+        <code style="display:block;word-break:break-all">{{ qr_verification_url }}?token={{ order.qr_token }}</code>
+      </div>
+    </div>
+
+    <!-- Contact Customer -->
+    <div class="card">
       <div class="card-header">Contact Customer</div>
       <div class="card-body" style="display:flex;flex-direction:column;gap:0.75rem">
         <a href="{{ url_for('admin.chat_thread', customer_id=order.user_id) }}" class="btn btn-outline btn-block">💬 Open Chat</a>

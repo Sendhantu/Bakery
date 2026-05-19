@@ -1,0 +1,57 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Audit Trail — Admin{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">Immutable Audit Trail</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When</th><th>Action</th><th>Entity</th><th>Actor</th><th>Summary</th></tr></thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td>{{ log.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td>{{ log.action }}</td>
+          <td>{{ log.entity_type }} #{{ log.entity_id }}</td>
+          <td>{{ log.actor.name if log.actor else 'System' }}</td>
+          <td>{{ log.change_summary or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted" style="padding:1rem">No audit entries yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="page-grid page-grid-sidebar mt-3">
+  <section class="card">
+    <div class="card-header">Operational Alerts</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Severity</th><th>Title</th><th>Created</th></tr></thead>
+        <tbody>
+          {% for alert in alerts %}
+          <tr><td>{{ alert.severity|title }}</td><td>{{ alert.title }}</td><td>{{ alert.created_at.strftime('%d %b %Y %H:%M') }}</td></tr>
+          {% else %}
+          <tr><td colspan="3" class="text-center text-muted" style="padding:1rem">No alerts.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <aside class="card">
+    <div class="card-header">Fraud Alerts</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Type</th><th>Severity</th><th>Order</th></tr></thead>
+        <tbody>
+          {% for alert in fraud_alerts %}
+          <tr><td>{{ alert.alert_type }}</td><td>{{ alert.severity|title }}</td><td>{{ alert.order.order_number if alert.order else '—' }}</td></tr>
+          {% else %}
+          <tr><td colspan="3" class="text-center text-muted" style="padding:1rem">No fraud alerts.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </aside>
+</div>
+{% endblock %}

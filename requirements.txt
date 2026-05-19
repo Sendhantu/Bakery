@@ -8,11 +8,16 @@ Flask-Caching
 Flask-Bcrypt
 Flask-Migrate
 Flask-SocketIO
+Flask-JWT-Extended
 gunicorn
 gevent
+gevent-websocket
 sqlalchemy
-psycopg[binary]
 PyMySQL
+cryptography
+redis
+cloudinary
+sentry-sdk
 Authlib
 celery
 python-dotenv
@@ -25,4 +30,4 @@ email-validator
 python-dateutil
 PyYAML
 tzlocal
-# cache-bust-v2numpy
+firebase-admin

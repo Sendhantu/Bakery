@@ -7,6 +7,7 @@
   <p class="text-muted mb-4">Almost there! Just fill in your delivery details.</p>
 
   <form method="POST" action="{{ url_for('customer.checkout') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="page-grid page-grid-checkout">
 
     <!-- LEFT: Address & Slot -->
@@ -245,7 +246,7 @@
         <div class="card-header">📦 Order Summary</div>
         <div class="card-body" style="padding-bottom:0">
           {% for item in cart_items %}
-          {% set price = item.variant.price if item.variant else item.product.base_price %}
+          {% set price = item.variant.current_price if item.variant else item.product.current_price %}
           <div class="flex justify-between items-center mb-2">
             <div>
               <span style="font-size:0.9rem;font-weight:500">{{ item.product.name }}</span>

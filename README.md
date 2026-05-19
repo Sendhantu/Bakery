@@ -1,308 +1,193 @@
-# 🎂 SweetCrumbs Bakery — Full-Stack Web Application
+# SweetCrumbs Bakery — Hybrid Production Platform
 
-A complete Bakery Management & E-Commerce platform built with **Flask + MySQL**.
+Flask modular monolith for bakery e-commerce, local admin operations, mobile delivery, offline-first sync, and Render + TiDB Cloud deployment.
 
-## Independent Flask Apps
+## Architecture (hybrid)
 
-This repository now includes three independent launchers for the bakery platform:
+```text
+PUBLIC (Render)
+  └── Customer portal (PORTAL_ROLE=customer) — ONLY public-facing app
 
-- `customer_app/` runs the customer storefront on `http://127.0.0.1:5000`
-- `admin_app/` runs the admin operations dashboard on `http://127.0.0.1:5001`
-- `delivery_app/` runs the delivery staff panel on `http://127.0.0.1:5002`
+LOCAL / PRIVATE (your laptop & delivery phones)
+  ├── Admin portal (PORTAL_ROLE=admin) — :5001
+  └── Delivery portal (PORTAL_ROLE=delivery) — :5002 PWA
 
-Each one has its own:
+SHARED CLOUD
+  ├── TiDB Cloud (primary MySQL-compatible database)
+  ├── Redis (Socket.IO, Celery, cache, rate limits)
+  └── Cloudinary (product images, invoice PDFs)
+```
 
-- `app.py`
-- `requirements.txt`
-- `.env`
+- **One Flask codebase**, **one TiDB database**, **one Redis cluster**
+- **SQLite is never production data** — only local offline queue files under `instance/offline/`
+- Production schema: `flask db upgrade` (see `migrations/versions/`)
 
-The launchers are intentionally thin wrappers around the shared production code in the root app. They each boot the same backend, but with separate portal roles, ports, and session cookies. The customer, admin, and delivery UIs still use the existing shared frontend in root `templates/` and `static/`.
-
-All three connect to the same centralized database and can be started independently:
+## Quick start (local development)
 
 ```bash
-cd customer_app && python app.py
-cd admin_app && python app.py
-cd delivery_app && python app.py
-```
-
-For local development, the provided `.env` files point all three apps at the same SQLite file: `../bakery_portals_shared.db`.
-For production, update each `.env` to the same MySQL URI, for example:
-
-```env
-DATABASE_URL=mysql+pymysql://root:password@localhost/bakery_central
-```
-
-## Render Customer Deployment With Local Admin
-
-This repo now includes a Render Blueprint in [`render.yaml`](render.yaml) that deploys only the customer portal plus a managed Render Postgres database.
-
-The app no longer needs Render-hosted MySQL specifically. Because it uses SQLAlchemy, the same backend code can run against MySQL locally and Render Postgres in deployment without rewriting the customer or admin flows.
-
-- The Render customer service uses the database's internal connection string automatically.
-- `python scripts/bootstrap_database.py` runs as the Render `preDeployCommand` to create tables and seed the shared catalog/users before the app starts.
-- Registration and other production POST actions now work with CSRF enabled because the shared base template exposes the CSRF token used by the existing frontend JavaScript.
-- Customer orders, registrations, and status changes are stored first in the shared Render database, so if your laptop is sleeping or offline nothing is lost.
-- When your local admin app is running again, it reads the same remote database and the live pages refresh every second, so it catches up from the remote source of truth automatically.
-
-If you want your locally running admin portal to see customer orders from the deployed website:
-
-1. Deploy the Blueprint from this repo on Render.
-2. Open the Render Postgres database's `Connect` menu and copy the `External Database URL`.
-3. Paste that URL into `admin_app/.env` as `DATABASE_URL=...`.
-4. Start your local admin app with `cd admin_app && python app.py`.
-
-After that, new customer registrations and orders created on the Render website will be stored in the shared Render database, and your laptop's admin portal will read the same data.
-
-## Mobile Frontend
-
-The shared frontend has been tuned for smaller screens:
-
-- improved mobile navbar layout and tap targets
-- better hero, card, cart, checkout, admin, and delivery spacing
-- horizontal-safe category scrollers and table wrappers
-- full-width action rows on narrow screens
-- phone-friendly form input sizing to reduce zoom issues
-
-These improvements apply automatically to the customer, admin, and delivery portals because they all use the same root `templates/` and `static/css/main.css`.
-
-## GitHub Setup
-
-This project is now GitHub-ready for source hosting and automation:
-
-- `.github/workflows/ci.yml` runs formatting and tests
-- `.github/workflows/docker-publish.yml` builds the Docker image and publishes it to GitHub Container Registry on pushes to `main` or `master`
-- `runtime.txt` pins the Python runtime for common PaaS deployments from GitHub
-
-Important:
-
-- GitHub Pages cannot host this app because it is a dynamic Flask + MySQL application.
-- Use GitHub to store the code and run Actions, then deploy from GitHub to Render, Railway, a VPS, or another Python host.
-- The Docker image published by Actions is designed for that deployment flow.
-
----
-
-## 🚀 Quick Start
-
-### 1. Prerequisites
-- Python 3.9+
-- MySQL 8.0+
-- pip
-
----
-
-### 2. Create MySQL Database & Tables
-
-Open your MySQL client and run:
-
-```bash
-mysql -u root -p < schema.sql
-```
-
-Or paste the contents of `schema.sql` into MySQL Workbench / phpMyAdmin.
-
-This creates the `bakery_db` database with all 20 tables and seed coupons.
-
-The product catalog is now stored in MySQL and seeded from `data/products.json`. Run `python scripts/seed_products.py` after you have created the database to populate `categories`, `products`, and `product_variants`.
-
----
-
-### 3. Configure Environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set your MySQL password (if you use MySQL):
-
-```
-DATABASE_URL=mysql+pymysql://root:YOUR_PASSWORD@localhost/bakery_db
-SECRET_KEY=your-long-random-secret-key
-```
-
-If your local MySQL root password is `Sendhan@2005`, use:
-
-```
-DATABASE_URL=mysql+pymysql://root:Sendhan@2005@localhost/bakery_db
-```
-
-> In production, `SECRET_KEY` must be a strong random value. The app will refuse to start with the default key in production.
-
-**MySQL (default fallback):** When `DATABASE_URL` is unset, the app now falls back to `MYSQL_DATABASE_URL`, and otherwise uses `mysql+pymysql://root:Sendhan@2005@localhost/bakery`.
-
-If you prefer a local SQLite fallback for quick development, set `DATABASE_URL` explicitly to a `sqlite:///...` URI.
-
----
-
-### 4. Install Python Dependencies
-
-```bash
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
-> For the local AI layer, set `LLM_MODEL_PATH` in your environment to a local Llama/Mistral model file before starting the app.
->
-> Example:
-> ```bash
-> export LLM_MODEL_PATH=/path/to/mistral-7b.gguf
-> ```
----
+cp .env.example .env   # configure DB_*, REDIS_URL, Cloudinary
 
-### 5. Run the Application
+# Terminal 1 — customer
+cd customer_app && cp .env.example .env && python app.py
+
+# Terminal 2 — admin (offline sync enabled)
+cd admin_app && cp .env.example .env && python app.py
+
+# Terminal 3 — delivery (mobile PWA)
+cd delivery_app && cp .env.example .env && python app.py
+```
+
+| Portal   | URL                      | Role      |
+|----------|--------------------------|-----------|
+| Customer | http://127.0.0.1:5000    | customer  |
+| Admin    | http://127.0.0.1:5001    | admin     |
+| Delivery | http://127.0.0.1:5002    | delivery  |
+
+Demo credentials (development only): see startup logs or `output/dev_credentials.json`.
+
+## Render deployment (customer + workers only)
+
+[`render.yaml`](render.yaml) provisions:
+
+1. **sweetcrumbs-redis** — Redis
+2. **sweetcrumbs-customer** — Gunicorn + Gevent WebSocket worker
+3. **sweetcrumbs-celery-worker** — background tasks
+4. **sweetcrumbs-celery-beat** — scheduled jobs
+
+**Not deployed on Render:** admin and delivery portals (run locally).
+
+### Render environment (set in dashboard)
+
+| Variable | Required |
+|----------|----------|
+| `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | Yes (TiDB) |
+| `DB_SSL_CA`, `DB_SSL_VERIFY_CERT`, `DB_SSL_VERIFY_IDENTITY` | Yes |
+| `REDIS_URL` | Auto from blueprint |
+| `SECRET_KEY`, `JWT_SECRET_KEY` | Auto-generated |
+| `CLOUDINARY_*` | Yes |
+| `CUSTOMER_PORTAL_URL` | Your Render URL |
+| `BOOTSTRAP_SEED_DATA` | `false` in production |
+
+Start command: `gunicorn --config gunicorn.conf.py wsgi:app`
+
+Health check: `GET /healthz` (DB, Redis, Celery broker, Cloudinary)
+
+Pre-deploy: `python scripts/bootstrap_database.py` runs `flask db upgrade`.
+
+## TiDB Cloud setup
+
+1. Create Serverless cluster and database `bakerydb`.
+2. Allow your IP (local) and Render outbound IPs.
+3. Either:
+   - **Recommended:** deploy with `flask db upgrade` via bootstrap script, or
+   - Import [`tidb_bootstrap.sql`](tidb_bootstrap.sql) for greenfield SQL seed (regenerate with `python scripts/generate_tidb_bootstrap.py`).
+
+Connection uses `mysql+pymysql://` with TLS from `DB_SSL_*` variables.
+
+## Redis
+
+Required in production for:
+
+- Socket.IO message queue (`SOCKETIO_MESSAGE_QUEUE`)
+- Celery broker/result backend
+- Flask-Caching and rate limiting
+
+Local: `REDIS_URL=redis://127.0.0.1:6379/0`
+
+## Cloudinary
+
+All product uploads go to Cloudinary (no local `file.save`). Set:
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+
+## Celery
 
 ```bash
-python app.py
+# Worker
+celery -A celery_app.celery_app worker --loglevel=info
+
+# Beat (schedules in config/base.py)
+celery -A celery_app.celery_app beat --loglevel=info
 ```
 
-This will:
-- Create all database tables (if not already done)
-- Insert demo users, products, and coupons
-- Start the Flask dev server at **http://localhost:5000**
+Scheduled jobs include: inventory forecasts, subscription orders, offline sync retry, analytics snapshot, backup verification, birthday loyalty, abandoned-cart WhatsApp reminders.
 
----
+## Offline-first (admin & delivery)
 
-## 🔑 Demo Login Credentials
+When TiDB is unreachable:
 
-| Role     | Email                   | Password     |
-|----------|-------------------------|--------------|
-| Admin    | admin@bakery.com        | Admin@bakery |
-| Customer | customer@test.com       | customer123  |
-| Delivery | delivery@bakery.com     | delivery123  |
+1. Actions queue to `instance/offline/{portal}_offline_sync.sqlite`
+2. Local snapshots keep UI responsive
+3. On reconnect, Celery + `/api/v2/sync/flush` push changes to TiDB
+4. Version conflicts surface at **Admin → Offline / Sync**
 
----
+Proactive queueing: routes check `offline_sync.is_online()` before writes.
 
-## 🗂 Project Structure
+## Mobile delivery
 
-```
-bakery/
-├── app.py                  # App factory, seed data, entry point
-├── config.py               # Configuration classes
-├── models.py               # SQLAlchemy ORM models (20 tables)
-├── schema.sql              # Pure MySQL schema (run this first)
-├── requirements.txt
-├── .env.example
-│
-├── routes/
-│   ├── auth.py             # Login, Register, Profile, Logout
-│   ├── customer.py         # Shop, Cart, Checkout, Orders, Chat...
-│   ├── admin.py            # Full admin panel
-│   ├── delivery.py         # Delivery staff dashboard
-│   └── api.py              # AJAX endpoints (coupon, search, etc.)
-│
-├── static/
-│   ├── css/main.css        # Full responsive stylesheet
-│   ├── js/main.js          # Charts, interactivity, cart logic
-│   └── images/products/    # Product images go here
-│
-└── templates/
-    ├── base.html            # Main layout with navbar/footer
-    ├── auth/               login, register, profile
-    ├── customer/           home, products, cart, checkout, orders...
-    ├── admin/              dashboard, products, orders, analytics...
-    └── delivery/           dashboard, order detail, history
-```
+- Responsive delivery templates + PWA manifest/service worker
+- Socket.IO reconnect (`delivery_updated` events)
+- Offline status/COD queueing with automatic sync
 
----
+Install: open delivery portal in mobile browser → Add to Home Screen.
 
-## ✨ Features
+## Realtime (Socket.IO)
 
-### Customer
-- Browse products with search, filters (category, price, egg/eggless, occasion)
-- Product detail with variants (0.5kg, 1kg, 2kg), reviews & ratings
-- Cart, Wishlist, Checkout with time-slot booking
-- Order tracking: PLACED → PREPARING → PACKED → OUT_FOR_DELIVERY → DELIVERED
-- Order cancellation (within 2 minutes), reorder, modification requests
-- Address change (max 2 changes, before dispatch)
-- Coupon codes, Membership discounts (10–15%)
-- Chat with bakery, printable invoice, notifications
+- Redis message queue enables multi-worker broadcasts
+- Events: `order_updated`, `kds_refresh`, `delivery_updated`, `analytics_updated`
+- KDS uses sockets with 30s HTTP fallback poll
 
-### Admin
-- Full dashboard with revenue + order charts
-- Product & category management with image upload
-- Inventory management with low-stock alerts
-- Order management with status updates & delivery assignment
-- Modification request approval/rejection with price adjustment
-- Customer insights with login history
-- Chat dashboard (respond to customer messages)
-- Analytics: revenue, top products, peak hours, order status breakdown
-- Coupon & delivery agent management
+Gunicorn worker: `geventwebsocket.gunicorn.workers.GeventWebSocketWorker`
 
-### Delivery Staff
-- View assigned orders with full delivery details
-- Update order status (Packed → Out for Delivery → Delivered)
-- Delivery history log
+## API versions
 
----
+| Path | Status |
+|------|--------|
+| `/api/v1/*` | Stable, deprecation headers toward v2 |
+| `/api/v2/*` | JWT, sync, QR, push devices, search |
 
-## 🗄 Database Schema
+## Operations features
 
-This app stores data in a relational database. If `DATABASE_URL` is set, it will use that database (MySQL is the expected production backend). Otherwise it falls back to a local SQLite file at `bakery.db`.
+| Feature | Admin route |
+|---------|-------------|
+| POS (offline queue) | `/admin/pos` |
+| Kitchen display | `/admin/kds` |
+| Forecasts | `/admin/forecasts` |
+| Dynamic pricing | `/admin/pricing` |
+| Subscriptions | `/admin/subscriptions` |
+| Audit & alerts | `/admin/audit` |
+| Queue monitor | `/admin/queue-monitor` |
+| Offline / conflicts | `/admin/offline` |
+| QR scanner | `/admin/qr-scanner` |
 
-The full MySQL schema is defined in `schema.sql`, while the ORM models are defined in `models/`.
+## Security
 
-Product catalog data is now persisted in MySQL using `data/products.json` as the seed source. The relevant tables for products are:
-- `categories` — product categories and icons
-- `products` — main catalog metadata and pricing
-- `product_variants` — variant sizes/options and stock levels
+- Production rejects SQLite URIs and weak `SECRET_KEY` values
+- Secure session cookies, ProxyFix, CSP, HTTPS redirect
+- Payment state machine with transition audit log
+- Fraud alerts on coupon abuse and rapid repeat orders
+- RBAC via `utils/permissions.py` (`roles_required` on sensitive routes)
 
-### Tables and main purpose
-
-| Table | Key fields | Purpose |
-|---|---|---|
-| `users` | `id`, `name`, `email`, `role`, `is_active` | Stores all users and login credentials for customers, admins, and delivery staff. |
-| `login_history` | `user_id`, `login_time`, `ip_address`, `status` | Tracks login attempts and access events. |
-| `categories` | `name`, `icon` | Stores product categories and category icons. |
-| `products` | `name`, `base_price`, `category_id`, `is_featured`, `occasion_tags` | Main product catalog with descriptions, pricing, and display flags. |
-| `product_variants` | `product_id`, `name`, `price`, `stock` | Variant pricing and inventory for product sizes/options. |
-| `cart` | `user_id`, `product_id`, `variant_id`, `quantity` | Temporary shopping cart contents for customers. |
-| `wishlist` | `user_id`, `product_id` | Customer saved products for later. |
-| `saved_addresses` | `user_id`, `label`, `address_line1`, `city`, `pincode` | Stored delivery addresses and defaults. |
-| `orders` | `order_number`, `user_id`, `status`, `total`, `delivery_date`, `payment_status` | Placed orders with delivery, payment, and coupon details. |
-| `order_items` | `order_id`, `product_id`, `variant_id`, `quantity`, `subtotal` | Items and pricing details for each order. |
-| `address_changes` | `order_id`, `old_address`, `new_address`, `changed_by` | History of order address updates. |
-| `modification_requests` | `order_id`, `user_id`, `status`, `price_diff` | Customer requests for order edits. |
-| `payments` | `order_id`, `amount`, `status`, `transaction_id` | Payment status for orders. |
-| `payment_links` | `token`, `user_id`, `order_id`, `status` | Generated payment link records for UPI/card flows. |
-| `refunds` | `order_id`, `amount`, `status` | Refund tracking for cancelled/returned orders. |
-| `coupons` | `code`, `discount_type`, `discount_value`, `valid_until`, `used_count` | Promotion codes and validation rules. |
-| `subscriptions` | `user_id`, `plan`, `discount_pct`, `start_date`, `end_date` | Customer membership plans and discounts. |
-| `reviews` | `product_id`, `user_id`, `rating`, `comment` | Customer product reviews and ratings. |
-| `messages` | `sender_id`, `receiver_id`, `order_id`, `content`, `is_read` | In-app messaging between users and staff. |
-| `notifications` | `user_id`, `title`, `message`, `is_read` | User notifications and alerts. |
-| `delivery_agents` | `user_id`, `name`, `phone`, `availability` | Delivery staff profiles and availability state. |
-| `deliveries` | `order_id`, `agent_id`, `status`, `delivered_time` | Order delivery assignment and status history. |
-| `raw_materials` | `name`, `stock`, `reorder_level`, `cost_per_unit` | Inventory for bakery ingredients. |
-| `product_materials` | `product_id`, `raw_material_id`, `quantity_required` | Links products to raw material recipes. |
-
----
-
-## 🖼 Adding Product Images
-
-Place product images in `static/images/products/`.  
-Filename should match the `image` field in the products table.  
-If no image found, an Unsplash placeholder is used automatically.
-
----
-
-## 🧪 Tests
+## Testing
 
 ```bash
-pytest
+pytest tests/ -q
 ```
 
-Uses a temporary SQLite database and the `testing` config (see `tests/conftest.py`).
+## Troubleshooting
 
-A GitHub Actions workflow also runs `pytest` and `black --check` on every push.
+| Issue | Check |
+|-------|--------|
+| Render boot fails | `/healthz`, Redis URL, Cloudinary vars, TiDB IP allowlist |
+| Migrations | `flask db upgrade` with `FLASK_APP=app:create_app` |
+| Celery tasks missing | `celery -A celery_app.celery_app inspect registered` |
+| Offline backlog | Admin → Offline / Sync → Flush queue |
+| WebSockets | Redis reachable; single worker on free tier is OK |
 
----
+## License
 
-## 📦 Production Notes
-
-1. Change `SECRET_KEY` to a strong random value
-2. Set `FLASK_ENV=production` in `.env`
-3. The app exposes `/healthz` for platform health checks
-4. Use a production WSGI server (Gunicorn, uWSGI)
-5. Configure MySQL with proper user permissions (not root)
-6. Set up a reverse proxy (Nginx/Apache)
-7. Enable `USE_PROXY_FIX=true` when behind a trusted proxy
-8. Set `RATE_LIMIT_STORAGE_URI` for production rate limiting (for example, `redis://user:pass@host:6379/0`)
-9. Serve the app over HTTPS and verify security headers are set
+Proprietary — SweetCrumbs Bakery platform.

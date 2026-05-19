@@ -7,10 +7,11 @@ from repositories import OrderRepository
 
 
 class DeliveryService:
-    def __init__(self, order_repository=None):
+    def __init__(self, order_repository=None, audit_service=None):
         self.order_repository = order_repository or OrderRepository()
+        self.audit_service = audit_service
 
-    def collect_cod_payment(self, order_id, amount_received, payment_mode="CASH"):
+    def collect_cod_payment(self, order_id, amount_received, payment_mode="CASH", actor_id=None):
         order = self.order_repository.get_or_404(order_id)
         if (order.payment_method or "").upper() != "COD":
             raise ValidationError("This order is not marked for cash on delivery.")
@@ -26,16 +27,30 @@ class DeliveryService:
         if amount < total_due:
             raise ValidationError("Collected amount cannot be less than the order total.")
 
-        payment = order.payment
-        if payment is None:
-            payment = Payment(order_id=order.id, amount=total_due)
-            db.session.add(payment)
+        with db.session.begin_nested():
+            payment = order.payment
+            if payment is None:
+                payment = Payment(order_id=order.id, amount=total_due)
+                db.session.add(payment)
 
-        payment.amount = amount
-        payment.status = "PAID"
-        payment.method = f"COD_{(payment_mode or 'CASH').strip().upper()}"
-        payment.transaction_id = f"COD-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-        order.payment_status = "PAID"
-        order.updated_at = datetime.utcnow()
+            payment.amount = amount
+            payment.method = f"COD_{(payment_mode or 'CASH').strip().upper()}"
+            payment.transaction_id = payment.transaction_id or f"COD-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+            payment.transition_to(
+                "PAID",
+                actor_id=actor_id,
+                reason="cod_collection",
+            )
+            order.mark_status_change()
+            if self.audit_service is not None:
+                self.audit_service.record(
+                    "cod_payment_collected",
+                    "Order",
+                    order.id,
+                    actor_id=actor_id,
+                    branch_id=order.branch_id,
+                    metadata={"amount": float(amount), "payment_mode": payment_mode},
+                    change_summary=f"COD collected via {payment_mode}",
+                )
         db.session.commit()
         return order

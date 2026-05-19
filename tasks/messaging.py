@@ -65,6 +65,31 @@ def send_sms(to_number, message):
         return False
 
 
+@celery.task
+def send_whatsapp_message(to_number, message):
+    from flask import current_app
+
+    if not current_app.config.get("WHATSAPP_ENABLED"):
+        return False
+    try:
+        from twilio.rest import Client
+
+        normalized_to = to_number if str(to_number).startswith("whatsapp:") else f"whatsapp:{to_number}"
+        client = Client(
+            current_app.config["TWILIO_ACCOUNT_SID"],
+            current_app.config["TWILIO_AUTH_TOKEN"],
+        )
+        client.messages.create(
+            body=message,
+            from_=current_app.config["TWILIO_WHATSAPP_FROM"],
+            to=normalized_to,
+        )
+        return True
+    except Exception as exc:
+        current_app.logger.error("WhatsApp failed to %s: %s", to_number, exc)
+        return False
+
+
 def render_low_stock_digest(alerts):
     rows = "".join(
         f'<tr><td>{a["name"]}</td><td>{a["stock"]} {a["unit"]}</td>'

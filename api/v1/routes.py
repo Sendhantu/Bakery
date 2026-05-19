@@ -9,9 +9,24 @@ from models import Notification, Product, ProductVariant, calculate_loyalty_rede
 api_v1_bp = Blueprint("api_v1", __name__)
 
 
+@api_v1_bp.after_request
+def add_version_headers(response):
+    response.headers["X-API-Version"] = "v1"
+    response.headers["X-API-Deprecated"] = "true"
+    response.headers["Deprecation"] = 'version="v2"'
+    response.headers["Link"] = '</api/v2/meta>; rel="successor-version"'
+    return response
+
+
 @api_v1_bp.route("/meta")
 def meta():
-    return jsonify({"version": "v1", "status": "ok"})
+    return jsonify(
+        {
+            "version": "v1",
+            "status": "ok",
+            "compatibility": "stable",
+        }
+    )
 
 
 @api_v1_bp.route("/validate-coupon", methods=["POST"])
@@ -55,7 +70,7 @@ def search_suggestions():
         return jsonify([])
     products = get_container().product_repository.active_search(q, limit=5)
     return jsonify(
-        [{"id": product.id, "name": product.name, "price": float(product.base_price)} for product in products]
+        [{"id": product.id, "name": product.name, "price": float(product.current_price)} for product in products]
     )
 
 

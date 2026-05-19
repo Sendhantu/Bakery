@@ -13,7 +13,9 @@ from models import db, User, LoginHistory, SavedAddress, limiter
 from datetime import datetime, timedelta
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from utils import (
+    ADMIN_PORTAL_ROLES,
     get_login_lockout_window as resolve_login_lockout_window,
+    has_role,
     save_address_for_customer,
     get_saved_addresses_for_user,
     send_email,
@@ -48,9 +50,9 @@ def portal_url_for_role(role, path=""):
 
 
 def role_portal(user):
-    if user.role == "admin":
+    if has_role(user, *ADMIN_PORTAL_ROLES):
         return "admin"
-    if user.role == "delivery":
+    if has_role(user, "delivery"):
         return "delivery"
     return "customer"
 
@@ -433,7 +435,7 @@ def profile():
         .all()
     )
     saved_addresses = []
-    if current_user.role == "customer":
+    if has_role(current_user, "customer"):
         saved_addresses = get_saved_addresses_for_user(current_user.id)
     return render_template(
         "auth/profile.html", history=history, saved_addresses=saved_addresses
@@ -443,7 +445,7 @@ def profile():
 @auth_bp.route("/profile/address/add", methods=["POST"])
 @login_required
 def add_saved_address():
-    if current_user.role != "customer":
+    if not has_role(current_user, "customer"):
         flash("Only customers can store delivery addresses.", "danger")
         return redirect(url_for("auth.profile"))
 

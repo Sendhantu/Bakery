@@ -1,8 +1,16 @@
 services:
+  - type: redis
+    name: sweetcrumbs-redis
+    plan: free
+    region: singapore
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
   - type: web
     name: sweetcrumbs-customer
-    env: python
-    plan: starter
+    runtime: python
+    plan: free
+    region: singapore
     buildCommand: pip install -r requirements.txt
     preDeployCommand: python scripts/bootstrap_database.py
     startCommand: gunicorn --config gunicorn.conf.py wsgi:app
@@ -18,13 +26,224 @@ services:
         value: "false"
       - key: SHOW_LOCAL_SESSION_HELPER
         value: "false"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sweetcrumbs-db
+      - key: LOGIN_SESSION_PROTECTION
+        value: basic
+      - key: BOOTSTRAP_SEED_DATA
+        value: "false"
+      - key: OFFLINE_SYNC_ENABLED
+        value: "false"
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_SSL_CA
+        value: /etc/ssl/certs/ca-certificates.crt
+      - key: DB_SSL_VERIFY_CERT
+        value: "true"
+      - key: DB_SSL_VERIFY_IDENTITY
+        value: "true"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: SOCKETIO_MESSAGE_QUEUE
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: RATELIMIT_STORAGE_URI
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
           property: connectionString
       - key: SECRET_KEY
         generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DB_HOST
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CUSTOMER_PORTAL_URL
+        sync: false
 
-databases:
-  - name: sweetcrumbs-db
-    plan: basic-256mb
+  - type: worker
+    name: sweetcrumbs-celery-worker
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PORTAL_ROLE
+        value: customer
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: SECRET_KEY
+      - key: JWT_SECRET_KEY
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: JWT_SECRET_KEY
+      - key: DB_HOST
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: DB_HOST
+      - key: DB_USER
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: DB_USER
+      - key: DB_PASSWORD
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: DB_PASSWORD
+      - key: DB_NAME
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: DB_NAME
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_SSL_CA
+        value: /etc/ssl/certs/ca-certificates.crt
+      - key: DB_SSL_VERIFY_CERT
+        value: "true"
+      - key: DB_SSL_VERIFY_IDENTITY
+        value: "true"
+      - key: CLOUDINARY_CLOUD_NAME
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: CLOUDINARY_CLOUD_NAME
+      - key: CLOUDINARY_API_KEY
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: CLOUDINARY_API_KEY
+      - key: CLOUDINARY_API_SECRET
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: CLOUDINARY_API_SECRET
+
+  - type: worker
+    name: sweetcrumbs-celery-beat
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A celery_app.celery_app beat --loglevel=info
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PORTAL_ROLE
+        value: customer
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: sweetcrumbs-redis
+          property: connectionString
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: SECRET_KEY
+      - key: JWT_SECRET_KEY
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: JWT_SECRET_KEY
+      - key: DB_HOST
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: DB_HOST
+      - key: DB_USER
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: DB_USER
+      - key: DB_PASSWORD
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: DB_PASSWORD
+      - key: DB_NAME
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: DB_NAME
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_SSL_CA
+        value: /etc/ssl/certs/ca-certificates.crt
+      - key: DB_SSL_VERIFY_CERT
+        value: "true"
+      - key: DB_SSL_VERIFY_IDENTITY
+        value: "true"
+      - key: CLOUDINARY_CLOUD_NAME
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: CLOUDINARY_CLOUD_NAME
+      - key: CLOUDINARY_API_KEY
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: CLOUDINARY_API_KEY
+      - key: CLOUDINARY_API_SECRET
+        fromService:
+          type: web
+          name: sweetcrumbs-customer
+          envVarKey: CLOUDINARY_API_SECRET

@@ -12,7 +12,7 @@
     <div class="card">
       <div class="card-header" id="cart-header-count">{{ total_quantity }} item{{ 's' if total_quantity != 1 else '' }} across {{ items|length }} product{{ 's' if items|length != 1 else '' }}</div>
       {% for item in items %}
-      {% set price = item.variant.price if item.variant else item.product.base_price %}
+      {% set price = item.price %}
       <div class="cart-item" data-cart-item>
         <img src="{{ item.product.image_src }}"
              alt="{{ item.product.name }}" class="cart-item-img" loading="lazy" decoding="async"

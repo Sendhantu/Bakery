@@ -1,0 +1,55 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Admin Offline — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="container" style="max-width:960px">
+    <div class="card" style="padding:2rem">
+      <h1 class="section-title">Offline Admin Mode</h1>
+      <p class="section-subtitle">
+        Status:
+        {% if online %}<span class="badge badge-green">Online</span>{% else %}<span class="badge badge-orange">Offline — queue active</span>{% endif %}
+      </p>
+      <div class="flex gap-2 flex-wrap mb-4">
+        <a href="{{ url_for('admin.inventory') }}" class="btn btn-primary">Open Inventory</a>
+        <a href="{{ url_for('admin.orders') }}" class="btn btn-outline">Open Orders</a>
+        <button type="button" class="btn btn-outline" id="sync-flush-btn">Flush Sync Queue</button>
+      </div>
+
+      <h2 class="text-lg mb-2">Pending actions ({{ pending_actions|length }})</h2>
+      {% if pending_actions %}
+      <ul class="text-sm">
+        {% for action in pending_actions %}
+        <li>{{ action.action_type }} · {{ action.entity_type }} #{{ action.entity_id }} · {{ action.status }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted">No queued actions.</p>
+      {% endif %}
+
+      <h2 class="text-lg mt-4 mb-2">Unresolved sync conflicts ({{ conflicts|length }})</h2>
+      {% for conflict in conflicts %}
+      <div class="card mb-2" style="padding:1rem">
+        <p><strong>{{ conflict.entity_type }}</strong> #{{ conflict.entity_id }} — {{ conflict.action_type }}</p>
+        <form method="post" action="{{ url_for('admin.resolve_sync_conflict', conflict_id=conflict.id) }}" class="flex gap-2 mt-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button name="resolution" value="accept_local" class="btn btn-sm btn-primary">Accept local</button>
+          <button name="resolution" value="accept_remote" class="btn btn-sm btn-outline">Accept remote</button>
+        </form>
+      </div>
+      {% else %}
+      <p class="text-muted">No conflicts.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('sync-flush-btn')?.addEventListener('click', async () => {
+  const response = await fetch('/api/v2/sync/flush', { method: 'POST', credentials: 'same-origin' });
+  const payload = await response.json();
+  alert(payload.ok ? 'Sync flush complete.' : (payload.message || 'Sync flush failed.'));
+  window.location.reload();
+});
+</script>
+{% endblock %}

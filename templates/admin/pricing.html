@@ -1,0 +1,42 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Pricing Rules — Admin{% endblock %}
+{% block content %}
+<div class="page-grid page-grid-sidebar">
+  <section class="card">
+    <div class="card-header">Active Pricing Rules</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Type</th><th>Discount</th><th>Category</th><th>Branch</th></tr></thead>
+        <tbody>
+          {% for rule in rules %}
+          <tr>
+            <td>{{ rule.name }}</td>
+            <td>{{ rule.rule_type.replace('_', ' ')|title }}</td>
+            <td>{{ rule.percent_discount }}%</td>
+            <td>{{ rule.category.name if rule.category else 'All' }}</td>
+            <td>{{ rule.branch.name if rule.branch else 'All' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted" style="padding:1rem">No pricing rules yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <aside class="card">
+    <div class="card-header">Add Rule</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.pricing') }}">
+        <div class="form-group"><label class="form-label">Name</label><input class="form-control" name="name"></div>
+        <div class="form-group"><label class="form-label">Rule Type</label><select class="form-control" name="rule_type"><option value="scheduled_discount">Scheduled Discount</option><option value="evening_discount">Evening Discount</option><option value="aging_discount">Aging Product Discount</option></select></div>
+        <div class="form-group"><label class="form-label">Discount %</label><input class="form-control" name="percent_discount" type="number" step="0.01" value="10"></div>
+        <div class="form-group"><label class="form-label">After Hour</label><input class="form-control" name="applies_after_hour" type="number" min="0" max="23"></div>
+        <div class="form-group"><label class="form-label">Batch Age Hours</label><input class="form-control" name="max_batch_age_hours" type="number" min="0"></div>
+        <div class="form-group"><label class="form-label">Category</label><select class="form-control" name="category_id"><option value="">All</option>{% for category in categories %}<option value="{{ category.id }}">{{ category.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label class="form-label">Branch</label><select class="form-control" name="branch_id"><option value="">All</option>{% for branch in branches %}<option value="{{ branch.id }}">{{ branch.name }}</option>{% endfor %}</select></div>
+        <button class="btn btn-primary btn-block" type="submit">Save Rule</button>
+      </form>
+    </div>
+  </aside>
+</div>
+{% endblock %}

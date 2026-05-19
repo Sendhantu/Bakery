@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}{{ product.name }} — {{ bakery_name }}{% endblock %}
-{% block meta_description %}{{ product.name }} — from ₹{{ product.base_price|int }} at {{ bakery_name }}. {% if product.description %}{{ product.description[:155] }}{% if product.description|length > 155 %}…{% endif %}{% else %}Fresh artisan bakes with delivery in {{ store_details.city }}.{% endif %}{% endblock %}
+{% block meta_description %}{{ product.name }} — from ₹{{ product.current_price|int }} at {{ bakery_name }}. {% if product.description %}{{ product.description[:155] }}{% if product.description|length > 155 %}…{% endif %}{% else %}Fresh artisan bakes with delivery in {{ store_details.city }}.{% endif %}{% endblock %}
 
 {% block content %}
 <div class="page-wrap">
@@ -67,7 +67,7 @@
       <!-- Price -->
       <div class="flex items-center gap-2 mb-3">
         <span class="current-price" style="font-family:var(--font-display);font-size:2rem;font-weight:700;color:var(--caramel)">
-          ₹{{ product.base_price|int }}
+          ₹{{ product.current_price|int }}
         </span>
         <span class="live-stock-badge badge
           {% if product.stock_status == 'in_stock' %}badge-green
@@ -270,7 +270,7 @@
         <div class="product-card-body">
           <h3 class="product-card-title"><a href="{{ url_for('customer.product_detail', product_id=p.id) }}" style="color:inherit">{{ p.name }}</a></h3>
           <div class="flex justify-between items-center mt-2">
-            <span class="product-price">₹{{ p.base_price|int }}</span>
+            <span class="product-price">₹{{ p.current_price|int }}</span>
             <a href="{{ url_for('customer.product_detail', product_id=p.id) }}" class="btn btn-outline btn-sm">View</a>
           </div>
         </div>

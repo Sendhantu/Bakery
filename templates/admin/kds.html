@@ -1,0 +1,42 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Kitchen Display — Admin{% endblock %}
+{% block content %}
+<div class="page-wrap" data-live-refresh="30000" data-socket-room="kds">
+  <div class="flex justify-between items-center mb-4">
+    <div>
+      <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">🔥 Kitchen Display System</h1>
+      <p class="text-muted">Live prep queue for the bakery floor and tablet displays.</p>
+    </div>
+    <span class="badge badge-green">Fullscreen-ready</span>
+  </div>
+  <div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem">
+    {% for order in orders %}
+    <article class="card" style="padding:1.25rem">
+      <div class="flex justify-between items-center mb-2">
+        <strong>#{{ order.order_number }}</strong>
+        <span class="badge {% if order.status == 'PLACED' %}badge-orange{% elif order.status == 'PREPARING' %}badge-brown{% else %}badge-green{% endif %}">{{ order.status.replace('_', ' ') }}</span>
+      </div>
+      <p class="text-sm text-muted">{{ order.customer.name }} · {{ order.delivery_slot }} · {{ order.delivery_date }}</p>
+      <p class="text-sm">Prep Age: {{ ((now - order.placed_at).total_seconds() // 60)|int }} min</p>
+      <ul style="margin-top:0.75rem;padding-left:1rem">
+        {% for item in order.items.all() %}
+        <li>{{ item.product_name }} × {{ item.quantity }}</li>
+        {% endfor %}
+      </ul>
+    </article>
+    {% else %}
+    <div class="card" style="padding:1.5rem"><p class="text-muted">No active kitchen orders.</p></div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+if (typeof io !== 'undefined') {
+  const socket = io({ query: { portal: 'admin' }, transports: ['websocket', 'polling'], reconnection: true });
+  socket.on('kds_refresh', () => window.location.reload());
+  socket.on('order_updated', () => window.location.reload());
+}
+</script>
+{% endblock %}

@@ -1,4 +1,4 @@
-from tasks.messaging import render_low_stock_digest, send_email, send_sms
+from tasks.messaging import render_low_stock_digest, send_email, send_sms, send_whatsapp_message
 
 
 def notify(user_id, title, message, ntype="order", link=""):
@@ -93,6 +93,23 @@ def send_order_sms(order, new_status=None):
     return send_sms.delay(user.phone, msg)
 
 
+def send_order_whatsapp(order, new_status=None):
+    user = order.customer
+    if not user.phone:
+        return False
+    if new_status:
+        message = (
+            f"SweetCrumbs: order #{order.order_number} is now "
+            f"{new_status.replace('_', ' ')}."
+        )
+    else:
+        message = (
+            f"SweetCrumbs: your order #{order.order_number} "
+            f"for Rs {int(order.total)} is confirmed."
+        )
+    return send_whatsapp_message.delay(user.phone, message)
+
+
 def notify_order_status_change(order, new_status, old_status=None):
     from flask import current_app, url_for
     from models import LoyaltyLedger, db
@@ -138,6 +155,12 @@ def notify_order_status_change(order, new_status, old_status=None):
     except Exception:
         current_app.logger.exception(
             "Failed to send status update SMS for order %s", order.id
+        )
+    try:
+        send_order_whatsapp(order, new_status)
+    except Exception:
+        current_app.logger.exception(
+            "Failed to send WhatsApp status update for order %s", order.id
         )
 
 

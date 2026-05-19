@@ -1,0 +1,48 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}POS — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">🧾 Offline-Ready POS</h1>
+    <p class="text-muted">Walk-in billing, barcode/SKU lookup, and printable receipt-ready order creation.</p>
+  </div>
+</div>
+<div class="page-grid page-grid-sidebar">
+  <section class="card">
+    <div class="card-header">Available Variants</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Product</th><th>Variant</th><th>SKU</th><th>Barcode</th><th>Stock</th><th>Price</th></tr></thead>
+        <tbody>
+          {% for variant in variants %}
+          <tr>
+            <td>{{ variant.product.name }}</td>
+            <td>{{ variant.name }}</td>
+            <td>{{ variant.sku or '—' }}</td>
+            <td>{{ variant.barcode or '—' }}</td>
+            <td>{{ variant.stock }}</td>
+            <td>₹{{ variant.price|int }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-center text-muted" style="padding:1rem">No POS products available.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <aside class="card">
+    <div class="card-header">New POS Sale</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.pos') }}">
+        <div class="form-group"><label class="form-label">Variant</label><select class="form-control" name="variant_id">{% for variant in variants %}<option value="{{ variant.id }}">{{ variant.product.name }} · {{ variant.name }} · ₹{{ variant.price|int }}</option>{% endfor %}</select></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Quantity</label><input class="form-control" type="number" name="quantity" min="1" value="1"></div>
+          <div class="form-group"><label class="form-label">Payment</label><select class="form-control" name="payment_mode"><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option></select></div>
+        </div>
+        <div class="form-group"><label class="form-label">Customer Phone</label><input class="form-control" name="customer_phone" placeholder="+91"></div>
+        <button class="btn btn-primary btn-block" type="submit">Create POS Sale</button>
+      </form>
+    </div>
+  </aside>
+</div>
+{% endblock %}

@@ -79,7 +79,7 @@ def search_suggestions():
     if len(q) < 2:
         return jsonify([])
     products = get_container().product_repository.active_search(q, limit=5)
-    return jsonify([{'id': p.id, 'name': p.name, 'price': float(p.base_price)} for p in products])
+    return jsonify([{'id': p.id, 'name': p.name, 'price': float(p.current_price)} for p in products])
 
 
 # ── LOYALTY API ──────────────────────────────────────────────

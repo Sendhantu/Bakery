@@ -1,0 +1,39 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Subscriptions — Admin{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">Recurring Subscriptions</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Customer</th><th>Plan</th><th>Status</th><th>Next Billing</th></tr></thead>
+      <tbody>
+        {% for subscription in subscriptions %}
+        <tr>
+          <td>{{ subscription.user.name }}</td>
+          <td>{{ subscription.plan|title }}</td>
+          <td>{{ subscription.status|title }}</td>
+          <td>{{ subscription.next_billing_at or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No subscriptions yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="card mt-3">
+  <div class="card-header">Schedule Health</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Subscription</th><th>Next Run</th><th>Status</th><th>Last Generated</th></tr></thead>
+      <tbody>
+        {% for schedule in schedules %}
+        <tr><td>#{{ schedule.subscription_id }}</td><td>{{ schedule.next_run_at }}</td><td>{{ schedule.status|title }}</td><td>{{ schedule.last_generated_at or '—' }}</td></tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No schedules yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

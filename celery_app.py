@@ -1,23 +1,12 @@
 import os
-from celery import Celery
+
 from app import create_app
+from models import celery
 
-def make_celery(app):
-    celery = Celery(
-        app.import_name,
-        backend=app.config['CELERY_RESULT_BACKEND'],
-        broker=app.config['CELERY_BROKER_URL']
-    )
-    celery.conf.update(app.config)
+import tasks  # noqa: F401
 
-    class ContextTask(celery.Task):
-        def __call__(self, *args, **kwargs):
-            with app.app_context():
-                return self.run(*args, **kwargs)
+config_name = os.environ.get("FLASK_ENV", "development").strip().lower() or "development"
+portal_role = (os.environ.get("PORTAL_ROLE") or "customer").strip().lower() or "customer"
 
-    celery.Task = ContextTask
-    return celery
-
-env = os.environ.get('FLASK_ENV', 'development')
-flask_app = create_app(env)
-celery_app = make_celery(flask_app)
+flask_app = create_app(config_name, portal_role=portal_role)
+celery_app = celery

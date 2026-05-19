@@ -3,18 +3,26 @@ import os
 from datetime import datetime
 from decimal import Decimal
 
-from flask import Flask, request, send_from_directory, url_for, jsonify, current_app, redirect
+from flask import Flask, request, send_from_directory, url_for, jsonify, current_app, redirect, render_template
 from flask_login import LoginManager
 from flask_mail import Mail
 from flask_wtf import CSRFProtect
-from sqlalchemy import inspect, text
+from flask_socketio import join_room
+from sqlalchemy import text
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from api.v1 import api_v1_bp
 from api.v2 import api_v2_bp
 from bootstrap import build_service_container
 from config import config
-from models import User, bcrypt, cache, db, limiter, socketio
+from infrastructure import (
+    configure_logging,
+    init_sentry,
+    register_error_handlers,
+    register_request_hooks,
+    register_sqlalchemy_observers,
+)
+from models import User, bcrypt, cache, celery, db, limiter, socketio
 from utils import (
     address_query,
     apply_security_headers,
@@ -22,6 +30,13 @@ from utils import (
     map_link_url,
     should_force_https,
 )
+
+try:
+    from flask_jwt_extended import JWTManager
+except ImportError:  # pragma: no cover
+    class JWTManager:  # type: ignore
+        def init_app(self, *args, **kwargs):
+            return None
 
 try:
     from flask_migrate import Migrate
@@ -37,6 +52,7 @@ login_manager = LoginManager()
 mail = Mail()
 csrf = CSRFProtect()
 migrate = Migrate()
+jwt = JWTManager()
 CREDENTIAL_REGISTRY_PATH = os.path.join(
     os.path.dirname(__file__), "output", "dev_credentials.json"
 )
@@ -69,6 +85,16 @@ DEMO_PORTAL_CREDENTIALS = {
         "label": "Delivery Default",
     },
 }
+
+
+@socketio.on("connect")
+def handle_socket_connect():
+    portal = (request.args.get("portal") or "customer").strip().lower()
+    if portal in {"customer", "admin", "delivery"}:
+        join_room(portal)
+    if portal == "admin":
+        join_room("kds")
+    join_room("global")
 
 
 def env_flag(name):
@@ -236,23 +262,12 @@ def configure_app(app, config_name="default", portal_role=None):
     app.config.from_object(config[config_name])
     if hasattr(config[config_name], "init_app"):
         config[config_name].init_app(app)
-    database_url = (os.environ.get("DATABASE_URL") or "").strip()
-    if database_url:
-        database_url = database_url.replace("Sendhan@2005", "Sendhan%402005")
-        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-
-    existing_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
-    if "Sendhan@2005" in existing_uri:
-        app.config["SQLALCHEMY_DATABASE_URI"] = existing_uri.replace(
-            "Sendhan@2005",
-            "Sendhan%402005",
-        )
-    app.config.setdefault("CACHE_TYPE", "SimpleCache")
     app.config["PORTAL_ROLE"] = resolve_portal_role(portal_role)
-    # Separate session cookies for each portal
     current_role = app.config["PORTAL_ROLE"]
     app.config["SESSION_COOKIE_NAME"] = f"sweetcrumbs_{current_role}_session"
-    app.config["SHOW_DEMO_ACCOUNTS"] = config_name != "production"
+    app.config["OFFLINE_SYNC_DB_PATH"] = app.config.get(
+        "OFFLINE_SYNC_DB_TEMPLATE", ""
+    ).format(portal_role=current_role)
     show_demo_override = env_flag("SHOW_DEMO_ACCOUNTS")
     if show_demo_override is not None:
         app.config["SHOW_DEMO_ACCOUNTS"] = show_demo_override
@@ -267,9 +282,6 @@ def configure_app(app, config_name="default", portal_role=None):
         )
 
     app.config.setdefault("JSON_SORT_KEYS", False)
-    # Disable CSRF during local development
-    if config_name != "production":
-        app.config["WTF_CSRF_ENABLED"] = False
     return config_name
 
 
@@ -279,6 +291,11 @@ def setup_middleware(app):
 
 
 def build_socketio_origins(app):
+    configured_origins = app.config.get("SOCKETIO_CORS_ALLOWED_ORIGINS")
+    if configured_origins and configured_origins != "*":
+        if isinstance(configured_origins, str):
+            return [item.strip() for item in configured_origins.split(",") if item.strip()]
+        return configured_origins
     if app.config.get("ENV") == "production":
         origins = [
             app.config.get("CUSTOMER_PORTAL_URL"),
@@ -289,6 +306,34 @@ def build_socketio_origins(app):
     return "*"
 
 
+def setup_celery(app):
+    broker = app.config.get("CELERY_BROKER_URL")
+    backend = app.config.get("CELERY_RESULT_BACKEND")
+    if not broker or not backend:
+        return celery
+
+    celery.conf.update(
+        broker_url=broker,
+        result_backend=backend,
+        task_serializer="json",
+        accept_content=["json"],
+        result_serializer="json",
+        timezone="UTC",
+        enable_utc=True,
+        beat_schedule=app.config.get("CELERY_BEAT_SCHEDULE") or {},
+        imports=("tasks",),
+    )
+
+    class ContextTask(celery.Task):
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return self.run(*args, **kwargs)
+
+    celery.Task = ContextTask
+    app.extensions["celery"] = celery
+    return celery
+
+
 def setup_extensions(app):
     db.init_app(app)
     bcrypt.init_app(app)
@@ -296,15 +341,22 @@ def setup_extensions(app):
     cache.init_app(app)
     mail.init_app(app)
     csrf.init_app(app)
+    jwt.init_app(app)
+    message_queue = app.config.get("REDIS_URL") or app.config.get("SOCKETIO_MESSAGE_QUEUE")
     socketio.init_app(
         app,
-        async_mode="gevent" if os.environ.get("FLASK_ENV") == "production" else "threading",
+        async_mode=app.config.get("SOCKETIO_ASYNC_MODE", "threading"),
         cors_allowed_origins=build_socketio_origins(app),
-        message_queue=app.config.get("SOCKETIO_MESSAGE_QUEUE"),
+        message_queue=message_queue,
     )
+    setup_celery(app)
+    import tasks  # noqa: F401 — register Celery task modules
+
     migrate.init_app(app, db, compare_type=True)
     login_manager.init_app(app)
-    login_manager.session_protection = "strong"
+    login_manager.session_protection = app.config.get(
+        "LOGIN_SESSION_PROTECTION", "basic"
+    )
     login_manager.login_view = "auth.login"
     if app.config.get("PORTAL_ROLE") == "admin":
         login_manager.login_view = "admin.admin_login"
@@ -354,18 +406,136 @@ def register_core_routes(app):
             app.static_folder, "robots.txt", mimetype="text/plain"
         )
 
+    @app.route("/admin/manifest.json")
+    def admin_manifest():
+        return jsonify(
+            {
+                "name": "SweetCrumbs Admin Portal",
+                "short_name": "Sweet Admin",
+                "start_url": "/admin/",
+                "display": "standalone",
+                "background_color": "#FDF6EC",
+                "theme_color": "#5C3D2E",
+                "icons": [
+                    {
+                        "src": url_for("static", filename="icons/bakery-app.svg"),
+                        "sizes": "512x512",
+                        "type": "image/svg+xml",
+                    }
+                ],
+            }
+        )
+
+    @app.route("/delivery/manifest.json")
+    def delivery_manifest():
+        return jsonify(
+            {
+                "name": "SweetCrumbs Delivery Portal",
+                "short_name": "Sweet Delivery",
+                "start_url": "/delivery/",
+                "display": "standalone",
+                "background_color": "#FDF6EC",
+                "theme_color": "#5C3D2E",
+                "icons": [
+                    {
+                        "src": url_for("static", filename="icons/bakery-app.svg"),
+                        "sizes": "512x512",
+                        "type": "image/svg+xml",
+                    }
+                ],
+            }
+        )
+
+    @app.route("/admin/offline")
+    def admin_offline():
+        return render_template("admin/offline.html")
+
+    @app.route("/delivery/offline")
+    def delivery_offline():
+        return render_template("delivery/offline.html")
+
+    @app.route("/admin/service-worker.js")
+    def admin_service_worker():
+        script = _build_service_worker_script(
+            cache_name="sweetcrumbs-admin-v1",
+            offline_url=url_for("admin_offline"),
+            warm_urls=[
+                url_for("admin.dashboard"),
+                url_for("admin_offline"),
+                url_for("static", filename="css/main.css"),
+                url_for("static", filename="js/main.js"),
+            ],
+        )
+        return app.response_class(script, mimetype="application/javascript")
+
+    @app.route("/delivery/service-worker.js")
+    def delivery_service_worker():
+        script = _build_service_worker_script(
+            cache_name="sweetcrumbs-delivery-v1",
+            offline_url=url_for("delivery_offline"),
+            warm_urls=[
+                url_for("delivery.dashboard"),
+                url_for("delivery_offline"),
+                url_for("static", filename="css/main.css"),
+                url_for("static", filename="js/main.js"),
+            ],
+        )
+        return app.response_class(script, mimetype="application/javascript")
+
     @app.route("/healthz")
     def healthz():
-        health_state = "ok"
         database_state = "ok"
+        redis_state = "ok"
+        celery_state = "ok"
+        storage_state = "ok"
+        status_code = 200
         try:
             db.session.execute(text("SELECT 1"))
         except Exception:
-            health_state = "error"
             database_state = "unhealthy"
-            app.logger.exception("Health check failed")
-        return jsonify(status=health_state, database=database_state), (
-            200 if health_state == "ok" else 503
+            status_code = 503
+        try:
+            redis_url = app.config.get("REDIS_URL")
+            if redis_url:
+                from redis import Redis
+
+                Redis.from_url(redis_url).ping()
+            elif app.config.get("ENV") == "production":
+                raise RuntimeError("REDIS_URL missing")
+        except Exception:
+            redis_state = "unhealthy"
+            status_code = 503
+        try:
+            broker = app.config.get("CELERY_BROKER_URL")
+            backend = app.config.get("CELERY_RESULT_BACKEND")
+            if not broker or not backend:
+                if app.config.get("ENV") == "production":
+                    raise RuntimeError("Celery broker/backend not configured")
+            else:
+                from redis import Redis
+
+                Redis.from_url(broker).ping()
+                registered = list(celery.tasks.keys())
+                if not any(name.startswith("tasks.") for name in registered):
+                    celery_state = "degraded"
+        except Exception:
+            celery_state = "unhealthy"
+            status_code = 503
+
+        storage_check = app.extensions["service_container"].storage_service.verify_connection()
+        storage_state = storage_check["status"]
+        if app.config.get("ENV") == "production" and storage_state != "ok":
+            status_code = 503
+
+        return (
+            jsonify(
+                status="ok" if status_code == 200 else "error",
+                database=database_state,
+                redis=redis_state,
+                celery=celery_state,
+                storage=storage_state,
+            ),
+            status_code,
         )
 
 
@@ -374,6 +544,7 @@ def register_context_processors(app):
     def inject_globals():
         from models import Category, Notification, get_loyalty_config
         from flask_login import current_user
+        from sqlalchemy.exc import SQLAlchemyError
 
         current_portal_role = app.config.get("PORTAL_ROLE", "customer")
 
@@ -406,12 +577,16 @@ def register_context_processors(app):
                 portal_urls[role] = configured or current_root
             return portal_urls
 
-        categories = Category.query.all()
+        categories = []
         unread_count = 0
-        if current_user.is_authenticated:
-            unread_count = Notification.query.filter_by(
-                user_id=current_user.id, is_read=False
-            ).count()
+        try:
+            categories = Category.query.all()
+            if current_user.is_authenticated:
+                unread_count = Notification.query.filter_by(
+                    user_id=current_user.id, is_read=False
+                ).count()
+        except SQLAlchemyError:
+            db.session.rollback()
         parallel_login_url, parallel_host = build_parallel_login_url()
         return dict(
             categories=categories,
@@ -424,7 +599,9 @@ def register_context_processors(app):
             parallel_host=parallel_host,
             current_year=datetime.now().year,
             portal_urls=build_portal_urls(),
-            portal_demo_credentials=DEMO_PORTAL_CREDENTIALS,
+            portal_demo_credentials={
+                entry["role"]: entry for entry in get_available_development_credentials()
+            },
             show_demo_accounts=app.config.get("SHOW_DEMO_ACCOUNTS", False),
             feature_flags=app.config.get("FEATURE_FLAGS", {}),
             loyalty_config=get_loyalty_config(),
@@ -437,76 +614,116 @@ def register_context_processors(app):
             map_link_url=map_link_url,
             map_embed_url=map_embed_url,
         )
-
-
-def apply_schema_compatibility_updates(app):
-    if not app.config.get("AUTO_INIT_DB"):
-        return
-
-    with app.app_context():
-        compatibility_updates = {
-            "products": [
-                ("preorder_required", "ALTER TABLE products ADD COLUMN preorder_required BOOLEAN DEFAULT 0"),
-                ("minimum_notice_hours", "ALTER TABLE products ADD COLUMN minimum_notice_hours INTEGER DEFAULT 24"),
-            ],
-            "orders": [
-                ("fulfillment_type", "ALTER TABLE orders ADD COLUMN fulfillment_type VARCHAR(20) DEFAULT 'DELIVERY'"),
-            ],
-        }
-
-        inspector = inspect(db.engine)
-        for table_name, operations in compatibility_updates.items():
-            existing_columns = {
-                column["name"] for column in inspector.get_columns(table_name)
-            }
-            for column_name, ddl in operations:
-                if column_name in existing_columns:
-                    continue
-                db.session.execute(text(ddl))
-                db.session.commit()
-                existing_columns.add(column_name)
-
-        db.session.execute(
-            text("UPDATE products SET preorder_required = COALESCE(preorder_required, 0)")
-        )
-        db.session.execute(
-            text("UPDATE products SET minimum_notice_hours = COALESCE(minimum_notice_hours, 24)")
-        )
-        db.session.execute(
-            text("UPDATE orders SET fulfillment_type = COALESCE(fulfillment_type, 'DELIVERY')")
-        )
-        db.session.commit()
-
-
 def initialize_database(app, seed=False):
     with app.app_context():
-        db.create_all()
-        auto_init_original = app.config.get("AUTO_INIT_DB")
-        app.config["AUTO_INIT_DB"] = True
-        try:
-            apply_schema_compatibility_updates(app)
-        finally:
-            app.config["AUTO_INIT_DB"] = auto_init_original
+        from flask_migrate import upgrade
 
+        upgrade()
         if seed:
             seed_data(app)
+
+
+def _build_service_worker_script(cache_name, offline_url, warm_urls):
+    precache = json.dumps(list(dict.fromkeys(warm_urls)))
+    return f"""
+const CACHE_NAME = "{cache_name}";
+const OFFLINE_URL = "{offline_url}";
+const PRECACHE_URLS = {precache};
+
+self.addEventListener("install", (event) => {{
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)).then(() => self.skipWaiting())
+  );
+}});
+
+self.addEventListener("activate", (event) => {{
+  event.waitUntil(self.clients.claim());
+}});
+
+self.addEventListener("fetch", (event) => {{
+  if (event.request.method !== "GET") {{
+    return;
+  }}
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {{
+        const cloned = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
+        return response;
+      }})
+      .catch(() =>
+        caches.match(event.request).then((cached) => cached || caches.match(OFFLINE_URL))
+      )
+  );
+}});
+
+self.addEventListener("push", (event) => {{
+  const payload = event.data ? event.data.json() : {{}};
+  const title = payload.title || "SweetCrumbs";
+  const options = {{
+    body: payload.body || "New bakery update available.",
+    icon: "/static/icons/bakery-app.svg",
+    data: payload.data || {{}},
+  }};
+  event.waitUntil(self.registration.showNotification(title, options));
+}});
+
+self.addEventListener("notificationclick", (event) => {{
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || "/";
+  event.waitUntil(clients.openWindow(targetUrl));
+}});
+"""
+
+
+def start_local_sync_worker(app):
+    if (
+        app.testing
+        or not app.config.get("ENABLE_LOCAL_SYNC_WORKER", False)
+        or app.config.get("PORTAL_ROLE") not in {"admin", "delivery"}
+        or app.config.get("ENV") == "production"
+    ):
+        return
+
+    if app.extensions.get("offline_sync_worker_started"):
+        return
+
+    app.extensions["offline_sync_worker_started"] = True
+    sync_service = app.extensions["service_container"].offline_sync_service
+
+    def _runner():
+        with app.app_context():
+            while True:
+                try:
+                    result = sync_service.flush_pending_actions()
+                    if any(result.values()):
+                        app.logger.info("offline_sync_flush %s", result)
+                except Exception:
+                    app.logger.exception("offline_sync_flush_failed")
+                socketio.sleep(app.config.get("SYNC_RETRY_INTERVAL_SECONDS", 30))
+
+    socketio.start_background_task(_runner)
 
 
 def create_app(config_name="default", portal_role=None):
     app = Flask(__name__)
     configure_app(app, config_name, portal_role)
+    configure_logging(app)
     setup_middleware(app)
     setup_extensions(app)
+    init_sentry(app)
     setup_security(app)
     build_service_container(app)
+    register_request_hooks(app)
+    register_error_handlers(app)
     register_blueprints(app)
     register_core_routes(app)
     register_context_processors(app)
-
-    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-
+    with app.app_context():
+        register_sqlalchemy_observers(app)
     if app.config.get("AUTO_INIT_DB"):
-        initialize_database(app, seed=True)
+        initialize_database(app, seed=app.config.get("SHOW_DEMO_ACCOUNTS", False))
+    start_local_sync_worker(app)
     print_development_startup_banner(app)
 
     return app

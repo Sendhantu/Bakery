@@ -1,0 +1,16 @@
+{% extends 'delivery/base_delivery.html' %}
+{% block title %}Delivery Offline — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="container" style="max-width:760px">
+    <div class="card" style="padding:2rem">
+      <h1 class="section-title">Offline Delivery Mode</h1>
+      <p class="section-subtitle">Assigned delivery updates can still be recorded locally from this device. Status changes and COD collections will sync back to the central system as soon as connectivity returns.</p>
+      <div class="flex gap-2 flex-wrap">
+        <a href="{{ url_for('delivery.dashboard') }}" class="btn btn-primary">Open Dashboard</a>
+        <a href="{{ url_for('delivery.history') }}" class="btn btn-outline">Open History</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

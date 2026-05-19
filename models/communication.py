@@ -20,9 +20,16 @@ class Notification(db.Model):
     title      = db.Column(db.String(200))
     message    = db.Column(db.Text)
     type       = db.Column(db.String(50))
+    priority   = db.Column(db.String(20), default='normal')
+    channel    = db.Column(db.String(20), default='in_app')
     is_read    = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     link       = db.Column(db.String(255))
+
+    __table_args__ = (
+        db.Index('idx_notifications_user_id', 'user_id'),
+        db.Index('idx_notifications_user_read', 'user_id', 'is_read', 'created_at'),
+    )
 
 
 # ─────────────────────────────────────────

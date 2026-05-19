@@ -17,7 +17,7 @@
       <div class="product-card-body">
         <h3 class="product-card-title">{{ item.product.name }}</h3>
         <div class="flex justify-between items-center mt-2">
-          <span class="product-price">₹{{ item.product.base_price|int }}</span>
+          <span class="product-price">₹{{ item.product.current_price|int }}</span>
           <div class="flex gap-1">
             <form method="POST" action="{{ url_for('customer.add_to_cart') }}">
               <input type="hidden" name="product_id" value="{{ item.product_id }}">

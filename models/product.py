@@ -26,6 +26,7 @@ class Product(db.Model):
     preparation   = db.Column(db.Text)
     base_price    = db.Column(db.Numeric(10, 2), nullable=False)
     image         = db.Column(db.String(255), default='default-product.jpg')
+    image_url     = db.Column(db.String(512))
     category_id   = db.Column(db.Integer, db.ForeignKey('categories.id'))
     is_eggless    = db.Column(db.Boolean, default=False)
     is_active     = db.Column(db.Boolean, default=True)
@@ -33,6 +34,8 @@ class Product(db.Model):
     preorder_required = db.Column(db.Boolean, default=False)
     minimum_notice_hours = db.Column(db.Integer, default=24)
     occasion_tags = db.Column(db.String(300))
+    shelf_life_hours = db.Column(db.Integer, default=24)
+    version = db.Column(db.Integer, default=1, nullable=False)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
 
     variants     = db.relationship('ProductVariant', backref='product', lazy='dynamic', cascade='all, delete-orphan')
@@ -89,6 +92,8 @@ class Product(db.Model):
     @property
     def image_src(self):
         from flask import url_for
+        if self.image_url:
+            return self.image_url
         if not self.image or self.image == 'default-product.jpg':
             return self.fallback_image_src
         if self.image.startswith(('http://', 'https://')):
@@ -100,15 +105,49 @@ class Product(db.Model):
         category_name = (self.category.name if self.category else '').lower()
         return PRODUCT_FALLBACK_IMAGES.get(category_name, PRODUCT_FALLBACK_IMAGES['cakes'])
 
+    @property
+    def current_price(self):
+        try:
+            from flask import current_app
+
+            if current_app:
+                from bootstrap import get_container
+
+                return get_container().pricing_service.resolve_product_price(self)["price"]
+        except Exception:
+            return self.base_price
+        return self.base_price
+
 
 class ProductVariant(db.Model):
     __tablename__ = 'product_variants'
     id         = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
+    branch_id  = db.Column(db.Integer, db.ForeignKey('branches.id'))
     name       = db.Column(db.String(100), nullable=False)
     price      = db.Column(db.Numeric(10, 2), nullable=False)
     stock      = db.Column(db.Integer, default=0)
     sku        = db.Column(db.String(100))
+    barcode    = db.Column(db.String(100), unique=True)
+    version    = db.Column(db.Integer, default=1, nullable=False)
+
+    branch = db.relationship('Branch', backref='product_variants')
+
+    @property
+    def current_price(self):
+        try:
+            from flask import current_app
+
+            if current_app:
+                from bootstrap import get_container
+
+                return get_container().pricing_service.resolve_product_price(
+                    self.product,
+                    self,
+                )["price"]
+        except Exception:
+            return self.price
+        return self.price
 
 
 class Review(db.Model):

@@ -162,7 +162,7 @@
             <p class="text-sm text-muted" style="margin-bottom:0.8rem">Requires {{ product.minimum_notice_hours }} hours notice.</p>
             {% endif %}
             <div class="product-card-footer">
-              <span class="product-price">₹{{ product.base_price|int }}</span>
+              <span class="product-price">₹{{ product.current_price|int }}</span>
               {% if product.stock_status != 'out_of_stock' %}
               <form method="POST" action="{{ url_for('customer.add_to_cart') }}">
                 <input type="hidden" name="product_id" value="{{ product.id }}">

@@ -13,6 +13,7 @@ from flask_login import login_required, current_user
 from bootstrap import get_container
 from exceptions import ValidationError
 from functools import wraps
+from utils.permissions import role_meets_minimum, roles_required
 from models import (
     db,
     User,
@@ -40,22 +41,37 @@ from models import (
     ProductionBatch,
     PaymentLink,
     LoyaltyLedger,
+    AuditLog,
+    ApiUsageLog,
+    AttendanceRecord,
+    FraudAlert,
+    InventoryForecast,
+    OperationalAlert,
+    PricingRule,
+    QueueMetric,
+    SalaryRecord,
+    SearchAnalytics,
+    StaffShift,
+    SubscriptionSchedule,
+    SyncConflict,
     get_loyalty_config,
     can_transition_order_status,
     get_allowed_order_statuses,
 )
 from services import enrich_orders
 from utils import (
+    ADMIN_PORTAL_ROLES,
     parse_decimal,
     notify,
     check_and_send_inventory_alerts,
+    has_role,
     validate_password,
 )
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 from dateutil.relativedelta import relativedelta  # pip install python-dateutil
 from sqlalchemy import func, extract, or_
+from sqlalchemy.exc import SQLAlchemyError
 from decimal import Decimal
-import os
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -63,7 +79,7 @@ admin_bp = Blueprint("admin", __name__)
 @admin_bp.before_request
 def ensure_admin_portal():
     if current_app.config.get("PORTAL_ROLE") != "admin":
-        if current_user.is_authenticated and current_user.role == "admin":
+        if current_user.is_authenticated and has_role(current_user, *ADMIN_PORTAL_ROLES):
             from routes.auth import portal_url_for_role
 
             return redirect(portal_url_for_role("admin", url_for("admin.dashboard")))
@@ -74,7 +90,9 @@ def ensure_admin_portal():
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not current_user.is_authenticated or current_user.role != "admin":
+        if not current_user.is_authenticated or not has_role(
+            current_user, *ADMIN_PORTAL_ROLES
+        ):
             flash("Admin access required.", "danger")
             return redirect(url_for("auth.login"))
         return f(*args, **kwargs)
@@ -135,26 +153,19 @@ def inject_admin_nav():
 
 # ── Image helper ─────────────────────────────────────────────
 def apply_product_image(product):
-    from flask import current_app
-    from werkzeug.utils import secure_filename
-
-    allowed = current_app.config.get(
-        "ALLOWED_IMAGE_EXTENSIONS", {"jpg", "jpeg", "png", "webp", "gif"}
-    )
-
     image_url = (request.form.get("image_url") or "").strip()
     if image_url.startswith(("http://", "https://")):
         product.image = image_url
+        product.image_url = image_url
 
     if "image" in request.files and request.files["image"].filename:
         f = request.files["image"]
-        ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
-        if ext not in allowed:
-            flash(f'Invalid image type .{ext}. Allowed: {", ".join(allowed)}', "danger")
-            return
-        filename = secure_filename(f.filename)
-        f.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
-        product.image = filename
+        uploaded_url = get_container().storage_service.upload_product_image(
+            f,
+            filename_prefix=(product.name or "product").strip().lower().replace(" ", "-"),
+        )
+        product.image = uploaded_url
+        product.image_url = uploaded_url
 
 
 # ── Recipe sync ──────────────────────────────────────────────
@@ -413,32 +424,33 @@ def add_product():
         RawMaterial.query.filter_by(is_active=True).order_by(RawMaterial.name).all()
     )
     if request.method == "POST":
-        p = Product(
-            name=request.form["name"],
-            description=request.form.get("description"),
-            ingredients=request.form.get("ingredients"),
-            preparation=request.form.get("preparation"),
-            base_price=request.form["base_price"],
-            category_id=request.form.get("category_id", type=int),
-            is_eggless=bool(request.form.get("is_eggless")),
-            is_featured=bool(request.form.get("is_featured")),
-            preorder_required=bool(request.form.get("preorder_required")),
-            minimum_notice_hours=max(1, request.form.get("minimum_notice_hours", type=int) or 24),
-            occasion_tags=request.form.get("occasion_tags", ""),
-        )
-        apply_product_image(p)
-        db.session.add(p)
-        db.session.flush()
-        variant_rows = [
-            {"id": None, "name": vn, "price": vp, "stock": vs}
-            for vn, vp, vs in zip(
-                request.form.getlist("variant_name[]"),
-                request.form.getlist("variant_price[]"),
-                request.form.getlist("variant_stock[]"),
-            )
-        ]
         try:
+            p = Product(
+                name=request.form["name"],
+                description=request.form.get("description"),
+                ingredients=request.form.get("ingredients"),
+                preparation=request.form.get("preparation"),
+                base_price=request.form["base_price"],
+                category_id=request.form.get("category_id", type=int),
+                is_eggless=bool(request.form.get("is_eggless")),
+                is_featured=bool(request.form.get("is_featured")),
+                preorder_required=bool(request.form.get("preorder_required")),
+                minimum_notice_hours=max(1, request.form.get("minimum_notice_hours", type=int) or 24),
+                occasion_tags=request.form.get("occasion_tags", ""),
+            )
+            apply_product_image(p)
+            db.session.add(p)
+            db.session.flush()
+            variant_rows = [
+                {"id": None, "name": vn, "price": vp, "stock": vs}
+                for vn, vp, vs in zip(
+                    request.form.getlist("variant_name[]"),
+                    request.form.getlist("variant_price[]"),
+                    request.form.getlist("variant_stock[]"),
+                )
+            ]
             get_container().inventory_service.sync_product_variants(p, variant_rows)
+            sync_product_materials(p)
         except ValidationError as exc:
             db.session.rollback()
             flash(str(exc), "danger")
@@ -448,7 +460,6 @@ def add_product():
                 categories=categories,
                 raw_materials=raw_materials,
             )
-        sync_product_materials(p)
         db.session.commit()
         flash("Product added!", "success")
         return redirect(url_for("admin.products"))
@@ -469,30 +480,31 @@ def edit_product(product_id):
         RawMaterial.query.filter_by(is_active=True).order_by(RawMaterial.name).all()
     )
     if request.method == "POST":
-        p.name = request.form["name"]
-        p.description = request.form.get("description")
-        p.ingredients = request.form.get("ingredients")
-        p.preparation = request.form.get("preparation")
-        p.base_price = request.form["base_price"]
-        p.category_id = request.form.get("category_id", type=int)
-        p.is_eggless = bool(request.form.get("is_eggless"))
-        p.is_featured = bool(request.form.get("is_featured"))
-        p.is_active = bool(request.form.get("is_active"))
-        p.preorder_required = bool(request.form.get("preorder_required"))
-        p.minimum_notice_hours = max(1, request.form.get("minimum_notice_hours", type=int) or 24)
-        p.occasion_tags = request.form.get("occasion_tags", "")
-        apply_product_image(p)
-        variant_rows = [
-            {"id": vid, "name": vn, "price": vp, "stock": vs}
-            for vid, vn, vp, vs in zip(
-                request.form.getlist("variant_id[]"),
-                request.form.getlist("variant_name[]"),
-                request.form.getlist("variant_price[]"),
-                request.form.getlist("variant_stock[]"),
-            )
-        ]
         try:
+            p.name = request.form["name"]
+            p.description = request.form.get("description")
+            p.ingredients = request.form.get("ingredients")
+            p.preparation = request.form.get("preparation")
+            p.base_price = request.form["base_price"]
+            p.category_id = request.form.get("category_id", type=int)
+            p.is_eggless = bool(request.form.get("is_eggless"))
+            p.is_featured = bool(request.form.get("is_featured"))
+            p.is_active = bool(request.form.get("is_active"))
+            p.preorder_required = bool(request.form.get("preorder_required"))
+            p.minimum_notice_hours = max(1, request.form.get("minimum_notice_hours", type=int) or 24)
+            p.occasion_tags = request.form.get("occasion_tags", "")
+            apply_product_image(p)
+            variant_rows = [
+                {"id": vid, "name": vn, "price": vp, "stock": vs}
+                for vid, vn, vp, vs in zip(
+                    request.form.getlist("variant_id[]"),
+                    request.form.getlist("variant_name[]"),
+                    request.form.getlist("variant_price[]"),
+                    request.form.getlist("variant_stock[]"),
+                )
+            ]
             get_container().inventory_service.sync_product_variants(p, variant_rows)
+            sync_product_materials(p)
         except ValidationError as exc:
             db.session.rollback()
             flash(str(exc), "danger")
@@ -502,8 +514,6 @@ def edit_product(product_id):
                 categories=categories,
                 raw_materials=raw_materials,
             )
-
-        sync_product_materials(p)
         db.session.commit()
         flash("Product updated!", "success")
         return redirect(url_for("admin.products"))
@@ -599,6 +609,12 @@ def order_detail(order_id):
         .order_by(PaymentLink.id.desc())
         .first()
     )
+    qr_verification_url = url_for("api_v2.verify_qr_token", _external=True)
+    order_qr_data_uri = get_container().qr_service.build_order_qr_data_uri(
+        order,
+        qr_verification_url,
+    )
+    db.session.commit()
     return render_template(
         "admin/order_detail.html",
         order=order,
@@ -608,6 +624,8 @@ def order_detail(order_id):
         addr_hist=addr_hist,
         payment_link=payment_link,
         allowed_statuses=get_allowed_order_statuses(order.status, actor="admin"),
+        order_qr_data_uri=order_qr_data_uri,
+        qr_verification_url=qr_verification_url,
     )
 
 
@@ -615,11 +633,27 @@ def order_detail(order_id):
 @admin_required
 def update_order_status(order_id):
     status = (request.form.get("status") or "").strip().upper()
+    offline_sync = get_container().offline_sync_service
+    if offline_sync.enabled and not offline_sync.is_online():
+        snapshot = offline_sync.get_snapshot("orders", order_id) or {}
+        request_id = offline_sync.queue_order_status_update_by_id(
+            order_id,
+            status,
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": order_id, "status": status},
+        )
+        flash(
+            f"Offline mode: status change queued for sync ({request_id[:8]}).",
+            "warning",
+        )
+        return redirect(url_for("admin.order_detail", order_id=order_id))
     try:
         order = get_container().order_service.update_order_status(
             order_id,
             status,
             actor="admin",
+            actor_id=current_user.id,
         )
     except ValueError:
         flash("Please choose a valid status.", "danger")
@@ -628,6 +662,24 @@ def update_order_status(order_id):
         message = str(exc) or "That status change is not allowed right now."
         flash(message, "danger")
         return redirect(url_for("admin.order_detail", order_id=order_id))
+    except SQLAlchemyError:
+        db.session.rollback()
+        offline_sync = get_container().offline_sync_service
+        snapshot = offline_sync.get_snapshot("orders", order_id) or {}
+        request_id = offline_sync.queue_order_status_update_by_id(
+            order_id,
+            status,
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": order_id, "status": status},
+        )
+        flash(
+            f"Internet unavailable. Status change queued locally for sync ({request_id[:8]}).",
+            "warning",
+        )
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+
+    get_container().offline_sync_service.cache_order(order)
 
     flash(f"Order status updated to {status}.", "success")
     return redirect(url_for("admin.order_detail", order_id=order_id))
@@ -652,6 +704,17 @@ def assign_delivery(order_id):
         )
     agent.availability = False
     db.session.commit()
+    deliveries = Delivery.query.filter_by(agent_id=agent_id, status="ASSIGNED").all()
+    get_container().route_planning_service.plan_for_agent(agent, deliveries)
+    from realtime.events import emit_delivery_assignment
+
+    emit_delivery_assignment(agent_id, order_id=order_id)
+    get_container().push_service.send_to_user(
+        agent.user_id,
+        "New delivery assignment",
+        f"Order #{order.order_number} has been assigned to you.",
+        data={"order_id": order_id},
+    )
     flash(f"Delivery assigned to {agent.name}.", "success")
     return redirect(url_for("admin.order_detail", order_id=order_id))
 
@@ -849,33 +912,129 @@ def inventory():
 @admin_bp.route("/inventory/update", methods=["POST"])
 @admin_required
 def update_stock():
-    v = ProductVariant.query.get_or_404(request.form.get("variant_id", type=int))
-    v.stock = request.form.get("stock", type=int)
-    db.session.commit()
-    # Trigger inventory email alert if stock is low
+    variant_id = request.form.get("variant_id", type=int)
     try:
-        check_and_send_inventory_alerts()
-    except Exception:
-        pass
-    flash("Stock updated!", "success")
+        v = ProductVariant.query.get_or_404(variant_id)
+    except SQLAlchemyError:
+        v = None
+    new_stock = request.form.get("stock", type=int)
+    offline_sync = get_container().offline_sync_service
+    if offline_sync.enabled and not offline_sync.is_online():
+        snapshot = offline_sync.get_snapshot("variants", variant_id) or {}
+        request_id = offline_sync.queue_variant_stock_update_by_id(
+            variant_id,
+            new_stock,
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": variant_id, "stock": new_stock},
+        )
+        flash(
+            f"Offline mode: stock update queued for sync ({request_id[:8]}).",
+            "warning",
+        )
+        return redirect(url_for("admin.inventory"))
+    try:
+        if v is None:
+            raise SQLAlchemyError("Database unavailable")
+        v.stock = new_stock
+        v.version = int(v.version or 0) + 1
+        get_container().audit_service.record(
+            "inventory_stock_updated",
+            "ProductVariant",
+            v.id,
+            actor_id=current_user.id,
+            metadata={"stock": new_stock},
+            change_summary=f"Variant stock set to {new_stock}",
+        )
+        db.session.commit()
+        get_container().offline_sync_service.cache_variant(v)
+        try:
+            check_and_send_inventory_alerts()
+        except Exception:
+            pass
+        flash("Stock updated!", "success")
+    except SQLAlchemyError:
+        db.session.rollback()
+        offline_sync = get_container().offline_sync_service
+        snapshot = offline_sync.get_snapshot("variants", variant_id) or {}
+        request_id = offline_sync.queue_variant_stock_update_by_id(
+            variant_id,
+            new_stock,
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": variant_id, "stock": new_stock},
+        )
+        flash(
+            f"Internet unavailable. Stock update queued locally for sync ({request_id[:8]}).",
+            "warning",
+        )
     return redirect(url_for("admin.inventory"))
 
 
 @admin_bp.route("/inventory/raw-material/update", methods=["POST"])
 @admin_required
 def update_raw_material_stock():
-    mat = RawMaterial.query.get_or_404(request.form.get("material_id", type=int))
+    material_id = request.form.get("material_id", type=int)
     try:
-        mat.stock = parse_decimal(request.form.get("stock"), "stock")
+        mat = RawMaterial.query.get_or_404(material_id)
+    except SQLAlchemyError:
+        mat = None
+    try:
+        new_stock = parse_decimal(request.form.get("stock"), "stock")
     except ValueError as e:
         flash(str(e), "danger")
         return redirect(url_for("admin.inventory"))
-    db.session.commit()
+    offline_sync = get_container().offline_sync_service
+    if offline_sync.enabled and not offline_sync.is_online():
+        snapshot = offline_sync.get_snapshot("raw_materials", material_id) or {}
+        request_id = offline_sync.queue_material_stock_update_by_id(
+            material_id,
+            new_stock,
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": material_id, "stock": float(new_stock)},
+        )
+        flash(
+            f"Offline mode: material update queued for sync ({request_id[:8]}).",
+            "warning",
+        )
+        return redirect(url_for("admin.inventory"))
     try:
-        check_and_send_inventory_alerts()
-    except Exception:
-        pass
-    flash("Raw material stock updated!", "success")
+        if mat is None:
+            raise SQLAlchemyError("Database unavailable")
+        mat.stock = new_stock
+        mat.version = int(mat.version or 0) + 1
+        get_container().audit_service.record(
+            "raw_material_stock_updated",
+            "RawMaterial",
+            mat.id,
+            actor_id=current_user.id,
+            branch_id=mat.branch_id,
+            metadata={"stock": float(new_stock)},
+            change_summary=f"Material stock set to {new_stock}",
+        )
+        db.session.commit()
+        get_container().offline_sync_service.cache_material(mat)
+        try:
+            check_and_send_inventory_alerts()
+        except Exception:
+            pass
+        flash("Raw material stock updated!", "success")
+    except SQLAlchemyError:
+        db.session.rollback()
+        offline_sync = get_container().offline_sync_service
+        snapshot = offline_sync.get_snapshot("raw_materials", material_id) or {}
+        request_id = offline_sync.queue_material_stock_update_by_id(
+            material_id,
+            new_stock,
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": material_id, "stock": float(new_stock)},
+        )
+        flash(
+            f"Internet unavailable. Material update queued locally for sync ({request_id[:8]}).",
+            "warning",
+        )
     return redirect(url_for("admin.inventory"))
 
 
@@ -1637,3 +1796,363 @@ def send_inventory_alerts():
     except Exception as e:
         flash(f"Alert failed: {e}", "danger")
     return redirect(url_for("admin.inventory"))
+
+
+@admin_bp.route("/forecasts")
+@admin_required
+def forecasts():
+    target_date = datetime.utcnow().date() + timedelta(days=1)
+    forecasts = get_container().forecast_service.weekly_summary()
+    if not forecasts:
+        forecasts = get_container().forecast_service.build_daily_forecasts(
+            target_date=target_date
+        )
+    return render_template("admin/forecasts.html", forecasts=forecasts, target_date=target_date)
+
+
+@admin_bp.route("/kds")
+@admin_required
+def kitchen_display():
+    orders = (
+        Order.query.filter(Order.status.in_(["PLACED", "PREPARING", "PACKED", "READY_FOR_PICKUP"]))
+        .order_by(Order.placed_at.asc())
+        .all()
+    )
+    return render_template("admin/kds.html", orders=orders, now=datetime.utcnow())
+
+
+@admin_bp.route("/staff")
+@admin_required
+def staff():
+    staff_users = (
+        User.query.filter(User.role != "customer")
+        .order_by(User.role.asc(), User.name.asc())
+        .all()
+    )
+    shifts = StaffShift.query.order_by(StaffShift.shift_date.desc()).limit(20).all()
+    attendance = AttendanceRecord.query.order_by(AttendanceRecord.created_at.desc()).limit(20).all()
+    salaries = SalaryRecord.query.order_by(SalaryRecord.period_end.desc()).limit(20).all()
+    branches = Branch.query.order_by(Branch.name.asc()).all()
+    return render_template(
+        "admin/staff.html",
+        staff_users=staff_users,
+        shifts=shifts,
+        attendance=attendance,
+        salaries=salaries,
+        branches=branches,
+        role_options=["admin", "branch_manager", "cashier", "kitchen_staff", "delivery"],
+    )
+
+
+@admin_bp.route("/staff/add", methods=["POST"])
+@admin_required
+def add_staff_member():
+    name = (request.form.get("name") or "").strip()
+    email = (request.form.get("email") or "").strip().lower()
+    phone = (request.form.get("phone") or "").strip()
+    password = (request.form.get("password") or "").strip()
+    role = (request.form.get("role") or "cashier").strip().lower()
+    branch_id = request.form.get("branch_id", type=int)
+    if not name or not email or not password:
+        flash("Name, email, and password are required.", "danger")
+        return redirect(url_for("admin.staff"))
+    if User.query.filter_by(email=email).first():
+        flash("A user with that email already exists.", "warning")
+        return redirect(url_for("admin.staff"))
+    password_errors = validate_password(password)
+    if password_errors:
+        for error in password_errors:
+            flash(error, "danger")
+        return redirect(url_for("admin.staff"))
+    user = User(
+        name=name,
+        email=email,
+        phone=phone,
+        role=role,
+        branch_id=branch_id,
+        is_active=True,
+    )
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    flash(f"{name} added to staff.", "success")
+    return redirect(url_for("admin.staff"))
+
+
+@admin_bp.route("/staff/shifts/add", methods=["POST"])
+@admin_required
+def add_staff_shift():
+    user_id = request.form.get("user_id", type=int)
+    shift_date_raw = request.form.get("shift_date", "").strip()
+    start_time_raw = request.form.get("start_time", "").strip()
+    end_time_raw = request.form.get("end_time", "").strip()
+    user = User.query.get_or_404(user_id)
+    try:
+        shift_date = datetime.strptime(shift_date_raw, "%Y-%m-%d").date()
+        start_time_value = datetime.strptime(start_time_raw, "%H:%M").time()
+        end_time_value = datetime.strptime(end_time_raw, "%H:%M").time()
+    except ValueError:
+        flash("Invalid shift date or time.", "danger")
+        return redirect(url_for("admin.staff"))
+    db.session.add(
+        StaffShift(
+            user_id=user.id,
+            branch_id=user.branch_id,
+            role=user.role,
+            shift_date=shift_date,
+            start_time=start_time_value,
+            end_time=end_time_value,
+        )
+    )
+    db.session.commit()
+    flash("Shift scheduled.", "success")
+    return redirect(url_for("admin.staff"))
+
+
+@admin_bp.route("/staff/attendance/clock", methods=["POST"])
+@admin_required
+def clock_staff_attendance():
+    user_id = request.form.get("user_id", type=int)
+    action = (request.form.get("action") or "in").strip().lower()
+    user = User.query.get_or_404(user_id)
+    record = (
+        AttendanceRecord.query.filter_by(user_id=user.id)
+        .order_by(AttendanceRecord.created_at.desc())
+        .first()
+    )
+    if action == "in":
+        db.session.add(
+            AttendanceRecord(
+                user_id=user.id,
+                branch_id=user.branch_id,
+                clock_in_at=datetime.utcnow(),
+                status="present",
+            )
+        )
+        flash("Clock-in recorded.", "success")
+    else:
+        if record is None or record.clock_in_at is None or record.clock_out_at is not None:
+            flash("No open attendance record found.", "warning")
+            return redirect(url_for("admin.staff"))
+        record.clock_out_at = datetime.utcnow()
+        record.worked_minutes = int(
+            (record.clock_out_at - record.clock_in_at).total_seconds() // 60
+        )
+        flash("Clock-out recorded.", "success")
+    db.session.commit()
+    return redirect(url_for("admin.staff"))
+
+
+@admin_bp.route("/pos", methods=["GET", "POST"])
+@admin_required
+def pos():
+    variants = ProductVariant.query.join(Product).filter(Product.is_active.is_(True)).order_by(Product.name.asc()).all()
+    if request.method == "POST":
+        variant_id = request.form.get("variant_id", type=int)
+        quantity = max(1, request.form.get("quantity", type=int) or 1)
+        payment_mode = (request.form.get("payment_mode") or "CASH").upper()
+        customer_phone = request.form.get("customer_phone", "")
+        try:
+            variant = ProductVariant.query.get_or_404(variant_id)
+            unit_price = variant.price
+            subtotal = unit_price * quantity
+            walkin_email = "walkin@sweetcrumbs.local"
+            customer = User.query.filter_by(email=walkin_email).first()
+            if customer is None:
+                customer = User(
+                    name="Walk-in Customer",
+                    email=walkin_email,
+                    role="customer",
+                    is_active=True,
+                    phone=customer_phone or None,
+                )
+                db.session.add(customer)
+                db.session.flush()
+            order = Order(
+                order_number=Order.generate_order_number(),
+                user_id=customer.id,
+                source="POS",
+                status="DELIVERED",
+                fulfillment_type="PICKUP",
+                payment_method=payment_mode,
+                payment_status="PAID",
+                subtotal=subtotal,
+                total=subtotal,
+                gst_amount=0,
+                address_line1=current_app.config["STORE_DETAILS"].get("address_line1", ""),
+                city=current_app.config["STORE_DETAILS"].get("city", ""),
+                pincode=current_app.config["STORE_DETAILS"].get("pincode", ""),
+                phone=customer_phone or current_app.config["STORE_DETAILS"].get("phone_tel", ""),
+                delivery_slot="Walk-in",
+                delivery_date=datetime.utcnow().date(),
+            )
+            db.session.add(order)
+            db.session.flush()
+            db.session.add(
+                OrderItem(
+                    order_id=order.id,
+                    product_id=variant.product_id,
+                    variant_id=variant.id,
+                    product_name=variant.product.name,
+                    variant_name=variant.name,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    subtotal=subtotal,
+                )
+            )
+            variant.stock = max(0, int(variant.stock or 0) - quantity)
+            payment = Payment(order_id=order.id, amount=subtotal, method=order.payment_method)
+            db.session.add(payment)
+            db.session.flush()
+            payment.transition_to("PAID", actor_id=current_user.id, reason="pos_sale")
+            db.session.commit()
+            flash(f"POS sale created for order #{order.order_number}.", "success")
+        except SQLAlchemyError:
+            db.session.rollback()
+            request_id = get_container().offline_sync_service.queue_pos_sale(
+                variant_id=variant_id,
+                quantity=quantity,
+                payment_mode=payment_mode,
+                customer_phone=customer_phone,
+                actor_id=current_user.id,
+            )
+            flash(
+                f"Connection lost. POS sale queued locally for sync ({request_id[:8]}).",
+                "warning",
+            )
+        return redirect(url_for("admin.pos"))
+    return render_template("admin/pos.html", variants=variants)
+
+
+@admin_bp.route("/pricing", methods=["GET", "POST"])
+@admin_required
+def pricing():
+    if request.method == "POST":
+        percent_discount = request.form.get("percent_discount", type=float) or 0
+        rule = PricingRule(
+            name=(request.form.get("name") or "Dynamic pricing rule").strip(),
+            rule_type=(request.form.get("rule_type") or "scheduled_discount").strip(),
+            category_id=request.form.get("category_id", type=int),
+            branch_id=request.form.get("branch_id", type=int),
+            percent_discount=percent_discount,
+            applies_after_hour=request.form.get("applies_after_hour", type=int),
+            max_batch_age_hours=request.form.get("max_batch_age_hours", type=int),
+        )
+        db.session.add(rule)
+        db.session.commit()
+        flash("Pricing rule saved.", "success")
+        return redirect(url_for("admin.pricing"))
+    rules = PricingRule.query.order_by(PricingRule.created_at.desc()).all()
+    categories = Category.query.order_by(Category.name.asc()).all()
+    branches = Branch.query.order_by(Branch.name.asc()).all()
+    return render_template("admin/pricing.html", rules=rules, categories=categories, branches=branches)
+
+
+@admin_bp.route("/subscriptions")
+@admin_required
+def subscriptions_admin():
+    subscriptions = Subscription.query.order_by(Subscription.start_date.desc()).all()
+    schedules = SubscriptionSchedule.query.order_by(SubscriptionSchedule.next_run_at.asc()).all()
+    return render_template("admin/subscriptions.html", subscriptions=subscriptions, schedules=schedules)
+
+
+@admin_bp.route("/audit")
+@admin_required
+def audit():
+    logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(100).all()
+    alerts = OperationalAlert.query.order_by(OperationalAlert.created_at.desc()).limit(50).all()
+    fraud_alerts = FraudAlert.query.order_by(FraudAlert.created_at.desc()).limit(50).all()
+    return render_template("admin/audit.html", logs=logs, alerts=alerts, fraud_alerts=fraud_alerts)
+
+
+@admin_bp.route("/queue-monitor")
+@admin_required
+def queue_monitor():
+    offline_sync = get_container().offline_sync_service
+    pending_actions = offline_sync.pending_actions(limit=100) if offline_sync.enabled else []
+    db.session.add(
+        QueueMetric(
+            queue_name="offline_sync",
+            backlog=len(pending_actions),
+            failed_count=0,
+            retry_count=len([item for item in pending_actions if item.get("status") == "retry"]),
+        )
+    )
+    db.session.commit()
+    recent_metrics = QueueMetric.query.order_by(QueueMetric.recorded_at.desc()).limit(20).all()
+    api_usage = ApiUsageLog.query.order_by(ApiUsageLog.created_at.desc()).limit(20).all()
+    celery_summary = {"registered_tasks": 0, "active_workers": 0}
+    try:
+        from models import celery as celery_app
+
+        inspector = celery_app.control.inspect(timeout=1.0)
+        if inspector:
+            registered = inspector.registered() or {}
+            active = inspector.active() or {}
+            celery_summary = {
+                "registered_tasks": sum(len(tasks) for tasks in registered.values()),
+                "active_workers": len(active),
+            }
+    except Exception:
+        pass
+    return render_template(
+        "admin/queue_monitor.html",
+        pending_actions=pending_actions,
+        recent_metrics=recent_metrics,
+        api_usage=api_usage,
+        celery_summary=celery_summary,
+    )
+
+
+@admin_bp.route("/offline")
+@admin_required
+def offline_admin():
+    offline_sync = get_container().offline_sync_service
+    conflicts = SyncConflict.query.filter(SyncConflict.resolved_at.is_(None)).order_by(
+        SyncConflict.created_at.desc()
+    ).limit(50).all()
+    pending_actions = offline_sync.pending_actions(limit=50) if offline_sync.enabled else []
+    return render_template(
+        "admin/offline.html",
+        conflicts=conflicts,
+        pending_actions=pending_actions,
+        online=offline_sync.is_online() if offline_sync.enabled else True,
+    )
+
+
+@admin_bp.route("/offline/conflicts/<int:conflict_id>/resolve", methods=["POST"])
+@roles_required("admin", "super_admin", "branch_manager")
+def resolve_sync_conflict(conflict_id):
+    resolution = (request.form.get("resolution") or "accept_local").strip().lower()
+    try:
+        get_container().offline_sync_service.resolve_conflict(
+            conflict_id,
+            resolution,
+            actor_id=current_user.id,
+        )
+        flash("Sync conflict resolved.", "success")
+    except ValidationError as exc:
+        flash(str(exc), "danger")
+    return redirect(url_for("admin.offline_admin"))
+
+
+@admin_bp.route("/delivery/routes/plan", methods=["POST"])
+@roles_required("admin", "super_admin", "branch_manager")
+def plan_delivery_routes():
+    agent_id = request.form.get("agent_id", type=int)
+    agent = DeliveryAgent.query.get_or_404(agent_id)
+    deliveries = Delivery.query.filter_by(agent_id=agent_id).filter(
+        Delivery.status.in_(["ASSIGNED", "OUT_FOR_DELIVERY"])
+    ).all()
+    plan = get_container().route_planning_service.plan_for_agent(agent, deliveries)
+    flash(
+        f"Route planned with {plan.stop_count} stops (~{plan.estimated_duration_minutes} min).",
+        "success",
+    )
+    return redirect(url_for("admin.orders"))
+
+
+@admin_bp.route("/qr-scanner")
+@admin_required
+def qr_scanner():
+    return render_template("admin/qr_scanner.html")

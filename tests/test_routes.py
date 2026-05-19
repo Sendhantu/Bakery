@@ -76,6 +76,7 @@ def test_customer_checkout_page_loads(client):
     assert b'Checkout' in response.data
     assert b'Delivery Address' in response.data
     assert b'Use Exact Location' in response.data
+    assert b'name="csrf_token"' in response.data
 
 
 def test_robots_txt(client):

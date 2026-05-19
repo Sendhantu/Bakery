@@ -4,6 +4,7 @@ from bootstrap import get_container
 from exceptions import ValidationError
 from functools import wraps
 from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 
 from models import db, Delivery, DeliveryAgent, Order, User, can_transition_order_status, get_allowed_order_statuses
 from datetime import datetime
@@ -110,15 +111,49 @@ def update_status(order_id):
     agent, delivery, order = get_assigned_delivery_or_404(order_id)
     status = (request.form.get('status') or '').strip().upper()
 
+    offline_sync = get_container().offline_sync_service
+    if offline_sync.enabled and not offline_sync.is_online():
+        snapshot = offline_sync.get_snapshot("orders", order_id) or {}
+        request_id = offline_sync.queue_order_status_update_by_id(
+            order_id,
+            status,
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": order_id, "status": status},
+        )
+        flash(
+            f'Offline mode: update queued for sync ({request_id[:8]}).',
+            'warning',
+        )
+        return redirect(url_for('delivery.order_detail', order_id=order_id))
     try:
         order = get_container().order_service.update_order_status(
             order_id,
             status,
             actor='delivery',
+            actor_id=current_user.id,
         )
     except ValidationError:
         flash('Invalid delivery status.', 'danger')
         return redirect(url_for('delivery.order_detail', order_id=order_id))
+    except SQLAlchemyError:
+        db.session.rollback()
+        offline_sync = get_container().offline_sync_service
+        snapshot = offline_sync.get_snapshot("orders", order_id) or {}
+        request_id = offline_sync.queue_order_status_update_by_id(
+            order_id,
+            status,
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": order_id, "status": status},
+        )
+        flash(
+            f'Connection lost. Delivery update queued locally for sync ({request_id[:8]}).',
+            'warning',
+        )
+        return redirect(url_for('delivery.order_detail', order_id=order_id))
+
+    get_container().offline_sync_service.cache_order(order)
 
     flash(f'Status updated to {status}.', 'success')
     return redirect(url_for('delivery.order_detail', order_id=order.id))
@@ -128,15 +163,51 @@ def update_status(order_id):
 @delivery_required
 def collect_payment(order_id):
     _agent, _delivery, order = get_assigned_delivery_or_404(order_id)
+    offline_sync = get_container().offline_sync_service
+    if offline_sync.enabled and not offline_sync.is_online():
+        snapshot = offline_sync.get_snapshot("orders", order_id) or {}
+        request_id = offline_sync.queue_cod_collection_by_id(
+            order_id,
+            request.form.get('amount_received'),
+            request.form.get('payment_mode', 'CASH'),
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": order_id, "payment_status": "PAID"},
+        )
+        flash(
+            f'Offline mode: COD collection queued for sync ({request_id[:8]}).',
+            'warning',
+        )
+        return redirect(url_for('delivery.order_detail', order_id=order_id))
     try:
         order = get_container().delivery_service.collect_cod_payment(
             order_id,
             request.form.get('amount_received'),
             payment_mode=request.form.get('payment_mode', 'CASH'),
+            actor_id=current_user.id,
         )
     except ValidationError as exc:
         flash(str(exc), 'danger')
         return redirect(url_for('delivery.order_detail', order_id=order_id))
+    except SQLAlchemyError:
+        db.session.rollback()
+        offline_sync = get_container().offline_sync_service
+        snapshot = offline_sync.get_snapshot("orders", order_id) or {}
+        request_id = offline_sync.queue_cod_collection_by_id(
+            order_id,
+            request.form.get('amount_received'),
+            request.form.get('payment_mode', 'CASH'),
+            actor_id=current_user.id,
+            expected_version=snapshot.get("version"),
+            snapshot_payload={**snapshot, "id": order_id, "payment_status": "PAID"},
+        )
+        flash(
+            f'Connection lost. COD collection queued locally for sync ({request_id[:8]}).',
+            'warning',
+        )
+        return redirect(url_for('delivery.order_detail', order_id=order_id))
+
+    get_container().offline_sync_service.cache_order(order)
 
     flash('COD payment marked as collected.', 'success')
     return redirect(url_for('delivery.order_detail', order_id=order.id))

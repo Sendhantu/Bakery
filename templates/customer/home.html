@@ -193,7 +193,7 @@
             {{ product.description[:80] }}{% if product.description|length > 80 %}…{% endif %}
           </p>
           <div class="product-card-footer">
-            <span class="product-price">₹{{ product.base_price|int }}</span>
+            <span class="product-price">₹{{ product.current_price|int }}</span>
             <div class="product-card-actions">
               <a href="{{ url_for('customer.product_detail', product_id=product.id) }}" class="btn btn-outline btn-sm">Details</a>
               {% if product.stock_status != 'out_of_stock' %}

@@ -1,0 +1,53 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Queue Monitor — Admin{% endblock %}
+{% block content %}
+<div class="page-grid page-grid-sidebar">
+  <section class="card">
+    <div class="card-header">Offline Sync Backlog</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Request</th><th>Action</th><th>Entity</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for item in pending_actions %}
+          <tr><td>{{ item.request_id[:8] }}</td><td>{{ item.action_type }}</td><td>{{ item.entity_type }} #{{ item.entity_id }}</td><td>{{ item.status }}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No queued offline actions.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <aside style="display:flex;flex-direction:column;gap:1rem">
+    <div class="card">
+      <div class="card-header">Queue Metrics</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Queue</th><th>Backlog</th><th>Recorded</th></tr></thead>
+          <tbody>
+            {% for metric in recent_metrics %}
+            <tr><td>{{ metric.queue_name }}</td><td>{{ metric.backlog }}</td><td>{{ metric.recorded_at.strftime('%H:%M:%S') }}</td></tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center text-muted" style="padding:1rem">No metrics yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">Recent API Calls</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Path</th><th>Status</th><th>Latency</th></tr></thead>
+          <tbody>
+            {% for call in api_usage %}
+            <tr><td>{{ call.path }}</td><td>{{ call.status_code }}</td><td>{{ call.latency_ms }} ms</td></tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center text-muted" style="padding:1rem">No API usage yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

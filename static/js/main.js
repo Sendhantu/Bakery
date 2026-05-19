@@ -227,6 +227,46 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('load', restoreAdminScrollState, { once: true });
   initializeUiBindings(document);
 
+  if ('serviceWorker' in navigator && document.body.dataset.serviceWorkerUrl) {
+    navigator.serviceWorker.register(document.body.dataset.serviceWorkerUrl).catch((error) => {
+      console.error('Service worker registration failed.', error);
+    });
+  }
+
+  const initConnectivityBanner = () => {
+    if (!document.body.dataset.serviceWorkerUrl) return;
+    let banner = document.getElementById('connectivity-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'connectivity-banner';
+      banner.className = 'flash-msg flash-warning';
+      banner.style.display = 'none';
+      document.querySelector('.flash-container')?.prepend(banner);
+    }
+    const setStatus = (online) => {
+      if (!banner) return;
+      banner.textContent = online
+        ? 'Back online — syncing queued changes…'
+        : 'You are offline. Changes will queue locally until connectivity returns.';
+      banner.style.display = 'block';
+      if (online) {
+        fetch('/api/v2/sync/status', { credentials: 'same-origin' })
+          .then((response) => response.json())
+          .then((payload) => {
+            if (payload.ok && payload.pending_actions > 0) {
+              fetch('/api/v2/sync/flush', { method: 'POST', credentials: 'same-origin' });
+            }
+          })
+          .catch(() => {});
+        window.setTimeout(() => { banner.style.display = 'none'; }, 4000);
+      }
+    };
+    window.addEventListener('online', () => setStatus(true));
+    window.addEventListener('offline', () => setStatus(false));
+    if (!navigator.onLine) setStatus(false);
+  };
+  initConnectivityBanner();
+
   // ─── Flash Messages ─────────────────────────────
   const flashes = document.querySelectorAll('.flash-msg');
   flashes.forEach(f => {

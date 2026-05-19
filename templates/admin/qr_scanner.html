@@ -1,0 +1,55 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}QR Scanner — Admin{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="card" style="padding:1.5rem;max-width:640px;margin:0 auto">
+    <h1 class="section-title">Order QR Scanner</h1>
+    <p class="section-subtitle">Scan or paste a pickup QR token to verify an order.</p>
+    <video id="qr-video" playsinline style="width:100%;max-height:320px;background:#111;border-radius:12px"></video>
+    <form id="qr-manual-form" class="mt-3">
+      <label class="form-label">Token</label>
+      <input type="text" name="token" id="qr-token-input" class="form-control" placeholder="Paste QR token">
+      <button type="submit" class="btn btn-primary mt-2">Verify</button>
+    </form>
+    <pre id="qr-result" class="mt-3 text-sm" style="white-space:pre-wrap"></pre>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script>
+async function verifyToken(token) {
+  const response = await fetch(`/api/v2/qr/verify?token=${encodeURIComponent(token)}`, { credentials: 'same-origin' });
+  const payload = await response.json();
+  document.getElementById('qr-result').textContent = JSON.stringify(payload, null, 2);
+}
+document.getElementById('qr-manual-form')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  verifyToken(document.getElementById('qr-token-input').value.trim());
+});
+const video = document.getElementById('qr-video');
+if (navigator.mediaDevices && video) {
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then((stream) => {
+    video.srcObject = stream;
+    video.play();
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    const tick = () => {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        if (code?.data) {
+          const match = code.data.match(/token=([^&]+)/);
+          verifyToken(match ? match[1] : code.data);
+        }
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }).catch(() => {});
+}
+</script>
+{% endblock %}
