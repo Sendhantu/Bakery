@@ -1,0 +1,31 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Sync Conflicts — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="container">
+  <h1>Offline Sync Conflicts</h1>
+  <p>Review and resolve conflicts created when offline changes couldn't be applied due to version mismatches.</p>
+  <table class="table">
+    <thead>
+      <tr><th>ID</th><th>Entity</th><th>Action</th><th>Created</th><th>Local</th><th>Remote</th><th>Resolve</th></tr>
+    </thead>
+    <tbody>
+      {% for c in conflicts %}
+      <tr>
+        <td>{{ c.id }}</td>
+        <td>{{ c.entity_type }} #{{ c.entity_id }}</td>
+        <td>{{ c.action_type }}</td>
+        <td>{{ c.created_at }}</td>
+        <td><pre style="max-width:300px;white-space:pre-wrap;">{{ c.local_payload }}</pre></td>
+        <td><pre style="max-width:300px;white-space:pre-wrap;">{{ c.remote_payload }}</pre></td>
+        <td>
+          <form method="post" action="{{ url_for('admin.resolve_sync_conflict', conflict_id=c.id) }}">
+            <button name="resolution" value="accept_local" class="btn btn-sm">Accept Local</button>
+            <button name="resolution" value="accept_remote" class="btn btn-sm btn-ghost">Accept Remote</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

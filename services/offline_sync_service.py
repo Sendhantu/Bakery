@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from exceptions import ValidationError
+from exceptions import ConflictError
 from models import (
     Delivery,
     Order,
@@ -92,11 +93,22 @@ class OfflineSyncService:
 
     def is_online(self):
         try:
+            # Check DB connectivity
             db.session.execute(text("SELECT 1"))
-            return True
         except Exception:
             db.session.rollback()
             return False
+
+        # Also check Redis if configured for stronger online detection
+        try:
+            redis_url = self.app.config.get("REDIS_URL") or self.app.config.get("SOCKETIO_MESSAGE_QUEUE")
+            if redis_url:
+                from redis import Redis
+
+                Redis.from_url(redis_url).ping()
+        except Exception:
+            return False
+        return True
 
     def cache_snapshot(self, scope, entity_key, payload):
         if not self.enabled:
@@ -537,6 +549,7 @@ class OfflineSyncService:
         for action in self.pending_actions(limit=limit or self.app.config.get("SYNC_BATCH_SIZE", 50)):
             request_id = action["request_id"]
             payload = json.loads(action["payload_json"])
+            self.app.logger.debug("offline_sync_attempt", extra={"request_id": request_id, "action": action["action_type"], "entity": action.get("entity_type"), "entity_id": action.get("entity_id"), "attempts": action.get("attempts", 0)})
             try:
                 self._apply_action(
                     request_id=request_id,
@@ -549,10 +562,12 @@ class OfflineSyncService:
                 db.session.commit()
                 synced += 1
             except ValidationError as exc:
+                self.app.logger.warning("offline_sync_retry", exc_info=exc, extra={"request_id": request_id})
                 self.mark_retry(request_id, exc)
                 db.session.rollback()
                 retried += 1
             except ConflictError as exc:
+                self.app.logger.warning("offline_sync_conflict", exc_info=exc, extra={"request_id": request_id})
                 self.record_conflict(
                     request_id,
                     exc.entity_type,
@@ -564,10 +579,12 @@ class OfflineSyncService:
                 db.session.commit()
                 conflicts += 1
             except SQLAlchemyError as exc:
+                self.app.logger.error("offline_sync_error", exc_info=exc, extra={"request_id": request_id})
                 self.mark_retry(request_id, exc)
                 db.session.rollback()
                 retried += 1
             except Exception as exc:  # pragma: no cover
+                self.app.logger.exception("offline_sync_unexpected", exc_info=exc, extra={"request_id": request_id})
                 self.mark_retry(request_id, exc)
                 db.session.rollback()
                 retried += 1
@@ -705,6 +722,24 @@ class OfflineSyncService:
         if payment is None:
             payment = Payment(order_id=order.id, amount=payload["amount"])
             db.session.add(payment)
+            db.session.flush()
+
+        # optimistic check on payment if present
+        try:
+            from utils.optimistic import assert_version
+
+            assert_version(payment, payload.get("expected_payment_version"), entity_name='Payment')
+        except Exception:
+            # convert into ConflictError expected by calling code
+            raise ConflictError(
+                entity_type='Payment',
+                entity_id=getattr(payment, 'id', None),
+                remote_payload={
+                    "id": getattr(payment, 'id', None),
+                    "version": int(getattr(payment, 'version', 0) or 0),
+                },
+            )
+
         payment.amount = payload["amount"]
         payment.method = f"COD_{str(payload.get('payment_mode', 'CASH')).upper()}"
         payment.transaction_id = payment.transaction_id or f"COD-SYNC-{uuid.uuid4().hex[:10].upper()}"

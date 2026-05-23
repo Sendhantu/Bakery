@@ -110,6 +110,16 @@ def order_detail(order_id):
 def update_status(order_id):
     agent, delivery, order = get_assigned_delivery_or_404(order_id)
     status = (request.form.get('status') or '').strip().upper()
+    # optimistic version check if client provided expected_version
+    expected_version = request.form.get('expected_version')
+    if expected_version is not None:
+        from utils.optimistic import assert_version
+
+        try:
+            assert_version(order, expected_version, entity_name='Order')
+        except Exception as exc:
+            flash('Version conflict: this order has been updated by someone else.', 'danger')
+            return redirect(url_for('delivery.order_detail', order_id=order_id))
 
     offline_sync = get_container().offline_sync_service
     if offline_sync.enabled and not offline_sync.is_online():
@@ -164,6 +174,15 @@ def update_status(order_id):
 def collect_payment(order_id):
     _agent, _delivery, order = get_assigned_delivery_or_404(order_id)
     offline_sync = get_container().offline_sync_service
+    expected_version = request.form.get('expected_version')
+    if expected_version is not None:
+        from utils.optimistic import assert_version
+
+        try:
+            assert_version(order, expected_version, entity_name='Order')
+        except Exception:
+            flash('Version conflict: this order has been updated by someone else.', 'danger')
+            return redirect(url_for('delivery.order_detail', order_id=order_id))
     if offline_sync.enabled and not offline_sync.is_online():
         snapshot = offline_sync.get_snapshot("orders", order_id) or {}
         request_id = offline_sync.queue_cod_collection_by_id(
@@ -185,6 +204,7 @@ def collect_payment(order_id):
             request.form.get('amount_received'),
             payment_mode=request.form.get('payment_mode', 'CASH'),
             actor_id=current_user.id,
+            expected_version=expected_version,
         )
     except ValidationError as exc:
         flash(str(exc), 'danger')

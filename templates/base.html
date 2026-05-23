@@ -254,5 +254,17 @@
   })();
 </script>
 {% block scripts %}{% endblock %}
+<script>
+  // Trigger server-side offline sync when navigator becomes online (for admin/delivery portals)
+  if (window && 'ononline' in window) {
+    function triggerSync() {
+      try {
+        fetch('/internal/trigger_offline_sync', { method: 'POST', credentials: 'include' }).catch(()=>{});
+      } catch (e) {}
+    }
+    window.addEventListener('online', triggerSync);
+    if (navigator.onLine) triggerSync();
+  }
+</script>
 </body>
 </html>

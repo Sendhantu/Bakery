@@ -107,3 +107,26 @@ def register_error_handlers(app):
         if request.accept_mimetypes.best == "application/json":
             return jsonify({"ok": False, "message": "Internal server error"}), 500
         raise exc
+
+
+def configure_celery_logging():
+    try:
+        from celery.signals import after_setup_logger, after_setup_task_logger
+    except Exception:
+        return
+
+    @after_setup_logger.connect
+    def _setup_logger(logger, *args, **kwargs):
+        handler = logging.StreamHandler()
+        handler.setFormatter(JsonFormatter())
+        logger.handlers.clear()
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+    @after_setup_task_logger.connect
+    def _setup_task_logger(logger, *args, **kwargs):
+        handler = logging.StreamHandler()
+        handler.setFormatter(JsonFormatter())
+        logger.handlers.clear()
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)

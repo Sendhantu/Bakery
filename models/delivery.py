@@ -34,3 +34,6 @@ class Delivery(db.Model):
     version        = db.Column(db.Integer, default=1, nullable=False)
 
     branch = db.relationship('Branch', backref='deliveries')
+    __table_args__ = (
+        db.Index('idx_delivery_agent', 'agent_id'),
+    )

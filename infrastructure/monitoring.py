@@ -12,6 +12,12 @@ def init_sentry(app):
         app.logger.warning("Sentry DSN provided but sentry-sdk is not installed.")
         return
 
+    traces = app.config.get("SENTRY_TRACES_SAMPLE_RATE")
+    try:
+        traces = float(traces) if traces is not None else 0.05
+    except Exception:
+        traces = 0.05
+
     sentry_sdk.init(
         dsn=dsn,
         integrations=[
@@ -19,6 +25,8 @@ def init_sentry(app):
             CeleryIntegration(),
             SqlalchemyIntegration(),
         ],
-        traces_sample_rate=0.1,
+        traces_sample_rate=traces,
         environment=app.config.get("ENV", "development"),
+        release=app.config.get("SENTRY_RELEASE"),
+        send_default_pii=bool(app.config.get("SENTRY_SEND_PII", False)),
     )

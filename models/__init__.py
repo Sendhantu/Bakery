@@ -1,4 +1,5 @@
 from .base import db, bcrypt, limiter, cache, celery, socketio
+from .base import safe_create_all
 from .loyalty import LoyaltyLedger, LOYALTY_EARN_RATE, LOYALTY_EARN_PER, LOYALTY_REDEEM_RATE, LOYALTY_REDEEM_PER, LOYALTY_POINTS_TTL_DAYS, get_loyalty_config, calculate_loyalty_redemption
 from .user import User, LoginHistory, Subscription
 from .product import PRODUCT_FALLBACK_IMAGES, Category, Product, ProductVariant, Review
@@ -22,4 +23,5 @@ __all__ = [
     'DeliveryAgent', 'Delivery',
     'Message', 'Notification', 'EmailLog',
     'AuditLog', 'OperationalAlert', 'InventoryForecast', 'DeliveryRoutePlan', 'StaffShift', 'AttendanceRecord', 'SalaryRecord', 'SearchAnalytics', 'BackupVerification', 'QueueMetric', 'ApiUsageLog', 'FraudAlert', 'PushDevice', 'PricingRule', 'SubscriptionSchedule', 'CashbackWalletEntry', 'ReferralReward', 'SyncConflict',
+    'safe_create_all',
 ]

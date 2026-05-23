@@ -24,4 +24,5 @@ __all__ = [
     "send_sms",
     "send_whatsapp_message",
     "verify_backup_health",
+    "refresh_kds",
 ]

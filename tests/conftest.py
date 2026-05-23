@@ -19,7 +19,9 @@ def app_factory(monkeypatch):
         app = create_app('testing', portal_role=portal_role)
         created_apps.append(app)
         with app.app_context():
-            db.create_all()
+            from models import safe_create_all
+
+            safe_create_all(app)
             seed_data(app)
         return app
 

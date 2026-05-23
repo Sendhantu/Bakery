@@ -151,6 +151,14 @@ def inject_admin_nav():
     return {"pending_msgs": count}
 
 
+@admin_bp.route('/sync_conflicts')
+@admin_required
+def list_sync_conflicts():
+    page, per_page = 1, 100
+    conflicts = SyncConflict.query.order_by(SyncConflict.created_at.desc()).limit(500).all()
+    return render_template('admin/sync_conflicts.html', conflicts=conflicts)
+
+
 # ── Image helper ─────────────────────────────────────────────
 def apply_product_image(product):
     image_url = (request.form.get("image_url") or "").strip()
@@ -649,11 +657,13 @@ def update_order_status(order_id):
         )
         return redirect(url_for("admin.order_detail", order_id=order_id))
     try:
+        expected_version = request.form.get('expected_version')
         order = get_container().order_service.update_order_status(
             order_id,
             status,
             actor="admin",
             actor_id=current_user.id,
+            expected_version=expected_version,
         )
     except ValueError:
         flash("Please choose a valid status.", "danger")
@@ -692,18 +702,23 @@ def assign_delivery(order_id):
     agent_id = request.form.get("agent_id", type=int)
     agent = DeliveryAgent.query.get_or_404(agent_id)
 
-    existing = Delivery.query.filter_by(order_id=order_id).first()
-    if existing:
-        existing.agent_id = agent_id
-        existing.assigned_time = datetime.utcnow()
-    else:
-        db.session.add(
-            Delivery(
-                order_id=order_id, agent_id=agent_id, assigned_time=datetime.utcnow()
+    expected_version = request.form.get('expected_version')
+    from utils.optimistic import assert_version
+    assert_version(order, expected_version, entity_name='Order')
+
+    # Wrap assignment in a transaction to atomically create/update delivery and agent state
+    with db.session.begin():
+        existing = Delivery.query.filter_by(order_id=order_id).first()
+        if existing:
+            existing.agent_id = agent_id
+            existing.assigned_time = datetime.utcnow()
+        else:
+            db.session.add(
+                Delivery(
+                    order_id=order_id, agent_id=agent_id, assigned_time=datetime.utcnow()
+                )
             )
-        )
-    agent.availability = False
-    db.session.commit()
+        agent.availability = False
     deliveries = Delivery.query.filter_by(agent_id=agent_id, status="ASSIGNED").all()
     get_container().route_planning_service.plan_for_agent(agent, deliveries)
     from realtime.events import emit_delivery_assignment
@@ -724,7 +739,7 @@ def assign_delivery(order_id):
 def order_payment_link(order_id):
     order = Order.query.get_or_404(order_id)
     link = build_order_payment_link(order)
-    db.session.commit()
+    # commit happens via context manager
     flash("Payment page ready.", "info")
     return redirect(url_for("customer.payment_link_page", token=link.token))
 
@@ -936,6 +951,9 @@ def update_stock():
     try:
         if v is None:
             raise SQLAlchemyError("Database unavailable")
+        expected_version = request.form.get('expected_version')
+        from utils.optimistic import assert_version
+        assert_version(v, expected_version, entity_name='ProductVariant')
         v.stock = new_stock
         v.version = int(v.version or 0) + 1
         get_container().audit_service.record(
@@ -1002,6 +1020,9 @@ def update_raw_material_stock():
     try:
         if mat is None:
             raise SQLAlchemyError("Database unavailable")
+        expected_version = request.form.get('expected_version')
+        from utils.optimistic import assert_version
+        assert_version(mat, expected_version, entity_name='RawMaterial')
         mat.stock = new_stock
         mat.version = int(mat.version or 0) + 1
         get_container().audit_service.record(
@@ -1958,54 +1979,62 @@ def pos():
             subtotal = unit_price * quantity
             walkin_email = "walkin@sweetcrumbs.local"
             customer = User.query.filter_by(email=walkin_email).first()
-            if customer is None:
-                customer = User(
-                    name="Walk-in Customer",
-                    email=walkin_email,
-                    role="customer",
-                    is_active=True,
-                    phone=customer_phone or None,
-                )
-                db.session.add(customer)
-                db.session.flush()
-            order = Order(
-                order_number=Order.generate_order_number(),
-                user_id=customer.id,
-                source="POS",
-                status="DELIVERED",
-                fulfillment_type="PICKUP",
-                payment_method=payment_mode,
-                payment_status="PAID",
-                subtotal=subtotal,
-                total=subtotal,
-                gst_amount=0,
-                address_line1=current_app.config["STORE_DETAILS"].get("address_line1", ""),
-                city=current_app.config["STORE_DETAILS"].get("city", ""),
-                pincode=current_app.config["STORE_DETAILS"].get("pincode", ""),
-                phone=customer_phone or current_app.config["STORE_DETAILS"].get("phone_tel", ""),
-                delivery_slot="Walk-in",
-                delivery_date=datetime.utcnow().date(),
-            )
-            db.session.add(order)
-            db.session.flush()
-            db.session.add(
-                OrderItem(
-                    order_id=order.id,
-                    product_id=variant.product_id,
-                    variant_id=variant.id,
-                    product_name=variant.product.name,
-                    variant_name=variant.name,
-                    quantity=quantity,
-                    unit_price=unit_price,
+            # Atomic POS sale: create customer, order, items, payment, and adjust stock
+            with db.session.begin():
+                if customer is None:
+                    customer = User(
+                        name="Walk-in Customer",
+                        email=walkin_email,
+                        role="customer",
+                        is_active=True,
+                        phone=customer_phone or None,
+                    )
+                    db.session.add(customer)
+                    db.session.flush()
+                order = Order(
+                    order_number=Order.generate_order_number(),
+                    user_id=customer.id,
+                    source="POS",
+                    status="DELIVERED",
+                    fulfillment_type="PICKUP",
+                    payment_method=payment_mode,
+                    payment_status="PAID",
                     subtotal=subtotal,
+                    total=subtotal,
+                    gst_amount=0,
+                    address_line1=current_app.config["STORE_DETAILS"].get("address_line1", ""),
+                    city=current_app.config["STORE_DETAILS"].get("city", ""),
+                    pincode=current_app.config["STORE_DETAILS"].get("pincode", ""),
+                    phone=customer_phone or current_app.config["STORE_DETAILS"].get("phone_tel", ""),
+                    delivery_slot="Walk-in",
+                    delivery_date=datetime.utcnow().date(),
                 )
-            )
-            variant.stock = max(0, int(variant.stock or 0) - quantity)
-            payment = Payment(order_id=order.id, amount=subtotal, method=order.payment_method)
-            db.session.add(payment)
-            db.session.flush()
-            payment.transition_to("PAID", actor_id=current_user.id, reason="pos_sale")
-            db.session.commit()
+                db.session.add(order)
+                db.session.flush()
+                db.session.add(
+                    OrderItem(
+                        order_id=order.id,
+                        product_id=variant.product_id,
+                        variant_id=variant.id,
+                        product_name=variant.product.name,
+                        variant_name=variant.name,
+                        quantity=quantity,
+                        unit_price=unit_price,
+                        subtotal=subtotal,
+                    )
+                )
+                expected_version = request.form.get('expected_version')
+                from utils.optimistic import assert_version
+                try:
+                    assert_version(variant, expected_version, entity_name='ProductVariant')
+                except Exception:
+                    raise ValidationError("Version conflict: variant stock changed by another user.")
+                variant.stock = max(0, int(variant.stock or 0) - quantity)
+                payment = Payment(order_id=order.id, amount=subtotal, method=order.payment_method)
+                db.session.add(payment)
+                db.session.flush()
+                payment.transition_to("PAID", actor_id=current_user.id, reason="pos_sale")
+            # commit occurs automatically at end of block
             flash(f"POS sale created for order #{order.order_number}.", "success")
         except SQLAlchemyError:
             db.session.rollback()

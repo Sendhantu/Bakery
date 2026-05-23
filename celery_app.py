@@ -10,3 +10,10 @@ portal_role = (os.environ.get("PORTAL_ROLE") or "customer").strip().lower() or "
 
 flask_app = create_app(config_name, portal_role=portal_role)
 celery_app = celery
+try:
+	# Ensure Celery structured logging is configured in worker processes
+	from infrastructure.logging import configure_celery_logging
+
+	configure_celery_logging()
+except Exception:
+	pass

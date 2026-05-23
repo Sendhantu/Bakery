@@ -331,6 +331,13 @@ def setup_celery(app):
 
     celery.Task = ContextTask
     app.extensions["celery"] = celery
+    # configure celery worker logging to use JSON formatter
+    try:
+        from infrastructure.logging import configure_celery_logging
+
+        configure_celery_logging()
+    except Exception:
+        app.logger.warning("Failed to configure Celery structured logging")
     return celery
 
 
@@ -349,6 +356,11 @@ def setup_extensions(app):
         cors_allowed_origins=build_socketio_origins(app),
         message_queue=message_queue,
     )
+    # Enforce gevent websocket worker in production for SocketIO
+    if app.config.get("ENV") == "production":
+        async_mode = app.config.get("SOCKETIO_ASYNC_MODE", "").strip().lower()
+        if async_mode != "gevent":
+            raise RuntimeError("SOCKETIO_ASYNC_MODE must be 'gevent' in production")
     setup_celery(app)
     import tasks  # noqa: F401 — register Celery task modules
 
@@ -537,6 +549,35 @@ def register_core_routes(app):
             ),
             status_code,
         )
+
+    @app.route("/internal/trigger_offline_sync", methods=["POST"])
+    def trigger_offline_sync():
+        from flask_login import current_user
+
+        # Only allow admin/delivery roles to trigger sync
+        if not getattr(current_user, "is_authenticated", False):
+            return jsonify({"status": "unauthenticated"}), 401
+        if (current_user.role or "").strip().lower() not in {"admin", "delivery"}:
+            return jsonify({"status": "forbidden"}), 403
+
+        service = app.extensions.get("service_container").offline_sync_service
+        try:
+            if service and service.enabled:
+                # Run in background to avoid blocking the client
+                socketio.start_background_task(lambda: service.flush_pending_actions())
+                return jsonify({"status": "started"}), 200
+            else:
+                # fallback to Celery scheduled retry
+                try:
+                    from tasks.operations import retry_offline_sync_actions
+
+                    retry_offline_sync_actions.delay()
+                    return jsonify({"status": "scheduled"}), 200
+                except Exception:
+                    return jsonify({"status": "not_configured"}), 500
+        except Exception:
+            app.logger.exception("trigger_offline_sync_failed")
+            return jsonify({"status": "error"}), 500
 
 
 def register_context_processors(app):
@@ -1036,7 +1077,9 @@ if __name__ == "__main__":
     def run_customer():
         customer_app = create_app("development", portal_role="customer")
         with customer_app.app_context():
-            db.create_all()
+            from models import safe_create_all
+
+            safe_create_all(customer_app)
             seed_data(customer_app)
         customer_app.run(debug=False, use_reloader=False, port=5000)
 

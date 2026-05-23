@@ -66,8 +66,10 @@ def prepare_database():
     os.environ['PORTAL_LAUNCHER_CHILD'] = '1'
     try:
         app = create_app('development', portal_role='customer')
+        from models import safe_create_all
+
         with app.app_context():
-            db.create_all()
+            safe_create_all(app)
             seed_data(app)
     finally:
         if previous_setting is None:

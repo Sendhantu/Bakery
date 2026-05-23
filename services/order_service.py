@@ -13,8 +13,11 @@ class OrderService:
         self.event_bus = event_bus
         self.audit_service = audit_service
 
-    def update_order_status(self, order_id, new_status, actor="admin", actor_id=None):
+    def update_order_status(self, order_id, new_status, actor="admin", actor_id=None, expected_version=None):
         order = self.order_repository.get_or_404(order_id)
+        # optimistic check if caller provided expected_version
+        from utils.optimistic import assert_version
+        assert_version(order, expected_version, entity_name='Order')
         status = ensure_order_status_transition(order.status, new_status, actor=actor)
         old_status = order.status
 

@@ -18,7 +18,8 @@ class ProductionConfig(BaseConfig):
     @classmethod
     def init_app(cls, app):
         ensure_instance_dirs()
-        require_database_config()
+        # Ensure database is configured for production
+        require_database_config()  # This line is already present
         require_env_vars(
             [
                 "REDIS_URL",

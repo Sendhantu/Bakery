@@ -125,6 +125,13 @@ When TiDB is unreachable:
 3. On reconnect, Celery + `/api/v2/sync/flush` push changes to TiDB
 4. Version conflicts surface at **Admin → Offline / Sync**
 
+### Offline sync details
+
+- Local buffering: admin and delivery portals use a local SQLite file under `instance/offline/{portal}_offline_sync.sqlite` for queued actions and snapshots. SQLite is strictly local and never used as a production database.
+- Automatic resume: when the client regains connectivity the browser triggers a server-side sync endpoint which starts a background flush; Celery beat also runs `retry_offline_sync_actions` every minute.
+- Idempotency & duplication avoidance: actions are queued with `request_id` and recorded in an `audit_logs` table to avoid re-applying the same change.
+- Conflict handling: if the remote record version is newer, a `sync_conflicts` entry is created. Admins can review and resolve via **Admin → Offline / Sync**.
+- Production safety: the app enforces `forbid_sqlite_in_production()` and will abort startup if a SQLite DB URI is detected in `ENV=production`.
 Proactive queueing: routes check `offline_sync.is_online()` before writes.
 
 ## Mobile delivery

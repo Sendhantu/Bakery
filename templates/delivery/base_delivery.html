@@ -54,7 +54,15 @@
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script>
 if (typeof io !== 'undefined' && document.body.dataset.pageRole === 'delivery') {
-  const socket = io({ query: { portal: 'delivery' }, transports: ['websocket', 'polling'], reconnection: true });
+  const socket = io({
+    query: { portal: 'delivery' },
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 60000,
+    randomizationFactor: 0.2,
+  });
   socket.on('delivery_updated', () => {
     const live = document.querySelector('[data-live-refresh]');
     if (live) window.location.reload();
@@ -62,5 +70,14 @@ if (typeof io !== 'undefined' && document.body.dataset.pageRole === 'delivery') 
 }
 </script>
 {% block scripts %}{% endblock %}
+<script>
+  function _triggerOfflineSync() {
+    try {
+      fetch('/internal/trigger_offline_sync', { method: 'POST', credentials: 'include' }).catch(()=>{});
+    } catch (e) {}
+  }
+  window.addEventListener('online', _triggerOfflineSync);
+  if (navigator.onLine) _triggerOfflineSync();
+</script>
 </body>
 </html>

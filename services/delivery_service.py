@@ -11,8 +11,11 @@ class DeliveryService:
         self.order_repository = order_repository or OrderRepository()
         self.audit_service = audit_service
 
-    def collect_cod_payment(self, order_id, amount_received, payment_mode="CASH", actor_id=None):
+    def collect_cod_payment(self, order_id, amount_received, payment_mode="CASH", actor_id=None, expected_version=None):
         order = self.order_repository.get_or_404(order_id)
+        # optimistic check if caller provided expected_version
+        from utils.optimistic import assert_version
+        assert_version(order, expected_version, entity_name='Order')
         if (order.payment_method or "").upper() != "COD":
             raise ValidationError("This order is not marked for cash on delivery.")
         if (order.payment_status or "").upper() == "PAID":
