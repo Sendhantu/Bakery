@@ -1,8 +1,10 @@
+cat > pyproject.toml << 'EOF'
 [project]
 name = "bakery"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = []
+
 [tool.black]
 line-length = 88
 target-version = ['py311']
@@ -18,9 +20,4 @@ exclude = '''/(
   |output
   |\.github
 )/'''
-
-[project]
-name = "bakery"
-version = "0.1.0"
-requires-python = ">=3.11"
-dependencies = []
+EOF
