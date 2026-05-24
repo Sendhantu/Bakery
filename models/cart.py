@@ -11,6 +11,11 @@ class Cart(db.Model):
     added_at   = db.Column(db.DateTime, default=datetime.utcnow)
     variant    = db.relationship('ProductVariant')
 
+    __table_args__ = (
+        db.Index('idx_cart_user', 'user_id'),
+        db.Index('idx_cart_product', 'product_id'),
+    )
+
 
 class Wishlist(db.Model):
     __tablename__ = 'wishlist'
@@ -18,6 +23,11 @@ class Wishlist(db.Model):
     user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     added_at   = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('idx_wishlist_user', 'user_id'),
+        db.Index('idx_wishlist_product', 'product_id'),
+    )
 
 
 class SavedAddress(db.Model):
@@ -35,6 +45,10 @@ class SavedAddress(db.Model):
     is_default    = db.Column(db.Boolean, default=False)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('idx_saved_address_user', 'user_id'),
+    )
 
     @property
     def full_address(self):

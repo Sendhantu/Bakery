@@ -1,0 +1,52 @@
+{
+  "name": "SweetCrumbs Delivery Portal",
+  "short_name": "SweetCrumbs Delivery",
+  "description": "Delivery operations portal for SweetCrumbs Bakery",
+  "start_url": "/delivery",
+  "scope": "/delivery",
+  "display": "standalone",
+  "background_color": "#5C3D2E",
+  "theme_color": "#5C3D2E",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Assigned Deliveries",
+      "short_name": "Assigned",
+      "description": "View assigned delivery orders",
+      "url": "/delivery",
+      "icons": [
+        {
+          "src": "/static/icons/icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Delivery History",
+      "short_name": "History",
+      "description": "View delivery history",
+      "url": "/delivery/history",
+      "icons": [
+        {
+          "src": "/static/icons/icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

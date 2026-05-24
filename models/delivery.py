@@ -36,4 +36,6 @@ class Delivery(db.Model):
     branch = db.relationship('Branch', backref='deliveries')
     __table_args__ = (
         db.Index('idx_delivery_agent', 'agent_id'),
+        db.Index('idx_delivery_status', 'status'),
+        db.Index('idx_delivery_order', 'order_id'),
     )

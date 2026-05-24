@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, abort, jsonify
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, abort, jsonify, send_from_directory
 from flask_login import login_required, current_user
 from bootstrap import get_container
 from exceptions import ValidationError
@@ -10,6 +10,18 @@ from models import db, Delivery, DeliveryAgent, Order, User, can_transition_orde
 from datetime import datetime
 
 delivery_bp = Blueprint('delivery', __name__)
+
+
+@delivery_bp.route("/manifest.json")
+def delivery_manifest():
+    """PWA manifest for delivery portal"""
+    return send_from_directory(current_app.static_folder, "manifest.json", mimetype="application/manifest+json")
+
+
+@delivery_bp.route("/sw.js")
+def delivery_service_worker():
+    """Service worker for delivery portal PWA"""
+    return send_from_directory(current_app.static_folder, "sw.js", mimetype="application/javascript")
 
 
 @delivery_bp.before_request

@@ -8,12 +8,16 @@ try:
         create_access_token,
         create_refresh_token,
         get_jwt_identity,
+        get_jwt,
         jwt_required,
+        current_user as jwt_current_user,
     )
 except ImportError:  # pragma: no cover
     create_access_token = None
     create_refresh_token = None
     get_jwt_identity = None
+    get_jwt = None
+    jwt_current_user = None
 
     def jwt_required(*args, **kwargs):  # type: ignore
         def decorator(view):
@@ -58,6 +62,46 @@ def _jwt_available():
     return create_access_token is not None and create_refresh_token is not None
 
 
+def _get_jwt_user():
+    """Get user from JWT token if available"""
+    if not _jwt_available():
+        return None
+    try:
+        identity = get_jwt_identity()
+        if identity:
+            return db.session.get(User, int(identity))
+    except Exception:
+        pass
+    return None
+
+
+def _require_jwt_role(*allowed_roles):
+    """Decorator to require specific roles for JWT endpoints"""
+    def decorator(f):
+        @jwt_required()
+        def wrapped(*args, **kwargs):
+            if not _jwt_available():
+                return jsonify({"ok": False, "message": "JWT support is not installed."}), 501
+
+            user = _get_jwt_user()
+            if not user or not user.is_active:
+                return jsonify({"ok": False, "message": "Invalid or inactive user."}), 401
+
+            # Check role from JWT claims
+            try:
+                claims = get_jwt()
+                user_role = claims.get("role", user.role)
+            except Exception:
+                user_role = user.role
+
+            if user_role not in allowed_roles and not has_role(user, *allowed_roles):
+                return jsonify({"ok": False, "message": "Insufficient permissions."}), 403
+
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
 @api_v2_bp.route("/meta")
 def meta():
     return jsonify(
@@ -83,9 +127,16 @@ def token():
     if user is None or not user.check_password(password) or not user.is_active:
         return jsonify({"ok": False, "message": "Invalid credentials."}), 401
 
+    # Determine portal based on role
+    portal = "customer"
+    if user.role == "admin":
+        portal = "admin"
+    elif user.role == "delivery":
+        portal = "delivery"
+
     access_token = create_access_token(
         identity=str(user.id),
-        additional_claims={"role": user.role, "portal": "delivery" if user.role == "delivery" else "admin"},
+        additional_claims={"role": user.role, "portal": portal},
     )
     refresh_token = create_refresh_token(identity=str(user.id))
     return jsonify(
@@ -93,9 +144,55 @@ def token():
             "ok": True,
             "access_token": access_token,
             "refresh_token": refresh_token,
+            "token_type": "Bearer",
+            "expires_in": 900,  # 15 minutes
             "role": user.role,
+            "portal": portal,
         }
     )
+
+
+@api_v2_bp.route("/auth/refresh", methods=["POST"])
+@jwt_required()
+def refresh():
+    if not _jwt_available():
+        return jsonify({"ok": False, "message": "JWT support is not installed."}), 501
+
+    identity = get_jwt_identity()
+    user = db.session.get(User, int(identity))
+    if not user or not user.is_active:
+        return jsonify({"ok": False, "message": "Invalid or inactive user."}), 401
+
+    # Determine portal based on role
+    portal = "customer"
+    if user.role == "admin":
+        portal = "admin"
+    elif user.role == "delivery":
+        portal = "delivery"
+
+    new_access_token = create_access_token(
+        identity=str(user.id),
+        additional_claims={"role": user.role, "portal": portal},
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "access_token": new_access_token,
+            "token_type": "Bearer",
+            "expires_in": 900,
+        }
+    )
+
+
+@api_v2_bp.route("/auth/logout", methods=["POST"])
+@jwt_required()
+def logout():
+    if not _jwt_available():
+        return jsonify({"ok": False, "message": "JWT support is not installed."}), 501
+
+    # In a stateless JWT setup, logout is handled client-side by removing the token
+    # For production, you might want to implement a token blacklist
+    return jsonify({"ok": True, "message": "Logged out successfully."})
 
 
 @api_v2_bp.route("/me")
@@ -111,14 +208,24 @@ def me():
 
     if user is None:
         return jsonify({"authenticated": False}), 401
+
+    # Get role from JWT claims if available
+    role = user.role
+    try:
+        claims = get_jwt()
+        role = claims.get("role", user.role)
+    except Exception:
+        pass
+
     return jsonify(
         {
             "authenticated": True,
             "id": user.id,
             "name": user.name,
             "email": user.email,
-            "role": user.role,
+            "role": role,
             "branch_id": user.branch_id,
+            "permissions": user.permissions if user.permissions else "[]",
         }
     )
 
@@ -190,21 +297,15 @@ def register_push_device():
 
 
 @api_v2_bp.route("/sync/flush", methods=["POST"])
+@_require_jwt_role(*ADMIN_PORTAL_ROLES, "delivery")
 def sync_flush():
-    if not getattr(current_user, "is_authenticated", False) or not has_role(
-        current_user, *ADMIN_PORTAL_ROLES, "delivery"
-    ):
-        return jsonify({"ok": False, "message": "Access denied."}), 403
     result = get_container().offline_sync_service.flush_pending_actions()
     return jsonify({"ok": True, "result": result})
 
 
 @api_v2_bp.route("/sync/status")
+@_require_jwt_role(*ADMIN_PORTAL_ROLES, "delivery")
 def sync_status():
-    if not getattr(current_user, "is_authenticated", False) or not has_role(
-        current_user, *ADMIN_PORTAL_ROLES, "delivery"
-    ):
-        return jsonify({"ok": False, "message": "Access denied."}), 403
     sync_service = get_container().offline_sync_service
     return jsonify(
         {

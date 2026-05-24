@@ -1,13 +1,7 @@
 services:
-  - type: redis
-    name: sweetcrumbs-redis
-    plan: free
-    region: singapore
-    maxmemoryPolicy: allkeys-lru
-    ipAllowList: []
-
+  # ─── Web Service (Customer Portal Only) ───────────────────────────────────────
   - type: web
-    name: sweetcrumbs-customer
+    name: bakery-customer-portal
     runtime: python
     plan: free
     region: singapore
@@ -15,235 +9,193 @@ services:
     preDeployCommand: python scripts/bootstrap_database.py
     startCommand: gunicorn --config gunicorn.conf.py wsgi:app
     healthCheckPath: /healthz
+
     envVars:
       - key: FLASK_ENV
         value: production
       - key: PORTAL_ROLE
         value: customer
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+
+      # TiDB Cloud - External Database (NOT Render PostgreSQL)
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_SSL_CA
+        value: /etc/ssl/certs/ca-certificates.crt
+      - key: DB_SSL_VERIFY_CERT
+        value: "true"
+      - key: DB_SSL_VERIFY_IDENTITY
+        value: "true"
+
+      # Redis - External (or Render Redis)
+      - key: REDIS_URL
+        sync: false
+
+      # Mail
+      - key: MAIL_SERVER
+        sync: false
+      - key: MAIL_PORT
+        sync: false
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: MAIL_DEFAULT_SENDER
+        sync: false
+
+      # Cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # Twilio
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+
+      # Firebase
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+      # Google Maps
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+
+      # Sentry
+      - key: SENTRY_DSN
+        sync: false
+
+      # Production settings
       - key: USE_PROXY_FIX
         value: "true"
       - key: SHOW_DEMO_ACCOUNTS
         value: "false"
-      - key: SHOW_LOCAL_SESSION_HELPER
-        value: "false"
-      - key: LOGIN_SESSION_PROTECTION
-        value: basic
-      - key: BOOTSTRAP_SEED_DATA
-        value: "false"
       - key: OFFLINE_SYNC_ENABLED
         value: "false"
-      - key: DB_PORT
-        value: "4000"
-      - key: DB_SSL_CA
-        value: /etc/ssl/certs/ca-certificates.crt
-      - key: DB_SSL_VERIFY_CERT
-        value: "true"
-      - key: DB_SSL_VERIFY_IDENTITY
-        value: "true"
-      - key: REDIS_URL
+      - key: RATELIMIT_STORAGE_URI
         fromService:
+          name: bakery-redis
           type: redis
-          name: sweetcrumbs-redis
           property: connectionString
       - key: SOCKETIO_MESSAGE_QUEUE
         fromService:
+          name: bakery-redis
           type: redis
-          name: sweetcrumbs-redis
           property: connectionString
       - key: CELERY_BROKER_URL
         fromService:
+          name: bakery-redis
           type: redis
-          name: sweetcrumbs-redis
           property: connectionString
       - key: CELERY_RESULT_BACKEND
         fromService:
+          name: bakery-redis
           type: redis
-          name: sweetcrumbs-redis
           property: connectionString
-      - key: RATELIMIT_STORAGE_URI
-        fromService:
-          type: redis
-          name: sweetcrumbs-redis
-          property: connectionString
-      - key: SECRET_KEY
-        generateValue: true
-      - key: JWT_SECRET_KEY
-        generateValue: true
-      - key: DB_HOST
-        sync: false
-      - key: DB_USER
-        sync: false
-      - key: DB_PASSWORD
-        sync: false
-      - key: DB_NAME
-        sync: false
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
-        sync: false
-      - key: CUSTOMER_PORTAL_URL
-        sync: false
 
+  # ─── Celery Worker ─────────────────────────────────────────────
   - type: worker
-    name: sweetcrumbs-celery-worker
+    name: bakery-celery-worker
     runtime: python
     plan: free
     region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
-    envVars:
-      - key: FLASK_ENV
-        value: production
-      - key: PORTAL_ROLE
-        value: customer
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: sweetcrumbs-redis
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: sweetcrumbs-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: sweetcrumbs-redis
-          property: connectionString
-      - key: SECRET_KEY
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: SECRET_KEY
-      - key: JWT_SECRET_KEY
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: JWT_SECRET_KEY
-      - key: DB_HOST
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: DB_HOST
-      - key: DB_USER
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: DB_USER
-      - key: DB_PASSWORD
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: DB_PASSWORD
-      - key: DB_NAME
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: DB_NAME
-      - key: DB_PORT
-        value: "4000"
-      - key: DB_SSL_CA
-        value: /etc/ssl/certs/ca-certificates.crt
-      - key: DB_SSL_VERIFY_CERT
-        value: "true"
-      - key: DB_SSL_VERIFY_IDENTITY
-        value: "true"
-      - key: CLOUDINARY_CLOUD_NAME
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: CLOUDINARY_CLOUD_NAME
-      - key: CLOUDINARY_API_KEY
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: CLOUDINARY_API_KEY
-      - key: CLOUDINARY_API_SECRET
-        fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: CLOUDINARY_API_SECRET
+    startCommand: celery -A celery_app.celery worker --loglevel=info --concurrency=2
 
-  - type: worker
-    name: sweetcrumbs-celery-beat
-    runtime: python
-    plan: free
-    region: singapore
-    buildCommand: pip install -r requirements.txt
-    startCommand: celery -A celery_app.celery_app beat --loglevel=info
     envVars:
       - key: FLASK_ENV
         value: production
-      - key: PORTAL_ROLE
-        value: customer
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: sweetcrumbs-redis
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          type: redis
-          name: sweetcrumbs-redis
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          type: redis
-          name: sweetcrumbs-redis
-          property: connectionString
       - key: SECRET_KEY
         fromService:
+          name: bakery-customer-portal
           type: web
-          name: sweetcrumbs-customer
           envVarKey: SECRET_KEY
       - key: JWT_SECRET_KEY
         fromService:
+          name: bakery-customer-portal
           type: web
-          name: sweetcrumbs-customer
           envVarKey: JWT_SECRET_KEY
       - key: DB_HOST
         fromService:
+          name: bakery-customer-portal
           type: web
-          name: sweetcrumbs-customer
           envVarKey: DB_HOST
+      - key: DB_PORT
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: DB_PORT
       - key: DB_USER
         fromService:
+          name: bakery-customer-portal
           type: web
-          name: sweetcrumbs-customer
           envVarKey: DB_USER
       - key: DB_PASSWORD
         fromService:
+          name: bakery-customer-portal
           type: web
-          name: sweetcrumbs-customer
           envVarKey: DB_PASSWORD
       - key: DB_NAME
         fromService:
+          name: bakery-customer-portal
           type: web
-          name: sweetcrumbs-customer
           envVarKey: DB_NAME
-      - key: DB_PORT
-        value: "4000"
       - key: DB_SSL_CA
-        value: /etc/ssl/certs/ca-certificates.crt
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: DB_SSL_CA
       - key: DB_SSL_VERIFY_CERT
-        value: "true"
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: DB_SSL_VERIFY_CERT
       - key: DB_SSL_VERIFY_IDENTITY
-        value: "true"
-      - key: CLOUDINARY_CLOUD_NAME
         fromService:
+          name: bakery-customer-portal
           type: web
-          name: sweetcrumbs-customer
-          envVarKey: CLOUDINARY_CLOUD_NAME
-      - key: CLOUDINARY_API_KEY
+          envVarKey: DB_SSL_VERIFY_IDENTITY
+      - key: REDIS_URL
         fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: CLOUDINARY_API_KEY
-      - key: CLOUDINARY_API_SECRET
+          name: bakery-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
         fromService:
-          type: web
-          name: sweetcrumbs-customer
-          envVarKey: CLOUDINARY_API_SECRET
+          name: bakery-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: bakery-redis
+          type: redis
+          property: connectionString
+
+  # ─── Redis (for SocketIO, Celery, Cache, Rate Limiting) ──────────────────────
+  - name: bakery-redis
+    type: redis
+    plan: free
+    ipAllowList: []

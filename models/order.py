@@ -178,6 +178,11 @@ class OrderItem(db.Model):
     subtotal = db.Column(db.Numeric(10, 2), nullable=False)
     variant = db.relationship("ProductVariant")
 
+    __table_args__ = (
+        db.Index("idx_order_item_order", "order_id"),
+        db.Index("idx_order_item_product", "product_id"),
+    )
+
 
 class AddressChange(db.Model):
     __tablename__ = "address_changes"

@@ -21,6 +21,11 @@ class RawMaterial(db.Model):
 
     branch = db.relationship('Branch', backref='raw_materials')
 
+    __table_args__ = (
+        db.Index('idx_raw_material_branch', 'branch_id'),
+        db.Index('idx_raw_material_active', 'is_active'),
+    )
+
     @property
     def stock_status(self):
         stock = float(self.stock or 0)
