@@ -8,7 +8,7 @@ services:
     buildCommand: pip install -r requirements.txt
     preDeployCommand: python scripts/bootstrap_database.py
     startCommand: gunicorn --config gunicorn.conf.py wsgi:app
-    healthCheckPath: /healthz
+    healthCheckPath: /livez
 
     envVars:
       - key: FLASK_ENV

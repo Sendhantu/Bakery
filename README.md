@@ -199,7 +199,7 @@ Render Cloud (Public)
 ├── bakery-customer-portal (Web Service)
 │   ├── Gunicorn + Gevent WebSocket Worker
 │   ├── Customer Portal Only (PORTAL_ROLE=customer)
-│   └── Health Check: /healthz
+│   └── Render Liveness Check: /livez
 │
 ├── bakery-celery-worker (Worker Service)
 │   ├── Background Task Processing
@@ -292,7 +292,10 @@ This script:
 #### 6. Verify Deployment
 
 ```bash
-# Check health endpoint
+# Check Render liveness endpoint
+curl https://your-app.onrender.com/livez
+
+# Check deep dependency health endpoint
 curl https://your-app.onrender.com/healthz
 
 # Expected response:
@@ -312,7 +315,7 @@ curl https://your-app.onrender.com/healthz
 | **Deployment fails during build** | Check `requirements.txt` for incompatible versions |
 | **Database connection error** | Verify TiDB credentials, IP allowlist, SSL settings |
 | **Redis connection error** | Verify Redis URL in render.yaml is correctly linked |
-| **Health check failing** | Check /healthz endpoint response, verify all services |
+| **Health check failing** | Check `/livez` for app startup and `/healthz` for TiDB, Redis, Celery, and Cloudinary |
 | **WebSocket not working** | Ensure Gevent WebSocket worker is configured in gunicorn.conf.py |
 | **Static files not loading** | Check static folder structure and Cloudinary configuration |
 | **Celery tasks not running** | Verify Celery worker is running and connected to Redis |
@@ -1276,7 +1279,7 @@ pytest tests/ -q
 
 | Issue | Check |
 |-------|--------|
-| Render boot fails | `/healthz`, Redis URL, Cloudinary vars, TiDB IP allowlist |
+| Render boot fails | `/livez`, Render logs, required env vars, TiDB IP allowlist |
 | Migrations | `flask db upgrade` with `FLASK_APP=app:create_app` |
 | Celery tasks missing | `celery -A celery_app.celery inspect registered` |
 | Offline backlog | Admin → Offline / Sync → Flush queue |

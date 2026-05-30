@@ -511,6 +511,10 @@ def register_core_routes(app):
         )
         return app.response_class(script, mimetype="application/javascript")
 
+    @app.route("/livez")
+    def livez():
+        return jsonify({"status": "ok", "service": "bakery"})
+
     @app.route("/healthz")
     def healthz():
         database_state = "ok"
