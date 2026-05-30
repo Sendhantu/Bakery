@@ -1,15 +1,10 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "wsgi.py",
-      "use": "@vercel/python"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "python scripts/vercel_build.py",
+  "functions": {
+    "wsgi.py": {
+      "maxDuration": 30,
+      "excludeFiles": "{.venv/**,venv/**,tests/**,output/**,instance/**,__pycache__/**,.pytest_cache/**,*.db,*.sqlite,*.sqlite3,.github/**,.idea/**,render.yaml,docker-compose.yml,Dockerfile,Procfile}"
     }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "wsgi.py"
-    }
-  ]
+  }
 }

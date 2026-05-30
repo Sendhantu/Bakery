@@ -1,0 +1,12 @@
+.venv
+venv
+__pycache__
+.pytest_cache
+.github
+.idea
+tests
+output
+instance
+*.db
+*.sqlite
+*.sqlite3

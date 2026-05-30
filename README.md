@@ -52,7 +52,7 @@ SHARED CLOUD INFRASTRUCTURE
 ### Prerequisites
 
 - Python 3.9+
-- TiDB Cloud account (or local MySQL 8.0+)
+- TiDB Cloud account
 - Redis server (local or cloud)
 - Cloudinary account (for image storage)
 
@@ -68,21 +68,34 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure environment
+# Configure environment for TiDB
 cp .env.example .env
-# Edit .env with your TiDB, Redis, and Cloudinary credentials
+# Edit DATABASE_URL with your TiDB Cloud mysql+pymysql:// connection string.
+# Edit Redis and Cloudinary values if you want realtime services/uploads locally.
+```
+
+Your local `.env` should use TiDB as the application database:
+
+```bash
+FLASK_ENV=development
+DATABASE_URL=mysql+pymysql://user:password@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/bakerydb
+DB_SSL_CA=/etc/ssl/certs/ca-certificates.crt
+DB_SSL_VERIFY_CERT=true
+DB_SSL_VERIFY_IDENTITY=true
 ```
 
 ### Running All Portals Locally
 
 ```bash
-# Option 1: Run all portals at once (development mode)
+# Run all portals at once against the TiDB database in .env
 python app.py
 
 # This starts:
 # - Customer portal on http://127.0.0.1:5000
 # - Admin portal on http://127.0.0.1:5001
 # - Delivery portal on http://127.0.0.1:5002
+#
+# On startup, migrations are applied with Flask-Migrate.
 ```
 
 ### Running Individual Portals
@@ -121,6 +134,59 @@ The application displays demo credentials on startup. They are also saved to `ou
 | Admin    | admin@bakery.com        | Admin@bakery |
 | Customer | customer@test.com       | customer123  |
 | Delivery | delivery@bakery.com     | delivery123  |
+
+## ▲ Vercel Deployment Guide
+
+This repository can now be deployed directly to Vercel as the **customer portal** using the root `wsgi.py` entrypoint.
+
+### Recommended setup
+
+- Use **TiDB Cloud** as the primary production database
+- Set `DATABASE_URL` to a `mysql+pymysql://...` DSN
+- Set `FLASK_ENV=production`
+- Set `PORTAL_ROLE=customer`
+- Set strong values for `SECRET_KEY` and `JWT_SECRET_KEY`
+
+### Required environment variables
+
+```bash
+FLASK_ENV=production
+PORTAL_ROLE=customer
+DATABASE_URL=mysql+pymysql://user:pass@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/bakerydb
+REDIS_URL=redis://...
+SOCKETIO_MESSAGE_QUEUE=redis://...
+CELERY_BROKER_URL=redis://...
+CELERY_RESULT_BACKEND=redis://...
+RATELIMIT_STORAGE_URI=redis://...
+SECRET_KEY=replace-with-a-long-random-secret
+JWT_SECRET_KEY=replace-with-a-long-random-secret
+CLOUDINARY_CLOUD_NAME=replace-me
+CLOUDINARY_API_KEY=replace-me
+CLOUDINARY_API_SECRET=replace-me
+SOCKETIO_ASYNC_MODE=gevent
+```
+
+### Optional environment variables
+
+- `CUSTOMER_PORTAL_URL` if you want to override the deployment URL explicitly
+- `MAIL_SERVER`, `MAIL_USERNAME`, `MAIL_PASSWORD` for email notifications
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` for WhatsApp/SMS
+- `GOOGLE_MAPS_API_KEY`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `SENTRY_DSN`
+
+### What happens on deploy
+
+- `vercel.json` runs `python scripts/vercel_build.py` as the build step
+- Alembic migrations are applied before the deployment goes live
+- Static assets are mirrored into `public/static` for Vercel-friendly serving
+- Demo data is **not** seeded unless `BOOTSTRAP_SEED_DATA=true`
+
+### Deploy
+
+```bash
+vercel
+```
+
+For Git-based deployments, import the repository in Vercel and add the same environment variables in Project Settings.
 
 ## ☁️ Render Deployment Guide
 
@@ -185,14 +251,11 @@ git push origin main
 
 #### 4. Configure Render Environment Variables
 
-The `render.yaml` includes most configuration, but you must manually set these in the Render dashboard:
+The `render.yaml` provisions Redis and shares it with the web service and Celery worker automatically. You only need to manually set external secrets in the Render dashboard:
 
 **TiDB Database (Required):**
-- `DB_HOST`: Your TiDB Cloud host (e.g., `gateway01.ap-southeast-1.prod.aws.tidbcloud.com`)
-- `DB_PORT`: `4000` (already set in render.yaml)
-- `DB_USER`: Your TiDB username
-- `DB_PASSWORD`: Your TiDB password
-- `DB_NAME`: `bakerydb`
+- `DATABASE_URL`: `mysql+pymysql://user:password@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/bakerydb`
+- SSL settings are already included in `render.yaml` for TiDB Cloud.
 
 **Cloudinary (Required):**
 - `CLOUDINARY_CLOUD_NAME`: Your Cloudinary cloud name
@@ -207,7 +270,12 @@ The `render.yaml` includes most configuration, but you must manually set these i
 - `SENTRY_DSN`: For error monitoring
 
 **Portal URLs (for CORS):**
-- `CUSTOMER_PORTAL_URL`: Your Render URL (e.g., `https://bakery-customer-portal.onrender.com`)
+- `CUSTOMER_PORTAL_URL`: Your Render URL after first deploy (e.g., `https://bakery-customer-portal.onrender.com`)
+
+**Render-managed automatically:**
+- `REDIS_URL`, `SOCKETIO_MESSAGE_QUEUE`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, and `RATELIMIT_STORAGE_URI` are linked from `bakery-redis`.
+- `SECRET_KEY` and `JWT_SECRET_KEY` are generated by Render.
+- The worker service inherits the same TiDB, Redis, Cloudinary, mail, Twilio, Firebase, Google Maps, and Sentry settings as the customer portal.
 
 #### 5. Run Database Migrations
 
@@ -329,11 +397,7 @@ Add these to your `.env` file or Render environment:
 
 ```bash
 # TiDB Cloud Configuration
-DB_HOST=gateway01.ap-southeast-1.prod.aws.tidbcloud.com
-DB_PORT=4000
-DB_USER=bakery_user
-DB_PASSWORD=your_strong_password_here
-DB_NAME=bakerydb
+DATABASE_URL=mysql+pymysql://bakery_user:your_strong_password_here@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/bakerydb
 
 # SSL Configuration (Required for TiDB Cloud)
 DB_SSL_CA=/etc/ssl/certs/ca-certificates.crt
@@ -1214,7 +1278,7 @@ pytest tests/ -q
 |-------|--------|
 | Render boot fails | `/healthz`, Redis URL, Cloudinary vars, TiDB IP allowlist |
 | Migrations | `flask db upgrade` with `FLASK_APP=app:create_app` |
-| Celery tasks missing | `celery -A celery_app.celery_app inspect registered` |
+| Celery tasks missing | `celery -A celery_app.celery inspect registered` |
 | Offline backlog | Admin → Offline / Sync → Flush queue |
 | WebSockets | Redis reachable; single worker on free tier is OK |
 

@@ -16,3 +16,4 @@ bakery_portals_shared.db
 instance/
 coverage.xml
 .coverage
+public/

@@ -20,7 +20,7 @@ def env_flag(name, default=False):
 def main():
     config_name = os.environ.get("FLASK_ENV", "production").strip().lower() or "production"
     portal_role = (os.environ.get("PORTAL_ROLE") or "customer").strip().lower() or "customer"
-    seed = env_flag("BOOTSTRAP_SEED_DATA", default=True)
+    seed = env_flag("BOOTSTRAP_SEED_DATA", default=False)
 
     app = create_app(config_name, portal_role=portal_role)
     initialize_database(app, seed=seed)

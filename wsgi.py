@@ -1,6 +1,12 @@
 import os
-import gevent.monkey
-gevent.monkey.patch_all()
+
+if (os.environ.get("SOCKETIO_ASYNC_MODE") or "gevent").strip().lower() == "gevent":
+    try:
+        import gevent.monkey
+
+        gevent.monkey.patch_all()
+    except ImportError:  # pragma: no cover
+        pass
 
 from app import create_app
 

@@ -1,4 +1,5 @@
 import time
+from functools import wraps
 
 from flask import Blueprint, g, jsonify, request
 from flask_login import current_user
@@ -78,14 +79,20 @@ def _get_jwt_user():
 def _require_jwt_role(*allowed_roles):
     """Decorator to require specific roles for JWT endpoints"""
     def decorator(f):
-        @jwt_required()
+        @wraps(f)
+        @jwt_required(optional=True)
         def wrapped(*args, **kwargs):
+            if getattr(current_user, "is_authenticated", False):
+                if has_role(current_user, *allowed_roles):
+                    return f(*args, **kwargs)
+                return jsonify({"ok": False, "message": "Insufficient permissions."}), 403
+
             if not _jwt_available():
-                return jsonify({"ok": False, "message": "JWT support is not installed."}), 501
+                return jsonify({"ok": False, "message": "Authentication required."}), 403
 
             user = _get_jwt_user()
             if not user or not user.is_active:
-                return jsonify({"ok": False, "message": "Invalid or inactive user."}), 401
+                return jsonify({"ok": False, "message": "Authentication required."}), 403
 
             # Check role from JWT claims
             try:

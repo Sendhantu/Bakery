@@ -11,6 +11,12 @@ from .operations import (
     verify_backup_health,
 )
 
+
+def refresh_kds(*args, **kwargs):
+    from .kds import refresh_kds as _refresh_kds
+
+    return _refresh_kds(*args, **kwargs)
+
 __all__ = [
     "aggregate_analytics_snapshot",
     "build_inventory_forecasts",

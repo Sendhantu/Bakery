@@ -14,6 +14,7 @@ gevent
 gevent-websocket
 sqlalchemy
 PyMySQL
+psycopg[binary]
 cryptography
 redis
 cloudinary
@@ -23,6 +24,7 @@ celery
 python-dotenv
 requests
 Pillow
+qrcode[pil]
 reportlab
 twilio
 PyJWT

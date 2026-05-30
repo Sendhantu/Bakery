@@ -111,11 +111,24 @@ def resolve_portal_role(portal_role=None):
     return "customer"
 
 
+def vercel_deployment_url():
+    deployment_url = (os.environ.get("VERCEL_URL") or "").strip()
+    if not deployment_url:
+        return ""
+    if not deployment_url.startswith(("http://", "https://")):
+        deployment_url = f"https://{deployment_url}"
+    return deployment_url.rstrip("/")
+
+
 def configured_portal_url(role, config_name):
     env_key = f"{role.upper()}_PORTAL_URL"
     configured = (os.environ.get(env_key) or "").strip().rstrip("/")
     if configured:
         return configured
+    if config_name == "production" and role == "customer":
+        deployment_url = vercel_deployment_url()
+        if deployment_url:
+            return deployment_url
     if config_name != "production":
         return LOCAL_PORTAL_URLS[role]
     return ""
@@ -262,6 +275,14 @@ def configure_app(app, config_name="default", portal_role=None):
     app.config.from_object(config[config_name])
     if hasattr(config[config_name], "init_app"):
         config[config_name].init_app(app)
+    app.config.setdefault(
+        "IS_VERCEL",
+        bool(
+            (os.environ.get("VERCEL") or "").strip()
+            or (os.environ.get("VERCEL_ENV") or "").strip()
+            or (os.environ.get("VERCEL_URL") or "").strip()
+        ),
+    )
     app.config["PORTAL_ROLE"] = resolve_portal_role(portal_role)
     current_role = app.config["PORTAL_ROLE"]
     app.config["SESSION_COOKIE_NAME"] = f"sweetcrumbs_{current_role}_session"
@@ -302,7 +323,8 @@ def build_socketio_origins(app):
             app.config.get("ADMIN_PORTAL_URL"),
             app.config.get("DELIVERY_PORTAL_URL"),
         ]
-        return [origin for origin in origins if origin]
+        filtered = [origin for origin in origins if origin]
+        return filtered or "*"
     return "*"
 
 
@@ -356,11 +378,6 @@ def setup_extensions(app):
         cors_allowed_origins=build_socketio_origins(app),
         message_queue=message_queue,
     )
-    # Enforce gevent websocket worker in production for SocketIO
-    if app.config.get("ENV") == "production":
-        async_mode = app.config.get("SOCKETIO_ASYNC_MODE", "").strip().lower()
-        if async_mode != "gevent":
-            raise RuntimeError("SOCKETIO_ASYNC_MODE must be 'gevent' in production")
     setup_celery(app)
     import tasks  # noqa: F401 — register Celery task modules
 
@@ -501,6 +518,9 @@ def register_core_routes(app):
         celery_state = "ok"
         storage_state = "ok"
         status_code = 200
+        redis_required = bool(app.config.get("REDIS_REQUIRED", False))
+        celery_required = bool(app.config.get("CELERY_REQUIRED", False))
+        storage_required = bool(app.config.get("STORAGE_REQUIRED", False))
         try:
             db.session.execute(text("SELECT 1"))
         except Exception:
@@ -512,8 +532,10 @@ def register_core_routes(app):
                 from redis import Redis
 
                 Redis.from_url(redis_url).ping()
-            elif app.config.get("ENV") == "production":
-                raise RuntimeError("REDIS_URL missing")
+            else:
+                redis_state = "not_configured"
+                if redis_required:
+                    raise RuntimeError("REDIS_URL missing")
         except Exception:
             redis_state = "unhealthy"
             status_code = 503
@@ -521,7 +543,8 @@ def register_core_routes(app):
             broker = app.config.get("CELERY_BROKER_URL")
             backend = app.config.get("CELERY_RESULT_BACKEND")
             if not broker or not backend:
-                if app.config.get("ENV") == "production":
+                celery_state = "not_configured"
+                if celery_required:
                     raise RuntimeError("Celery broker/backend not configured")
             else:
                 from redis import Redis
@@ -534,9 +557,13 @@ def register_core_routes(app):
             celery_state = "unhealthy"
             status_code = 503
 
-        storage_check = app.extensions["service_container"].storage_service.verify_connection()
+        storage_check = (
+            app.extensions["service_container"].storage_service.verify_connection()
+        )
         storage_state = storage_check["status"]
-        if app.config.get("ENV") == "production" and storage_state != "ok":
+        if storage_state == "not_configured" and not storage_required:
+            storage_state = "not_configured"
+        elif storage_state != "ok":
             status_code = 503
 
         return (
@@ -657,6 +684,8 @@ def register_context_processors(app):
         )
 def initialize_database(app, seed=False):
     with app.app_context():
+        if app.config.get("ENV") == "production" and seed:
+            raise RuntimeError("BOOTSTRAP_SEED_DATA is disabled in production")
         from flask_migrate import upgrade
 
         upgrade()
@@ -1076,11 +1105,10 @@ if __name__ == "__main__":
 
     def run_customer():
         customer_app = create_app("development", portal_role="customer")
-        with customer_app.app_context():
-            from models import safe_create_all
-
-            safe_create_all(customer_app)
-            seed_data(customer_app)
+        initialize_database(
+            customer_app,
+            seed=customer_app.config.get("SHOW_DEMO_ACCOUNTS", False),
+        )
         customer_app.run(debug=False, use_reloader=False, port=5000)
 
     def run_admin():

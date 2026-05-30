@@ -1,58 +1,79 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  nginx_gateway:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-    depends_on:
-      - customer_web
-      - admin_web
-      - delivery_web
-
   customer_web:
     build: .
+    env_file:
+      - .env
     environment:
-      - PORTAL_ROLE=customer
-      - FLASK_ENV=production
-      - DATABASE_URL=mysql+pymysql://bakery_user:bakery_pass@db/bakery_db
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=your_secure_secret_key
-      - MEILI_HOST=http://meilisearch:7700
-      - MEILI_MASTER_KEY=masterKey123
+      FLASK_ENV: development
+      PORTAL_ROLE: customer
+      PORT: "5000"
+      REDIS_URL: redis://redis:6379/0
+      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      RATELIMIT_STORAGE_URI: redis://redis:6379/0
+    ports:
+      - "5000:5000"
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
   admin_web:
     build: .
+    env_file:
+      - .env
+    command: gunicorn --config gunicorn.conf.py 'app:create_app("development", portal_role="admin")'
     environment:
-      - PORTAL_ROLE=admin
-      - FLASK_ENV=production
-      - DATABASE_URL=mysql+pymysql://bakery_user:bakery_pass@db/bakery_db
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=your_secure_secret_key
+      FLASK_ENV: development
+      PORTAL_ROLE: admin
+      PORT: "5001"
+      REDIS_URL: redis://redis:6379/0
+      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      RATELIMIT_STORAGE_URI: redis://redis:6379/0
+    ports:
+      - "5001:5001"
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
   delivery_web:
     build: .
+    env_file:
+      - .env
+    command: gunicorn --config gunicorn.conf.py 'app:create_app("development", portal_role="delivery")'
     environment:
-      - PORTAL_ROLE=delivery
-      - FLASK_ENV=production
-      - DATABASE_URL=mysql+pymysql://bakery_user:bakery_pass@db/bakery_db
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=your_secure_secret_key
+      FLASK_ENV: development
+      PORTAL_ROLE: delivery
+      PORT: "5002"
+      REDIS_URL: redis://redis:6379/0
+      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      RATELIMIT_STORAGE_URI: redis://redis:6379/0
+    ports:
+      - "5002:5002"
     depends_on:
-      db:
+      redis:
         condition: service_healthy
+
+  celery_worker:
+    build: .
+    env_file:
+      - .env
+    command: celery -A celery_app.celery worker --loglevel=info
+    environment:
+      FLASK_ENV: development
+      PORTAL_ROLE: customer
+      REDIS_URL: redis://redis:6379/0
+      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      RATELIMIT_STORAGE_URI: redis://redis:6379/0
+    depends_on:
       redis:
         condition: service_healthy
 
@@ -65,53 +86,3 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-
-  meilisearch:
-    image: getmeili/meilisearch:v1.6
-    ports:
-      - "7700:7700"
-    environment:
-      - MEILI_MASTER_KEY=masterKey123
-    volumes:
-      - meili_data:/meili_data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  celery_worker:
-    build: .
-    command: celery -A celery_app.celery_app worker --loglevel=info
-    environment:
-      - FLASK_ENV=production
-      - DATABASE_URL=mysql+pymysql://bakery_user:bakery_pass@db/bakery_db
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  db:
-    image: mysql:8.0
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: bakery_db
-      MYSQL_USER: bakery_user
-      MYSQL_PASSWORD: bakery_pass
-    volumes:
-      - db_data:/var/lib/mysql
-      - ./schema.sql:/docker-entrypoint-initdb.d/1_schema.sql
-    healthcheck:
-      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
-
-volumes:
-  db_data:
-  meili_data:

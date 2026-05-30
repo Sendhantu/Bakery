@@ -113,8 +113,8 @@ self.addEventListener('push', (event) => {
   const data = event.data.json();
   const options = {
     body: data.body || 'New notification',
-    icon: '/static/icons/icon-192x192.png',
-    badge: '/static/icons/icon-72x72.png',
+    icon: '/static/icons/bakery-app.svg',
+    badge: '/static/icons/bakery-app.svg',
     vibrate: [200, 100, 200],
     data: {
       url: data.url || '/delivery'
@@ -123,12 +123,12 @@ self.addEventListener('push', (event) => {
       {
         action: 'view',
         title: 'View',
-        icon: '/static/icons/icon-192x192.png'
+        icon: '/static/icons/bakery-app.svg'
       },
       {
         action: 'close',
         title: 'Close',
-        icon: '/static/icons/icon-192x192.png'
+        icon: '/static/icons/bakery-app.svg'
       }
     ]
   };

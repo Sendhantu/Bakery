@@ -20,16 +20,8 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
 
-      # TiDB Cloud - External Database (NOT Render PostgreSQL)
-      - key: DB_HOST
-        sync: false
-      - key: DB_PORT
-        value: "4000"
-      - key: DB_USER
-        sync: false
-      - key: DB_PASSWORD
-        sync: false
-      - key: DB_NAME
+      # TiDB Cloud - External Database (required in production)
+      - key: DATABASE_URL
         sync: false
       - key: DB_SSL_CA
         value: /etc/ssl/certs/ca-certificates.crt
@@ -38,9 +30,12 @@ services:
       - key: DB_SSL_VERIFY_IDENTITY
         value: "true"
 
-      # Redis - External (or Render Redis)
+      # Redis - Render-managed and shared by Socket.IO, Celery, cache, and rate limiting
       - key: REDIS_URL
-        sync: false
+        fromService:
+          name: bakery-redis
+          type: redis
+          property: connectionString
 
       # Mail
       - key: MAIL_SERVER
@@ -91,10 +86,14 @@ services:
       # Production settings
       - key: USE_PROXY_FIX
         value: "true"
+      - key: CUSTOMER_PORTAL_URL
+        sync: false
       - key: SHOW_DEMO_ACCOUNTS
         value: "false"
       - key: OFFLINE_SYNC_ENABLED
         value: "false"
+      - key: SOCKETIO_ASYNC_MODE
+        value: gevent
       - key: RATELIMIT_STORAGE_URI
         fromService:
           name: bakery-redis
@@ -128,6 +127,8 @@ services:
     envVars:
       - key: FLASK_ENV
         value: production
+      - key: PORTAL_ROLE
+        value: customer
       - key: SECRET_KEY
         fromService:
           name: bakery-customer-portal
@@ -138,31 +139,11 @@ services:
           name: bakery-customer-portal
           type: web
           envVarKey: JWT_SECRET_KEY
-      - key: DB_HOST
+      - key: DATABASE_URL
         fromService:
           name: bakery-customer-portal
           type: web
-          envVarKey: DB_HOST
-      - key: DB_PORT
-        fromService:
-          name: bakery-customer-portal
-          type: web
-          envVarKey: DB_PORT
-      - key: DB_USER
-        fromService:
-          name: bakery-customer-portal
-          type: web
-          envVarKey: DB_USER
-      - key: DB_PASSWORD
-        fromService:
-          name: bakery-customer-portal
-          type: web
-          envVarKey: DB_PASSWORD
-      - key: DB_NAME
-        fromService:
-          name: bakery-customer-portal
-          type: web
-          envVarKey: DB_NAME
+          envVarKey: DATABASE_URL
       - key: DB_SSL_CA
         fromService:
           name: bakery-customer-portal
@@ -183,6 +164,16 @@ services:
           name: bakery-redis
           type: redis
           property: connectionString
+      - key: RATELIMIT_STORAGE_URI
+        fromService:
+          name: bakery-redis
+          type: redis
+          property: connectionString
+      - key: SOCKETIO_MESSAGE_QUEUE
+        fromService:
+          name: bakery-redis
+          type: redis
+          property: connectionString
       - key: CELERY_BROKER_URL
         fromService:
           name: bakery-redis
@@ -193,6 +184,99 @@ services:
           name: bakery-redis
           type: redis
           property: connectionString
+      - key: CLOUDINARY_CLOUD_NAME
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: CLOUDINARY_CLOUD_NAME
+      - key: CLOUDINARY_API_KEY
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: CLOUDINARY_API_KEY
+      - key: CLOUDINARY_API_SECRET
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: CLOUDINARY_API_SECRET
+      - key: MAIL_SERVER
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: MAIL_SERVER
+      - key: MAIL_PORT
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: MAIL_PORT
+      - key: MAIL_USERNAME
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: MAIL_USERNAME
+      - key: MAIL_PASSWORD
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: MAIL_PASSWORD
+      - key: MAIL_DEFAULT_SENDER
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: MAIL_DEFAULT_SENDER
+      - key: TWILIO_ACCOUNT_SID
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: TWILIO_ACCOUNT_SID
+      - key: TWILIO_AUTH_TOKEN
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: TWILIO_AUTH_TOKEN
+      - key: TWILIO_FROM_NUMBER
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: TWILIO_FROM_NUMBER
+      - key: TWILIO_WHATSAPP_FROM
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: TWILIO_WHATSAPP_FROM
+      - key: FIREBASE_PROJECT_ID
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: FIREBASE_PROJECT_ID
+      - key: FIREBASE_CLIENT_EMAIL
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: FIREBASE_CLIENT_EMAIL
+      - key: FIREBASE_PRIVATE_KEY
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: FIREBASE_PRIVATE_KEY
+      - key: GOOGLE_MAPS_API_KEY
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: GOOGLE_MAPS_API_KEY
+      - key: SENTRY_DSN
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: SENTRY_DSN
+      - key: USE_PROXY_FIX
+        value: "true"
+      - key: SHOW_DEMO_ACCOUNTS
+        value: "false"
+      - key: OFFLINE_SYNC_ENABLED
+        value: "false"
+      - key: SOCKETIO_ASYNC_MODE
+        value: gevent
 
   # ─── Redis (for SocketIO, Celery, Cache, Rate Limiting) ──────────────────────
   - name: bakery-redis

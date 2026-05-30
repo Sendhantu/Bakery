@@ -6,8 +6,8 @@ port = os.environ.get("PORT", "5000")
 bind = f"0.0.0.0:{port}"
 
 # ─── Worker Processes ───────────────────────────────────────────
-# gevent is required for Flask-SocketIO + gevent-websocket
-worker_class = "gevent"
+# gevent-websocket is required for Flask-SocketIO websocket upgrades on Render
+worker_class = "geventwebsocket.gunicorn.workers.GeventWebSocketWorker"
 workers = 1               # Keep at 1 for free tier (512MB RAM)
 worker_connections = 1000
 timeout = 120
