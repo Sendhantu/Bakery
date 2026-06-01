@@ -92,6 +92,8 @@ services:
         value: "false"
       - key: OFFLINE_SYNC_ENABLED
         value: "false"
+      - key: STORAGE_REQUIRED
+        value: "false"
       - key: SOCKETIO_ASYNC_MODE
         value: gevent
       - key: RATELIMIT_STORAGE_URI

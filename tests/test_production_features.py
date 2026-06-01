@@ -1,6 +1,56 @@
-import json
+import pytest
+from flask import Flask
 
-from models import Payment, User, db
+from config.production import ProductionConfig
+from models import Payment, db
+
+
+def _set_required_production_env(monkeypatch):
+    required_values = {
+        "DATABASE_URL": "mysql+pymysql://user:pass@example.com:4000/bakerydb",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "SOCKETIO_MESSAGE_QUEUE": "redis://localhost:6379/0",
+        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_RESULT_BACKEND": "redis://localhost:6379/0",
+        "RATELIMIT_STORAGE_URI": "redis://localhost:6379/0",
+        "SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
+        "JWT_SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
+    }
+    for name, value in required_values.items():
+        monkeypatch.setenv(name, value)
+
+
+def _production_config_app():
+    app = Flask(__name__)
+    app.config["SECRET_KEY"] = "abcdefghijklmnopqrstuvwxyz123456"
+    app.config["SQLALCHEMY_DATABASE_URI"] = (
+        "mysql+pymysql://user:pass@example.com:4000/bakerydb"
+    )
+    app.config["RATELIMIT_STORAGE_URI"] = "redis://localhost:6379/0"
+    return app
+
+
+def test_production_cloudinary_optional_for_startup(monkeypatch):
+    _set_required_production_env(monkeypatch)
+    monkeypatch.delenv("CLOUDINARY_CLOUD_NAME", raising=False)
+    monkeypatch.delenv("CLOUDINARY_API_KEY", raising=False)
+    monkeypatch.delenv("CLOUDINARY_API_SECRET", raising=False)
+
+    app = _production_config_app()
+    ProductionConfig.init_app(app)
+
+    assert app.config["STORAGE_REQUIRED"] is False
+
+
+def test_production_cloudinary_required_when_storage_required(monkeypatch):
+    _set_required_production_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_REQUIRED", "true")
+    monkeypatch.delenv("CLOUDINARY_CLOUD_NAME", raising=False)
+    monkeypatch.delenv("CLOUDINARY_API_KEY", raising=False)
+    monkeypatch.delenv("CLOUDINARY_API_SECRET", raising=False)
+
+    with pytest.raises(RuntimeError, match="CLOUDINARY_API_KEY"):
+        ProductionConfig.init_app(_production_config_app())
 
 
 def test_healthz_returns_json(client):

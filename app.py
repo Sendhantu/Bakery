@@ -1100,10 +1100,6 @@ def seed_data(app):
         db.session.commit()
         print("✅ Seed data inserted successfully.")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Local development only — python app.py starts 3 portals on separate ports
-# Production uses wsgi.py via gunicorn (Render)
-# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import threading
 

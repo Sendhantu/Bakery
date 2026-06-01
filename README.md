@@ -160,15 +160,14 @@ CELERY_RESULT_BACKEND=redis://...
 RATELIMIT_STORAGE_URI=redis://...
 SECRET_KEY=replace-with-a-long-random-secret
 JWT_SECRET_KEY=replace-with-a-long-random-secret
-CLOUDINARY_CLOUD_NAME=replace-me
-CLOUDINARY_API_KEY=replace-me
-CLOUDINARY_API_SECRET=replace-me
 SOCKETIO_ASYNC_MODE=gevent
 ```
 
 ### Optional environment variables
 
 - `CUSTOMER_PORTAL_URL` if you want to override the deployment URL explicitly
+- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` for uploads and invoice PDF storage
+- `STORAGE_REQUIRED=true` if Cloudinary must be present before the production app boots
 - `MAIL_SERVER`, `MAIL_USERNAME`, `MAIL_PASSWORD` for email notifications
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` for WhatsApp/SMS
 - `GOOGLE_MAPS_API_KEY`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `SENTRY_DSN`
@@ -211,9 +210,9 @@ Render Cloud (Public)
     ├── Flask Cache
     └── Rate Limiting Storage
 
-External Cloud Services (Required)
+External Cloud Services
 ├── TiDB Cloud (Database)
-├── Cloudinary (Image/File Storage)
+├── Cloudinary (Optional Image/File Storage)
 └── Optional: Firebase (Push Notifications)
 ```
 
@@ -233,6 +232,8 @@ External Cloud Services (Required)
 2. Create a new cloud (or use existing)
 3. Navigate to Settings → API Keys
 4. Note down: Cloud name, API Key, API Secret
+
+Cloudinary is optional for booting the public customer portal. Set `STORAGE_REQUIRED=true` only if uploads and invoice file storage must be available before the service starts.
 
 #### 3. Deploy to Render
 
@@ -257,7 +258,7 @@ The `render.yaml` provisions Redis and shares it with the web service and Celery
 - `DATABASE_URL`: `mysql+pymysql://user:password@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/bakerydb`
 - SSL settings are already included in `render.yaml` for TiDB Cloud.
 
-**Cloudinary (Required):**
+**Cloudinary (Optional, required when `STORAGE_REQUIRED=true`):**
 - `CLOUDINARY_CLOUD_NAME`: Your Cloudinary cloud name
 - `CLOUDINARY_API_KEY`: Your Cloudinary API key
 - `CLOUDINARY_API_SECRET`: Your Cloudinary API secret
