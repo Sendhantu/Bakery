@@ -38,6 +38,11 @@
   {% endblock %}
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   {% block head %}{% endblock %}
+  <!-- Vercel Speed Insights -->
+  <script>
+    window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
+  </script>
+  <script defer src="/_vercel/speed-insights/script.js"></script>
 </head>
 <body data-authenticated="{{ 'true' if current_user.is_authenticated else 'false' }}" data-login-url="{{ url_for('auth.login') }}" data-user-role="{{ current_user.role if current_user.is_authenticated else 'guest' }}" data-page-role="{{ current_portal_role }}">
 
