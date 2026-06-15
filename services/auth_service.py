@@ -2,6 +2,7 @@ from datetime import datetime
 
 from models import LoginHistory, db
 from repositories import UserRepository
+from clock import utcnow
 from utils.security import admin_2fa_provision, get_login_lockout_window
 
 
@@ -25,7 +26,7 @@ class AuthService:
         )
 
     def get_recent_failed_attempts(self, user, config):
-        window_start = datetime.utcnow() - get_login_lockout_window(config)
+        window_start = utcnow() - get_login_lockout_window(config)
         last_success = self.user_repository.last_success(user.id, window_start)
         failures = self.user_repository.recent_failures(user.id, window_start)
         if last_success:
@@ -47,10 +48,10 @@ class AuthService:
             return False, 0
 
         unlock_at = last_failed.login_time + get_login_lockout_window(config)
-        if unlock_at <= datetime.utcnow():
+        if unlock_at <= utcnow():
             return False, 0
 
-        remaining_seconds = int((unlock_at - datetime.utcnow()).total_seconds())
+        remaining_seconds = int((unlock_at - utcnow()).total_seconds())
         remaining_minutes = max(1, (remaining_seconds + 59) // 60)
         return True, remaining_minutes
 

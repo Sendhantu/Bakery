@@ -1,4 +1,5 @@
 from datetime import datetime
+from clock import utcnow
 from .base import db
 
 PRODUCT_FALLBACK_IMAGES = {
@@ -36,7 +37,7 @@ class Product(db.Model):
     occasion_tags = db.Column(db.String(300))
     shelf_life_hours = db.Column(db.Integer, default=24)
     version = db.Column(db.Integer, default=1, nullable=False)
-    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at    = db.Column(db.DateTime, default=utcnow)
 
     variants     = db.relationship('ProductVariant', backref='product', lazy='dynamic', cascade='all, delete-orphan')
     cart_items   = db.relationship('Cart', backref='product', lazy='dynamic')
@@ -157,4 +158,4 @@ class Review(db.Model):
     user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     rating     = db.Column(db.Integer, nullable=False)
     comment    = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)

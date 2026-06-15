@@ -10,6 +10,7 @@ except ImportError:  # pragma: no cover
 
 from exceptions import ValidationError
 from models import Order, db
+from clock import utcnow
 
 
 class QRService:
@@ -35,7 +36,7 @@ class QRService:
         if order.qr_verified_at is not None:
             raise ValidationError("This QR code has already been used.")
 
-        order.qr_verified_at = datetime.utcnow()
+        order.qr_verified_at = utcnow()
         order.qr_verified_by = actor_id
         if order.status in {"PACKED", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY"}:
             order.status = "DELIVERED"

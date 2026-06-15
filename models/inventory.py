@@ -1,5 +1,6 @@
 from datetime import datetime
 import uuid
+from clock import utcnow
 from .base import db
 
 class RawMaterial(db.Model):
@@ -15,8 +16,8 @@ class RawMaterial(db.Model):
     notes         = db.Column(db.Text)
     is_active     = db.Column(db.Boolean, default=True)
     version       = db.Column(db.Integer, default=1, nullable=False)
-    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at    = db.Column(db.DateTime, default=utcnow)
+    updated_at    = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
     recipe_items  = db.relationship('ProductMaterial', backref='raw_material', lazy='dynamic')
 
     branch = db.relationship('Branch', backref='raw_materials')
@@ -60,7 +61,7 @@ class Supplier(db.Model):
     payment_terms = db.Column(db.String(200))
     notes         = db.Column(db.Text)
     is_active     = db.Column(db.Boolean, default=True)
-    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at    = db.Column(db.DateTime, default=utcnow)
 
     @property
     def status(self):
@@ -75,7 +76,7 @@ class Branch(db.Model):
     phone        = db.Column(db.String(30))
     address      = db.Column(db.Text)
     is_active    = db.Column(db.Boolean, default=True)
-    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at   = db.Column(db.DateTime, default=utcnow)
 
     @property
     def status(self):
@@ -96,7 +97,7 @@ class ProductionPlan(db.Model):
     oven_slot = db.Column(db.String(50))
     priority = db.Column(db.String(20), default='normal')
     notes          = db.Column(db.Text)
-    created_at     = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at     = db.Column(db.DateTime, default=utcnow)
 
     product = db.relationship('Product', backref='production_plans')
     branch  = db.relationship('Branch', backref='production_plans')
@@ -112,7 +113,7 @@ class ProductionBatch(db.Model):
     batch_code       = db.Column(db.String(120), nullable=False, unique=True, default=lambda: f"BATCH-{uuid.uuid4().hex[:8].upper()}")
     product_id       = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     branch_id        = db.Column(db.Integer, db.ForeignKey('branches.id'))
-    produced_at      = db.Column(db.DateTime, default=datetime.utcnow)
+    produced_at      = db.Column(db.DateTime, default=utcnow)
     expiry_date      = db.Column(db.DateTime)
     quantity         = db.Column(db.Integer, nullable=False, default=0)
     waste_percentage = db.Column(db.Numeric(5, 2), default=0)
@@ -125,4 +126,4 @@ class ProductionBatch(db.Model):
 
     @property
     def age_days(self):
-        return (datetime.utcnow().date() - self.produced_at.date()).days
+        return (utcnow().date() - self.produced_at.date()).days

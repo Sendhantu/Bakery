@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from clock import utcnow
 from .base import db
 
 
@@ -14,7 +15,7 @@ class AuditLog(db.Model):
     action = db.Column(db.String(80), nullable=False)
     change_summary = db.Column(db.Text)
     metadata_json = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     actor = db.relationship("User")
     branch = db.relationship("Branch")
@@ -36,7 +37,7 @@ class OperationalAlert(db.Model):
     message = db.Column(db.Text, nullable=False)
     is_resolved = db.Column(db.Boolean, default=False)
     resolved_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     branch = db.relationship("Branch")
     user = db.relationship("User")
@@ -53,7 +54,7 @@ class InventoryForecast(db.Model):
     ingredient_projection_json = db.Column(db.Text)
     confidence_score = db.Column(db.Numeric(5, 2), default=0)
     alert_level = db.Column(db.String(20), default="normal")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     branch = db.relationship("Branch")
     product = db.relationship("Product", backref="forecasts")
@@ -81,8 +82,8 @@ class DeliveryRoutePlan(db.Model):
     estimated_duration_minutes = db.Column(db.Integer, default=0)
     route_payload_json = db.Column(db.Text)
     route_cache_key = db.Column(db.String(120))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
     branch = db.relationship("Branch")
     agent = db.relationship("DeliveryAgent", backref="route_plans")
@@ -99,7 +100,7 @@ class StaffShift(db.Model):
     end_time = db.Column(db.Time, nullable=False)
     status = db.Column(db.String(20), default="scheduled")
     notes = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     branch = db.relationship("Branch", backref="staff_shifts")
 
@@ -115,7 +116,7 @@ class AttendanceRecord(db.Model):
     status = db.Column(db.String(20), default="present")
     worked_minutes = db.Column(db.Integer, default=0)
     notes = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     branch = db.relationship("Branch", backref="attendance_records")
     shift = db.relationship("StaffShift", backref="attendance_records")
@@ -131,7 +132,7 @@ class SalaryRecord(db.Model):
     amount = db.Column(db.Numeric(10, 2), nullable=False, default=0)
     status = db.Column(db.String(20), default="due")
     notes = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     branch = db.relationship("Branch", backref="salary_records")
     user = db.relationship("User", backref="salary_records")
@@ -143,7 +144,7 @@ class SearchAnalytics(db.Model):
     query_text = db.Column(db.String(255), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"))
     hit_count = db.Column(db.Integer, default=0)
-    last_searched_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_searched_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     product = db.relationship("Product")
 
@@ -158,7 +159,7 @@ class BackupVerification(db.Model):
     provider = db.Column(db.String(40), nullable=False)
     status = db.Column(db.String(20), default="unknown")
     details = db.Column(db.Text)
-    verified_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    verified_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
 
 class QueueMetric(db.Model):
@@ -168,7 +169,7 @@ class QueueMetric(db.Model):
     backlog = db.Column(db.Integer, default=0)
     failed_count = db.Column(db.Integer, default=0)
     retry_count = db.Column(db.Integer, default=0)
-    recorded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    recorded_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
 
 class ApiUsageLog(db.Model):
@@ -180,7 +181,7 @@ class ApiUsageLog(db.Model):
     method = db.Column(db.String(10), nullable=False)
     status_code = db.Column(db.Integer, default=200)
     latency_ms = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     user = db.relationship("User")
 
@@ -194,7 +195,7 @@ class FraudAlert(db.Model):
     severity = db.Column(db.String(20), default="medium")
     details = db.Column(db.Text)
     is_resolved = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     order = db.relationship("Order", backref="fraud_alerts")
     user = db.relationship("User", backref="fraud_alerts")
@@ -208,7 +209,7 @@ class PushDevice(db.Model):
     platform = db.Column(db.String(40), default="web")
     device_token = db.Column(db.String(255), nullable=False, unique=True)
     is_active = db.Column(db.Boolean, default=True)
-    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     user = db.relationship("User", backref="push_devices")
 
@@ -226,7 +227,7 @@ class PricingRule(db.Model):
     max_batch_age_hours = db.Column(db.Integer)
     applies_after_hour = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     branch = db.relationship("Branch")
     category = db.relationship("Category")
@@ -242,7 +243,7 @@ class SubscriptionSchedule(db.Model):
     skipped_until = db.Column(db.DateTime)
     last_generated_at = db.Column(db.DateTime)
     status = db.Column(db.String(20), default="active")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     subscription = db.relationship("Subscription", backref="schedule")
 
@@ -256,7 +257,7 @@ class CashbackWalletEntry(db.Model):
     entry_type = db.Column(db.String(20), nullable=False)
     reason = db.Column(db.String(120), nullable=False)
     expires_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     user = db.relationship("User", backref="wallet_entries")
     order = db.relationship("Order", backref="wallet_entries")
@@ -271,7 +272,7 @@ class ReferralReward(db.Model):
     reward_points = db.Column(db.Integer, default=0)
     reward_amount = db.Column(db.Numeric(10, 2), default=0)
     status = db.Column(db.String(20), default="pending")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     referrer = db.relationship("User", foreign_keys=[referrer_user_id])
     referred = db.relationship("User", foreign_keys=[referred_user_id])
@@ -286,5 +287,5 @@ class SyncConflict(db.Model):
     action_type = db.Column(db.String(80), nullable=False)
     local_payload = db.Column(db.Text)
     remote_payload = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     resolved_at = db.Column(db.DateTime)

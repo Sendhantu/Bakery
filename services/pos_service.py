@@ -4,7 +4,7 @@ from decimal import Decimal
 
 class POSService:
     def create_pos_sale(self, variant_id, quantity, payment_mode='CASH', customer_phone='', actor_id=None):
-        variant = ProductVariant.query.get_or_404(variant_id)
+        variant = db.get_or_404(ProductVariant, variant_id)
         unit_price = variant.price
         subtotal = unit_price * quantity
         # Minimal POS implementation: create order, items, payment, adjust stock

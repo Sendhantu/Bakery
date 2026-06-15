@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from decimal import Decimal
 
+from clock import utcnow
 from flask import Flask, request, send_from_directory, url_for, jsonify, current_app, redirect, render_template
 from flask_login import LoginManager
 from flask_mail import Mail
@@ -198,7 +199,7 @@ def record_development_credential(role, email, password, label="", source="manua
         "password": password,
         "label": label or f"{role.title()} Account",
         "source": source,
-        "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
+        "updated_at": utcnow().isoformat(timespec="seconds"),
     }
     save_recorded_development_credentials(registry)
 
@@ -371,7 +372,7 @@ def setup_extensions(app):
     mail.init_app(app)
     csrf.init_app(app)
     jwt.init_app(app)
-    message_queue = app.config.get("REDIS_URL") or app.config.get("SOCKETIO_MESSAGE_QUEUE")
+    message_queue = app.config.get("SOCKETIO_MESSAGE_QUEUE") or app.config.get("REDIS_URL")
     socketio.init_app(
         app,
         async_mode=app.config.get("SOCKETIO_ASYNC_MODE", "threading"),
@@ -535,7 +536,10 @@ def register_core_routes(app):
             if redis_url:
                 from redis import Redis
 
-                Redis.from_url(redis_url).ping()
+                Redis.from_url(
+                    redis_url,
+                    **app.config.get("REDIS_CLIENT_OPTIONS", {}),
+                ).ping()
             else:
                 redis_state = "not_configured"
                 if redis_required:
@@ -553,7 +557,10 @@ def register_core_routes(app):
             else:
                 from redis import Redis
 
-                Redis.from_url(broker).ping()
+                Redis.from_url(
+                    broker,
+                    **app.config.get("REDIS_CLIENT_OPTIONS", {}),
+                ).ping()
                 registered = list(celery.tasks.keys())
                 if not any(name.startswith("tasks.") for name in registered):
                     celery_state = "degraded"
@@ -1080,7 +1087,7 @@ def seed_data(app):
                     discount_value=10,
                     min_order_value=300,
                     max_uses=500,
-                    valid_until=datetime.utcnow() + timedelta(days=365),
+                    valid_until=utcnow() + timedelta(days=365),
                 )
             )
         if not Coupon.query.filter_by(code="FLAT50").first():
@@ -1093,7 +1100,7 @@ def seed_data(app):
                     discount_value=50,
                     min_order_value=500,
                     max_uses=200,
-                    valid_until=datetime.utcnow() + timedelta(days=365),
+                    valid_until=utcnow() + timedelta(days=365),
                 )
             )
 
@@ -1101,36 +1108,14 @@ def seed_data(app):
         print("✅ Seed data inserted successfully.")
 
 if __name__ == "__main__":
-    import threading
+    config_name = os.environ.get("FLASK_ENV", "development").strip().lower()
+    portal_role = resolve_portal_role()
+    port = int(os.environ.get("PORT") or PORTAL_PORTS[portal_role])
 
-    def run_customer():
-        customer_app = create_app("development", portal_role="customer")
+    flask_app = create_app(config_name, portal_role=portal_role)
+    if config_name != "production":
         initialize_database(
-            customer_app,
-            seed=customer_app.config.get("SHOW_DEMO_ACCOUNTS", False),
+            flask_app,
+            seed=flask_app.config.get("SHOW_DEMO_ACCOUNTS", False),
         )
-        customer_app.run(debug=False, use_reloader=False, port=5000)
-
-    def run_admin():
-        admin_app = create_app("development", portal_role="admin")
-        admin_app.run(debug=False, use_reloader=False, port=5001)
-
-    def run_delivery():
-        delivery_app = create_app("development", portal_role="delivery")
-        delivery_app.run(debug=False, use_reloader=False, port=5002)
-
-    customer_thread = threading.Thread(target=run_customer)
-    admin_thread = threading.Thread(target=run_admin)
-    delivery_thread = threading.Thread(target=run_delivery)
-
-    customer_thread.start()
-    admin_thread.start()
-    delivery_thread.start()
-
-    customer_thread.join()
-    admin_thread.join()
-    delivery_thread.join()
-
-#cd /Users/sendhanumapathy/Downloads/bakery/customer_app && python app.py
-#cd /Users/sendhanumapathy/Downloads/bakery/admin_app && python app.py
-#cd /Users/sendhanumapathy/Downloads/bakery/delivery_app && python app.py
+    flask_app.run(debug=False, use_reloader=False, host="0.0.0.0", port=port)

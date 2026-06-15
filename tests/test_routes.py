@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 from models import Coupon, Delivery, DeliveryAgent, Order, Product, ProductVariant, User, db
+from clock import utcnow
 
 
 def sign_in(test_client, email, password):
@@ -29,7 +30,7 @@ def create_order(app, status='PLACED', assign_delivery=False):
             pincode='641002',
             phone='9999999999',
             delivery_slot='09:00 - 11:00',
-            delivery_date=datetime.utcnow().date() + timedelta(days=1),
+            delivery_date=utcnow().date() + timedelta(days=1),
         )
         db.session.add(order)
         db.session.flush()
@@ -41,7 +42,7 @@ def create_order(app, status='PLACED', assign_delivery=False):
                 Delivery(
                     order_id=order.id,
                     agent_id=agent.id,
-                    assigned_time=datetime.utcnow(),
+                    assigned_time=utcnow(),
                     status='ASSIGNED',
                 )
             )
@@ -202,7 +203,7 @@ def test_delivery_cannot_set_packed_status(delivery_client):
     assert b'Invalid delivery status.' in response.data
 
     with delivery_client.application.app_context():
-        order = Order.query.get(order_id)
+        order = db.session.get(Order, order_id)
         assert order is not None
         assert order.status == 'PREPARING'
 
@@ -236,7 +237,7 @@ def test_admin_can_toggle_coupon(admin_client):
     assert response.status_code == 200
 
     with admin_client.application.app_context():
-        coupon = Coupon.query.get(coupon_id)
+        coupon = db.session.get(Coupon, coupon_id)
         assert coupon is not None
         assert coupon.is_active is False
 
@@ -280,7 +281,7 @@ def test_customer_can_place_pickup_order(client):
     )
     assert add_response.status_code in {200, 302}
 
-    tomorrow = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
+    tomorrow = (utcnow().date() + timedelta(days=1)).isoformat()
     response = client.post(
         '/checkout',
         data={
@@ -331,7 +332,7 @@ def test_preorder_product_blocks_insufficient_notice_pickup(client):
     )
     assert add_response.status_code in {200, 302}
 
-    tomorrow = (datetime.utcnow().date() + timedelta(days=1)).isoformat()
+    tomorrow = (utcnow().date() + timedelta(days=1)).isoformat()
     response = client.post(
         '/checkout',
         data={
@@ -366,6 +367,6 @@ def test_delivery_can_collect_cod_payment(delivery_client):
     assert b'COD payment marked as collected.' in response.data
 
     with delivery_client.application.app_context():
-        order = Order.query.get(order_id)
+        order = db.session.get(Order, order_id)
         assert order is not None
         assert order.payment_status == 'PAID'

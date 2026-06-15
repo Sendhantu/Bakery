@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta
 
 from exceptions import ValidationError
+from clock import utcnow
 
 
 class SlotService:
@@ -9,7 +10,7 @@ class SlotService:
         self.pickup_buffer_minutes = max(0, int(pickup_buffer_minutes or 0))
 
     def get_available_slots(self, target_date, now=None):
-        current_time = now or datetime.utcnow()
+        current_time = now or utcnow()
         normalized_date = self._normalize_date(target_date)
         if normalized_date > current_time.date():
             return list(self.time_slots)
@@ -24,7 +25,7 @@ class SlotService:
         return available
 
     def validate_delivery_selection(self, target_date, selected_slot, now=None):
-        current_time = now or datetime.utcnow()
+        current_time = now or utcnow()
         normalized_date = self._normalize_date(target_date)
         selected_slot = (selected_slot or "").strip()
 
@@ -35,7 +36,7 @@ class SlotService:
         return selected_slot
 
     def validate_pickup_selection(self, target_date, selected_slot="", custom_time="", now=None):
-        current_time = now or datetime.utcnow()
+        current_time = now or utcnow()
         normalized_date = self._normalize_date(target_date)
         selected_slot = (selected_slot or "").strip()
         custom_time = (custom_time or "").strip()

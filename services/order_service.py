@@ -5,6 +5,7 @@ from exceptions import ValidationError
 from models import db
 from repositories import OrderRepository
 from validators import ensure_order_status_transition
+from clock import utcnow
 
 
 class OrderService:
@@ -55,8 +56,8 @@ class OrderService:
         agent = delivery.agent
         if new_status == "DELIVERED":
             delivery.status = "DELIVERED"
-            delivery.delivered_time = datetime.utcnow()
-            delivery.last_status_at = datetime.utcnow()
+            delivery.delivered_time = utcnow()
+            delivery.last_status_at = utcnow()
             delivery.version = int(delivery.version or 0) + 1
             if agent:
                 agent.availability = True
@@ -65,25 +66,25 @@ class OrderService:
         delivery.delivered_time = None
         if new_status == "OUT_FOR_DELIVERY":
             delivery.status = "OUT_FOR_DELIVERY"
-            delivery.last_status_at = datetime.utcnow()
+            delivery.last_status_at = utcnow()
             delivery.version = int(delivery.version or 0) + 1
             if agent:
                 agent.availability = False
         elif new_status == "PACKED":
             delivery.status = "PACKED"
-            delivery.last_status_at = datetime.utcnow()
+            delivery.last_status_at = utcnow()
             delivery.version = int(delivery.version or 0) + 1
             if agent:
                 agent.availability = False
         elif new_status == "CANCELLED":
             delivery.status = "CANCELLED"
-            delivery.last_status_at = datetime.utcnow()
+            delivery.last_status_at = utcnow()
             delivery.version = int(delivery.version or 0) + 1
             if agent:
                 agent.availability = True
         else:
             delivery.status = "ASSIGNED"
-            delivery.last_status_at = datetime.utcnow()
+            delivery.last_status_at = utcnow()
             delivery.version = int(delivery.version or 0) + 1
             if agent:
                 agent.availability = False

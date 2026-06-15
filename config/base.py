@@ -1,7 +1,13 @@
 import os
 import secrets
 
-from .utils import BASE_DIR, build_database_uri, build_engine_options, env_flag
+from .utils import (
+    BASE_DIR,
+    build_database_uri,
+    build_engine_options,
+    build_redis_client_options,
+    env_flag,
+)
 
 try:  # pragma: no cover
     import redis as _redis  # noqa: F401
@@ -97,7 +103,9 @@ class BaseConfig:
     )
     CACHE_TYPE = "RedisCache" if REDIS_URL and REDIS_CLIENT_AVAILABLE else "SimpleCache"
     CACHE_REDIS_URL = REDIS_URL or None
+    CACHE_OPTIONS = build_redis_client_options() if REDIS_URL else {}
     CACHE_DEFAULT_TIMEOUT = int(os.environ.get("CACHE_DEFAULT_TIMEOUT", 300))
+    REDIS_CLIENT_OPTIONS = build_redis_client_options()
 
     SOCKETIO_ASYNC_MODE = os.environ.get("SOCKETIO_ASYNC_MODE", "threading")
     SOCKETIO_CORS_ALLOWED_ORIGINS = os.environ.get(

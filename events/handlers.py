@@ -1,11 +1,11 @@
 from domains.orders import OrderStatusUpdated
-from models import Order
+from models import Order, db
 from realtime.events import emit_kds_refresh, emit_order_updated
 from utils.notifications import notify_order_status_change
 
 
 def handle_order_status_updated(event: OrderStatusUpdated):
-    order = Order.query.get(event.order_id)
+    order = db.session.get(Order, event.order_id)
     if order is None:
         return
     notify_order_status_change(

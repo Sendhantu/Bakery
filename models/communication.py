@@ -1,4 +1,5 @@
 from datetime import datetime
+from clock import utcnow
 from .base import db
 
 class Message(db.Model):
@@ -9,7 +10,7 @@ class Message(db.Model):
     order_id    = db.Column(db.Integer, db.ForeignKey('orders.id'))
     content     = db.Column(db.Text, nullable=False)
     is_read     = db.Column(db.Boolean, default=False)
-    sent_at     = db.Column(db.DateTime, default=datetime.utcnow)
+    sent_at     = db.Column(db.DateTime, default=utcnow)
     receiver    = db.relationship('User', foreign_keys=[receiver_id])
 
 
@@ -23,7 +24,7 @@ class Notification(db.Model):
     priority   = db.Column(db.String(20), default='normal')
     channel    = db.Column(db.String(20), default='in_app')
     is_read    = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
     link       = db.Column(db.String(255))
 
     __table_args__ = (
@@ -43,4 +44,4 @@ class EmailLog(db.Model):
     body_key   = db.Column(db.String(50))   # e.g. 'order_placed', 'status_update'
     status     = db.Column(db.String(20), default='sent')   # sent / failed
     error      = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)

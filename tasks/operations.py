@@ -3,6 +3,7 @@ from datetime import datetime
 from flask import current_app
 
 from models import BackupVerification, QueueMetric, cache, celery, db
+from clock import utcnow
 
 
 @celery.task
@@ -49,7 +50,7 @@ def verify_backup_health():
         db.session.rollback()
 
     entries = [
-        BackupVerification(provider="tidb", status=db_result, details=f"checked_at={datetime.utcnow().isoformat()}"),
+        BackupVerification(provider="tidb", status=db_result, details=f"checked_at={utcnow().isoformat()}"),
         BackupVerification(provider="cloudinary", status=storage_result.get("status", "unknown"), details=storage_result.get("error", "")),
     ]
     db.session.add_all(entries)
@@ -67,7 +68,7 @@ def aggregate_analytics_snapshot():
     summary = {
         "total_orders": total_orders,
         "total_revenue": total_revenue,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": utcnow().isoformat(),
     }
     cache.set("analytics:summary", summary, timeout=3600)
     emit_analytics_updated(summary)
@@ -93,7 +94,7 @@ def send_abandoned_cart_reminders():
     from models import Cart, User
     from tasks.messaging import send_whatsapp_message
 
-    cutoff = datetime.utcnow() - timedelta(hours=2)
+    cutoff = utcnow() - timedelta(hours=2)
     stale_carts = Cart.query.filter(Cart.added_at <= cutoff).limit(50).all()
     sent = 0
     for cart in stale_carts:

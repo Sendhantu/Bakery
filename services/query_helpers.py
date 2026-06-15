@@ -18,6 +18,7 @@ from models import (
     Wishlist,
     db,
 )
+from clock import utcnow
 
 
 def paginate_query(query, page, per_page):
@@ -274,7 +275,7 @@ def get_admin_orders_page(status, scope, search, page, per_page):
         if scope == "today":
             from datetime import datetime
 
-            query = query.filter(today == datetime.utcnow().date())
+            query = query.filter(today == utcnow().date())
         elif scope == "pending":
             query = query.filter(Order.status.in_(["PLACED", "PREPARING"]))
 

@@ -35,10 +35,6 @@ class ProductionConfig(BaseConfig):
         required_env_vars = [
             "DATABASE_URL",
             "REDIS_URL",
-            "SOCKETIO_MESSAGE_QUEUE",
-            "CELERY_BROKER_URL",
-            "CELERY_RESULT_BACKEND",
-            "RATELIMIT_STORAGE_URI",
             "SECRET_KEY",
             "JWT_SECRET_KEY",
         ]
@@ -51,6 +47,26 @@ class ProductionConfig(BaseConfig):
                 ]
             )
         require_env_vars(required_env_vars)
+        redis_url = (app.config.get("REDIS_URL") or os.environ.get("REDIS_URL") or "").strip()
+        redis_backed_settings = [
+            "SOCKETIO_MESSAGE_QUEUE",
+            "CELERY_BROKER_URL",
+            "CELERY_RESULT_BACKEND",
+            "RATELIMIT_STORAGE_URI",
+        ]
+        for name in redis_backed_settings:
+            app.config[name] = (
+                app.config.get(name)
+                or (os.environ.get(name) or "").strip()
+                or redis_url
+            )
+        missing_config = [name for name in redis_backed_settings if not app.config.get(name)]
+        if missing_config:
+            raise RuntimeError(
+                "Missing required production configuration values: "
+                + ", ".join(sorted(missing_config))
+                + " (set them directly or set REDIS_URL)"
+            )
         app.config["IS_VERCEL"] = VERCEL_DEPLOYMENT
         app.config["REDIS_REQUIRED"] = cls.REDIS_REQUIRED
         app.config["SOCKETIO_QUEUE_REQUIRED"] = cls.SOCKETIO_QUEUE_REQUIRED

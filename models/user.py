@@ -1,6 +1,7 @@
 from datetime import datetime
 import secrets
 
+from clock import utcnow
 from flask_login import UserMixin
 from sqlalchemy import func, or_
 
@@ -33,8 +34,8 @@ class User(UserMixin, db.Model):
     referred_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     wallet_balance = db.Column(db.Numeric(10, 2), default=0)
     is_mobile_verified = db.Column(db.Boolean, default=False)
-    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
     avatar = db.Column(db.String(255), default="default.png")
 
     oauth_id = db.Column(db.String(100), unique=True)
@@ -106,7 +107,7 @@ class User(UserMixin, db.Model):
     @property
     def loyalty_points(self):
         """Sum of non-expired active points in the ledger."""
-        now = datetime.utcnow()
+        now = utcnow()
         total = db.session.query(
             func.coalesce(func.sum(LoyaltyLedger.points), 0)
         ).filter(
@@ -132,7 +133,7 @@ class LoginHistory(db.Model):
     __tablename__ = "login_history"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    login_time = db.Column(db.DateTime, default=datetime.utcnow)
+    login_time = db.Column(db.DateTime, default=utcnow)
     ip_address = db.Column(db.String(50))
     device     = db.Column(db.String(200))
     status     = db.Column(db.String(20), default="success")
@@ -145,7 +146,7 @@ class Subscription(db.Model):
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
     plan = db.Column(db.String(20), default="monthly")
     discount_pct = db.Column(db.Numeric(5, 2), default=10)
-    start_date = db.Column(db.DateTime, default=datetime.utcnow)
+    start_date = db.Column(db.DateTime, default=utcnow)
     end_date = db.Column(db.DateTime)
     next_billing_at = db.Column(db.DateTime)
     paused_until = db.Column(db.DateTime)

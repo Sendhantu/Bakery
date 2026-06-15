@@ -1,6 +1,7 @@
 import pytest
 from flask import Flask
 
+from config.utils import build_engine_options
 from config.production import ProductionConfig
 from models import Payment, db
 
@@ -18,6 +19,24 @@ def _set_required_production_env(monkeypatch):
     }
     for name, value in required_values.items():
         monkeypatch.setenv(name, value)
+
+
+def _set_minimal_render_production_env(monkeypatch):
+    required_values = {
+        "DATABASE_URL": "mysql+pymysql://user:pass@example.com:4000/bakerydb",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
+        "JWT_SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
+    }
+    for name, value in required_values.items():
+        monkeypatch.setenv(name, value)
+    for name in (
+        "SOCKETIO_MESSAGE_QUEUE",
+        "CELERY_BROKER_URL",
+        "CELERY_RESULT_BACKEND",
+        "RATELIMIT_STORAGE_URI",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _production_config_app():
@@ -40,6 +59,39 @@ def test_production_cloudinary_optional_for_startup(monkeypatch):
     ProductionConfig.init_app(app)
 
     assert app.config["STORAGE_REQUIRED"] is False
+
+
+def test_production_redis_url_populates_render_backed_settings(monkeypatch):
+    _set_minimal_render_production_env(monkeypatch)
+
+    app = _production_config_app()
+    app.config["REDIS_URL"] = "redis://localhost:6379/0"
+    app.config.pop("SOCKETIO_MESSAGE_QUEUE", None)
+    app.config.pop("CELERY_BROKER_URL", None)
+    app.config.pop("CELERY_RESULT_BACKEND", None)
+    app.config.pop("RATELIMIT_STORAGE_URI", None)
+
+    ProductionConfig.init_app(app)
+
+    assert app.config["SOCKETIO_MESSAGE_QUEUE"] == "redis://localhost:6379/0"
+    assert app.config["CELERY_BROKER_URL"] == "redis://localhost:6379/0"
+    assert app.config["CELERY_RESULT_BACKEND"] == "redis://localhost:6379/0"
+    assert app.config["RATELIMIT_STORAGE_URI"] == "redis://localhost:6379/0"
+
+
+def test_render_database_pool_defaults_are_conservative(monkeypatch):
+    monkeypatch.setenv("RENDER_SERVICE_ID", "srv-test")
+    monkeypatch.delenv("DB_POOL_SIZE", raising=False)
+    monkeypatch.delenv("DB_MAX_OVERFLOW", raising=False)
+    monkeypatch.delenv("DB_POOL_TIMEOUT", raising=False)
+
+    options = build_engine_options(
+        "mysql+pymysql://user:pass@example.com:4000/bakerydb"
+    )
+
+    assert options["pool_size"] == 5
+    assert options["max_overflow"] == 5
+    assert options["pool_timeout"] == 10
 
 
 def test_production_cloudinary_required_when_storage_required(monkeypatch):

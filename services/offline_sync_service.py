@@ -21,6 +21,7 @@ from models import (
     User,
     db,
 )
+from clock import utcnow
 
 
 class OfflineSyncService:
@@ -105,7 +106,10 @@ class OfflineSyncService:
             if redis_url:
                 from redis import Redis
 
-                Redis.from_url(redis_url).ping()
+                Redis.from_url(
+                    redis_url,
+                    **self.app.config.get("REDIS_CLIENT_OPTIONS", {}),
+                ).ping()
         except Exception:
             return False
         return True
@@ -125,7 +129,7 @@ class OfflineSyncService:
                     scope,
                     str(entity_key),
                     json.dumps(payload, sort_keys=True, default=str),
-                    datetime.utcnow().isoformat(),
+                    utcnow().isoformat(),
                 ),
             )
             connection.commit()
@@ -187,7 +191,7 @@ class OfflineSyncService:
                     str(entity_id),
                     json.dumps(payload, sort_keys=True, default=str),
                     expected_version,
-                    datetime.utcnow().isoformat(),
+                    utcnow().isoformat(),
                 ),
             )
             connection.commit()
@@ -219,7 +223,7 @@ class OfflineSyncService:
                 SET status='synced', synced_at=?
                 WHERE request_id=?
                 """,
-                (datetime.utcnow().isoformat(), request_id),
+                (utcnow().isoformat(), request_id),
             )
             connection.commit()
 
@@ -254,7 +258,7 @@ class OfflineSyncService:
                     action_type,
                     json.dumps(local_payload, sort_keys=True, default=str),
                     json.dumps(remote_payload, sort_keys=True, default=str),
-                    datetime.utcnow().isoformat(),
+                    utcnow().isoformat(),
                 ),
             )
             connection.execute(
@@ -700,7 +704,7 @@ class OfflineSyncService:
         self._assert_version(delivery, expected_version, "Delivery")
         delivery.status = str(payload["status"]).strip().upper()
         delivery.version = int(delivery.version or 0) + 1
-        delivery.last_status_at = datetime.utcnow()
+        delivery.last_status_at = utcnow()
         self.audit_service.record(
             "offline_delivery_status_sync",
             "Delivery",
@@ -820,7 +824,7 @@ class OfflineSyncService:
             pincode=self.app.config["STORE_DETAILS"].get("pincode", ""),
             phone=payload.get("customer_phone") or self.app.config["STORE_DETAILS"].get("phone_tel", ""),
             delivery_slot="Walk-in",
-            delivery_date=datetime.utcnow().date(),
+            delivery_date=utcnow().date(),
         )
         db.session.add(order)
         db.session.flush()
@@ -870,7 +874,7 @@ class OfflineSyncService:
                 self.cache_variant(variant)
         elif resolution == "accept_remote":
             pass
-        conflict.resolved_at = datetime.utcnow()
+        conflict.resolved_at = utcnow()
         self.audit_service.record(
             "sync_conflict_resolved",
             conflict.entity_type,

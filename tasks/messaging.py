@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from clock import utcnow
+
 from models import celery
 
 
@@ -108,6 +110,6 @@ def render_low_stock_digest(alerts):
         </tr></thead>
         <tbody>{rows}</tbody>
       </table>
-      <p style="font-size:0.85rem;color:#888">Sent automatically by SweetCrumbs at {datetime.utcnow().strftime('%d %b %Y %H:%M')} UTC</p>
+      <p style="font-size:0.85rem;color:#888">Sent automatically by SweetCrumbs at {utcnow().strftime('%d %b %Y %H:%M')} UTC</p>
     </div>
     """

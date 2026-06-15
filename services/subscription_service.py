@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from models import Order, OrderItem, Product, ProductVariant, Subscription, SubscriptionSchedule, User, db
+from clock import utcnow
 
 
 class SubscriptionService:
@@ -80,7 +81,7 @@ class SubscriptionService:
                 order.phone = default_address.phone
 
     def create_due_orders(self, now=None):
-        now = now or datetime.utcnow()
+        now = now or utcnow()
         schedules = (
             SubscriptionSchedule.query.join(Subscription)
             .filter(

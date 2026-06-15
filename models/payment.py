@@ -1,6 +1,7 @@
 from datetime import datetime
 import secrets
 
+from clock import utcnow
 from .base import db
 
 PAYMENT_STATES = {
@@ -30,8 +31,8 @@ class Payment(db.Model):
     cancelled_at = db.Column(db.DateTime)
     failure_reason = db.Column(db.String(255))
     version = db.Column(db.Integer, default=1, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
     transitions = db.relationship(
         "PaymentTransitionLog",
@@ -60,7 +61,7 @@ class Payment(db.Model):
                 f"Invalid payment transition from {current_state} to {new_state}"
             )
 
-        now = datetime.utcnow()
+        now = utcnow()
         self.status = new_state
         self.version = int(self.version or 0) + 1
         self.updated_at = now
@@ -123,8 +124,8 @@ class PaymentLink(db.Model):
     gateway_reference = db.Column(db.String(100))
     notes = db.Column(db.Text)
     expires_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
     @classmethod
     def create_pending(cls, **kwargs):
@@ -158,7 +159,7 @@ class Refund(db.Model):
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     reason    = db.Column(db.String(255))
     status    = db.Column(db.String(30), default="PENDING")
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, default=utcnow)
 
 
 class Coupon(db.Model):
@@ -176,7 +177,7 @@ class Coupon(db.Model):
     is_active = db.Column(db.Boolean, default=True)
 
     def is_valid(self):
-        now = datetime.utcnow()
+        now = utcnow()
         if not self.is_active or self.used_count >= self.max_uses:
             return False
         if self.valid_from and now < self.valid_from:
@@ -194,6 +195,6 @@ class PaymentTransitionLog(db.Model):
     previous_state = db.Column(db.String(30), nullable=False)
     next_state = db.Column(db.String(30), nullable=False)
     reason = db.Column(db.String(255))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
 
     actor = db.relationship("User")

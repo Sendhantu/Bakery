@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from models import db, Delivery, DeliveryAgent, Order, User, can_transition_order_status, get_allowed_order_statuses
-from datetime import datetime
+from clock import utcnow
 
 delivery_bp = Blueprint('delivery', __name__)
 
@@ -75,7 +75,7 @@ def get_delivery_dashboard_context():
                 )
         completed_count = Delivery.query.filter_by(agent_id=agent.id, status='DELIVERED').count()
         delivered_today = Delivery.query.filter_by(agent_id=agent.id, status='DELIVERED').filter(
-            db.func.date(Delivery.delivered_time) == datetime.utcnow().date()
+            db.func.date(Delivery.delivered_time) == utcnow().date()
         ).count()
     return dict(
         agent=agent,

@@ -11,6 +11,7 @@ from flask import (
 )
 from flask_login import login_required, current_user
 from bootstrap import get_container
+from clock import utcnow
 from exceptions import ValidationError
 from functools import wraps
 from utils.permissions import role_meets_minimum, roles_required
@@ -116,7 +117,7 @@ def sync_delivery_status(order, new_status):
 
     if new_status == "DELIVERED":
         delivery.status = "DELIVERED"
-        delivery.delivered_time = datetime.utcnow()
+        delivery.delivered_time = utcnow()
         if agent:
             agent.availability = True
         return
@@ -185,7 +186,7 @@ def sync_product_materials(product):
     for mat_id, qty in zip(material_ids, quantities):
         if not mat_id:
             continue
-        mat = RawMaterial.query.get(int(mat_id))
+        mat = db.session.get(RawMaterial, int(mat_id))
         if not mat:
             continue
         try:
@@ -232,7 +233,7 @@ def build_order_payment_link(order):
 @admin_bp.route("/")
 @admin_required
 def dashboard():
-    today = datetime.utcnow().date()
+    today = utcnow().date()
 
     total_orders = Order.query.count()
     today_orders = Order.query.filter(func.date(Order.placed_at) == today).count()
@@ -482,7 +483,7 @@ def add_product():
 @admin_bp.route("/products/<int:product_id>/edit", methods=["GET", "POST"])
 @admin_required
 def edit_product(product_id):
-    p = Product.query.get_or_404(product_id)
+    p = db.get_or_404(Product, product_id)
     categories = Category.query.all()
     raw_materials = (
         RawMaterial.query.filter_by(is_active=True).order_by(RawMaterial.name).all()
@@ -536,7 +537,7 @@ def edit_product(product_id):
 @admin_bp.route("/products/<int:product_id>/delete", methods=["POST"])
 @admin_required
 def delete_product(product_id):
-    p = Product.query.get_or_404(product_id)
+    p = db.get_or_404(Product, product_id)
     if p.is_active:
         p.is_active = False
         db.session.commit()
@@ -565,7 +566,7 @@ def orders():
     if status:
         query = query.filter(Order.status == status)
     if scope == "today":
-        query = query.filter(func.date(Order.placed_at) == datetime.utcnow().date())
+        query = query.filter(func.date(Order.placed_at) == utcnow().date())
     elif scope == "pending":
         query = query.filter(Order.status.in_(["PLACED", "PREPARING"]))
     if search:
@@ -603,7 +604,7 @@ def orders():
 @admin_bp.route("/orders/<int:order_id>")
 @admin_required
 def order_detail(order_id):
-    order = Order.query.get_or_404(order_id)
+    order = db.get_or_404(Order, order_id)
     items = order.items.all()
     agents = DeliveryAgent.query.order_by(
         DeliveryAgent.availability.desc(), DeliveryAgent.name
@@ -698,9 +699,9 @@ def update_order_status(order_id):
 @admin_bp.route("/orders/<int:order_id>/assign-delivery", methods=["POST"])
 @admin_required
 def assign_delivery(order_id):
-    order = Order.query.get_or_404(order_id)
+    order = db.get_or_404(Order, order_id)
     agent_id = request.form.get("agent_id", type=int)
-    agent = DeliveryAgent.query.get_or_404(agent_id)
+    agent = db.get_or_404(DeliveryAgent, agent_id)
 
     expected_version = request.form.get('expected_version')
     from utils.optimistic import assert_version
@@ -711,11 +712,11 @@ def assign_delivery(order_id):
         existing = Delivery.query.filter_by(order_id=order_id).first()
         if existing:
             existing.agent_id = agent_id
-            existing.assigned_time = datetime.utcnow()
+            existing.assigned_time = utcnow()
         else:
             db.session.add(
                 Delivery(
-                    order_id=order_id, agent_id=agent_id, assigned_time=datetime.utcnow()
+                    order_id=order_id, agent_id=agent_id, assigned_time=utcnow()
                 )
             )
         agent.availability = False
@@ -737,7 +738,7 @@ def assign_delivery(order_id):
 @admin_bp.route("/orders/<int:order_id>/payment-link")
 @admin_required
 def order_payment_link(order_id):
-    order = Order.query.get_or_404(order_id)
+    order = db.get_or_404(Order, order_id)
     link = build_order_payment_link(order)
     # commit happens via context manager
     flash("Payment page ready.", "info")
@@ -759,10 +760,10 @@ def modifications():
 @admin_bp.route("/modifications/<int:req_id>/resolve", methods=["POST"])
 @admin_required
 def resolve_modification(req_id):
-    req = ModificationRequest.query.get_or_404(req_id)
+    req = db.get_or_404(ModificationRequest, req_id)
     action = request.form.get("action")
     req.status = "APPROVED" if action == "approve" else "REJECTED"
-    req.resolved_at = datetime.utcnow()
+    req.resolved_at = utcnow()
     req.order.is_locked = False
 
     if action == "approve":
@@ -805,7 +806,7 @@ def customers():
 @admin_bp.route("/customers/<int:user_id>")
 @admin_required
 def customer_detail(user_id):
-    user = User.query.get_or_404(user_id)
+    user = db.get_or_404(User, user_id)
     orders = (
         Order.query.filter_by(user_id=user_id).order_by(Order.placed_at.desc()).all()
     )
@@ -837,7 +838,7 @@ def chat():
 @admin_bp.route("/chat/<int:customer_id>")
 @admin_required
 def chat_thread(customer_id):
-    customer = User.query.get_or_404(customer_id)
+    customer = db.get_or_404(User, customer_id)
     messages = (
         Message.query.filter(
             (
@@ -929,7 +930,7 @@ def inventory():
 def update_stock():
     variant_id = request.form.get("variant_id", type=int)
     try:
-        v = ProductVariant.query.get_or_404(variant_id)
+        v = db.get_or_404(ProductVariant, variant_id)
     except SQLAlchemyError:
         v = None
     new_stock = request.form.get("stock", type=int)
@@ -994,7 +995,7 @@ def update_stock():
 def update_raw_material_stock():
     material_id = request.form.get("material_id", type=int)
     try:
-        mat = RawMaterial.query.get_or_404(material_id)
+        mat = db.get_or_404(RawMaterial, material_id)
     except SQLAlchemyError:
         mat = None
     try:
@@ -1098,7 +1099,7 @@ def add_supplier():
 @admin_bp.route("/suppliers/<int:supplier_id>/toggle", methods=["POST"])
 @admin_required
 def toggle_supplier_status(supplier_id):
-    supplier = Supplier.query.get_or_404(supplier_id)
+    supplier = db.get_or_404(Supplier, supplier_id)
     supplier.is_active = not supplier.is_active
     db.session.commit()
     flash(
@@ -1140,7 +1141,7 @@ def add_branch():
 @admin_bp.route("/branches/<int:branch_id>/toggle", methods=["POST"])
 @admin_required
 def toggle_branch_status(branch_id):
-    branch = Branch.query.get_or_404(branch_id)
+    branch = db.get_or_404(Branch, branch_id)
     branch.is_active = not branch.is_active
     db.session.commit()
     flash(
@@ -1247,7 +1248,7 @@ def add_batch():
 @admin_bp.route("/batches/<int:batch_id>/update", methods=["POST"])
 @admin_required
 def update_batch(batch_id):
-    batch = ProductionBatch.query.get_or_404(batch_id)
+    batch = db.get_or_404(ProductionBatch, batch_id)
     batch.status = request.form.get("status", batch.status)
     batch.notes = (request.form.get("notes") or "").strip()
     try:
@@ -1330,7 +1331,7 @@ def add_raw_material():
 @admin_bp.route("/raw-materials/<int:material_id>/update", methods=["POST"])
 @admin_required
 def update_raw_material(material_id):
-    mat = RawMaterial.query.get_or_404(material_id)
+    mat = db.get_or_404(RawMaterial, material_id)
     name = request.form.get("name", "").strip()
     if not name:
         flash("Name is required.", "danger")
@@ -1368,7 +1369,7 @@ def update_raw_material(material_id):
 @admin_bp.route("/raw-materials/<int:material_id>/toggle", methods=["POST"])
 @admin_required
 def toggle_raw_material_status(material_id):
-    mat = RawMaterial.query.get_or_404(material_id)
+    mat = db.get_or_404(RawMaterial, material_id)
     mat.is_active = not mat.is_active
     db.session.commit()
     flash(
@@ -1437,7 +1438,7 @@ def add_coupon():
 @admin_bp.route("/coupons/<int:coupon_id>/toggle", methods=["POST"])
 @admin_required
 def toggle_coupon(coupon_id):
-    coupon = Coupon.query.get_or_404(coupon_id)
+    coupon = db.get_or_404(Coupon, coupon_id)
     coupon.is_active = not coupon.is_active
     db.session.commit()
     flash(
@@ -1557,7 +1558,7 @@ def add_agent():
 @admin_bp.route("/agents/<int:agent_id>/reset-password", methods=["POST"])
 @admin_required
 def reset_agent_password(agent_id):
-    agent = DeliveryAgent.query.get_or_404(agent_id)
+    agent = db.get_or_404(DeliveryAgent, agent_id)
     if agent.user is None:
         flash("This delivery profile is not linked to a login account yet.", "danger")
         return redirect(url_for("admin.agents"))
@@ -1599,7 +1600,7 @@ def reset_agent_password(agent_id):
 @admin_bp.route("/agents/<int:agent_id>/toggle-access", methods=["POST"])
 @admin_required
 def toggle_agent_access(agent_id):
-    agent = DeliveryAgent.query.get_or_404(agent_id)
+    agent = db.get_or_404(DeliveryAgent, agent_id)
     if agent.user is None:
         flash("This delivery profile is not linked to a login account yet.", "danger")
         return redirect(url_for("admin.agents"))
@@ -1623,7 +1624,7 @@ def toggle_agent_access(agent_id):
 @admin_bp.route("/analytics")
 @admin_required
 def analytics():
-    today = datetime.utcnow().date()
+    today = utcnow().date()
 
     # ── Monthly revenue — FIXED: uses dateutil.relativedelta for accurate months ──
     monthly_data = []
@@ -1794,7 +1795,7 @@ def loyalty_adjust():
     if not user_id or points is None:
         flash("User and points are required.", "danger")
         return redirect(url_for("admin.loyalty"))
-    user = User.query.get_or_404(user_id)
+    user = db.get_or_404(User, user_id)
     LoyaltyLedger.admin_adjust(user_id, points, reason)
     notify(
         user_id,
@@ -1822,7 +1823,7 @@ def send_inventory_alerts():
 @admin_bp.route("/forecasts")
 @admin_required
 def forecasts():
-    target_date = datetime.utcnow().date() + timedelta(days=1)
+    target_date = utcnow().date() + timedelta(days=1)
     forecasts = get_container().forecast_service.weekly_summary()
     if not forecasts:
         forecasts = get_container().forecast_service.build_daily_forecasts(
@@ -1839,7 +1840,7 @@ def kitchen_display():
         .order_by(Order.placed_at.asc())
         .all()
     )
-    return render_template("admin/kds.html", orders=orders, now=datetime.utcnow())
+    return render_template("admin/kds.html", orders=orders, now=utcnow())
 
 
 @admin_bp.route("/staff")
@@ -1907,7 +1908,7 @@ def add_staff_shift():
     shift_date_raw = request.form.get("shift_date", "").strip()
     start_time_raw = request.form.get("start_time", "").strip()
     end_time_raw = request.form.get("end_time", "").strip()
-    user = User.query.get_or_404(user_id)
+    user = db.get_or_404(User, user_id)
     try:
         shift_date = datetime.strptime(shift_date_raw, "%Y-%m-%d").date()
         start_time_value = datetime.strptime(start_time_raw, "%H:%M").time()
@@ -1935,7 +1936,7 @@ def add_staff_shift():
 def clock_staff_attendance():
     user_id = request.form.get("user_id", type=int)
     action = (request.form.get("action") or "in").strip().lower()
-    user = User.query.get_or_404(user_id)
+    user = db.get_or_404(User, user_id)
     record = (
         AttendanceRecord.query.filter_by(user_id=user.id)
         .order_by(AttendanceRecord.created_at.desc())
@@ -1946,7 +1947,7 @@ def clock_staff_attendance():
             AttendanceRecord(
                 user_id=user.id,
                 branch_id=user.branch_id,
-                clock_in_at=datetime.utcnow(),
+                clock_in_at=utcnow(),
                 status="present",
             )
         )
@@ -1955,7 +1956,7 @@ def clock_staff_attendance():
         if record is None or record.clock_in_at is None or record.clock_out_at is not None:
             flash("No open attendance record found.", "warning")
             return redirect(url_for("admin.staff"))
-        record.clock_out_at = datetime.utcnow()
+        record.clock_out_at = utcnow()
         record.worked_minutes = int(
             (record.clock_out_at - record.clock_in_at).total_seconds() // 60
         )
@@ -1974,7 +1975,7 @@ def pos():
         payment_mode = (request.form.get("payment_mode") or "CASH").upper()
         customer_phone = request.form.get("customer_phone", "")
         try:
-            variant = ProductVariant.query.get_or_404(variant_id)
+            variant = db.get_or_404(ProductVariant, variant_id)
             unit_price = variant.price
             subtotal = unit_price * quantity
             walkin_email = "walkin@sweetcrumbs.local"
@@ -2007,7 +2008,7 @@ def pos():
                     pincode=current_app.config["STORE_DETAILS"].get("pincode", ""),
                     phone=customer_phone or current_app.config["STORE_DETAILS"].get("phone_tel", ""),
                     delivery_slot="Walk-in",
-                    delivery_date=datetime.utcnow().date(),
+                    delivery_date=utcnow().date(),
                 )
                 db.session.add(order)
                 db.session.flush()
@@ -2169,7 +2170,7 @@ def resolve_sync_conflict(conflict_id):
 @roles_required("admin", "super_admin", "branch_manager")
 def plan_delivery_routes():
     agent_id = request.form.get("agent_id", type=int)
-    agent = DeliveryAgent.query.get_or_404(agent_id)
+    agent = db.get_or_404(DeliveryAgent, agent_id)
     deliveries = Delivery.query.filter_by(agent_id=agent_id).filter(
         Delivery.status.in_(["ASSIGNED", "OUT_FOR_DELIVERY"])
     ).all()

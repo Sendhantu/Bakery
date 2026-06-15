@@ -57,5 +57,7 @@ def admin_2fa_provision(config):
 
 
 def suspicious_login_window(now=None, minutes=30):
-    current_time = now or datetime.utcnow()
+    from clock import utcnow
+
+    current_time = now or utcnow()
     return current_time - timedelta(minutes=max(1, int(minutes or 30)))

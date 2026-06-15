@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta
 
 from models import CashbackWalletEntry, LoyaltyLedger, ReferralReward, User, db
+from clock import utcnow
 
 
 class LoyaltyService:
@@ -39,7 +40,7 @@ class LoyaltyService:
         return entry
 
     def process_birthday_rewards(self, now=None):
-        now = now or datetime.utcnow()
+        now = now or utcnow()
         rewarded = []
         users = User.query.filter(
             User.is_active.is_(True),

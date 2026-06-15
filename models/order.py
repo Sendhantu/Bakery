@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import uuid
 
+from clock import utcnow
 from .base import db
 
 ORDER_STATUSES = [
@@ -101,8 +102,8 @@ class Order(db.Model):
     idempotency_key = db.Column(db.String(80), unique=True)
     is_suspicious = db.Column(db.Boolean, default=False)
 
-    placed_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    placed_at = db.Column(db.DateTime, default=utcnow)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
     is_locked = db.Column(db.Boolean, default=False)
     address_changes = db.Column(db.Integer, default=0)
 
@@ -139,7 +140,7 @@ class Order(db.Model):
         if self.status not in ["PLACED"]:
             return False
         window = self.placed_at + timedelta(minutes=2)
-        return datetime.utcnow() <= window
+        return utcnow() <= window
 
     def can_modify(self):
         return self.status in ["PLACED"] and not self.is_locked
@@ -155,12 +156,12 @@ class Order(db.Model):
     def mark_status_change(self):
         self.version = int(self.version or 0) + 1
         self.sync_version = int(self.sync_version or 0) + 1
-        self.updated_at = datetime.utcnow()
+        self.updated_at = utcnow()
 
     @staticmethod
     def generate_order_number():
         """UUID-based — zero collision risk."""
-        prefix = datetime.utcnow().strftime("%Y%m%d")
+        prefix = utcnow().strftime("%Y%m%d")
         suffix = uuid.uuid4().hex[:6].upper()
         return f"SC{prefix}{suffix}"
 
@@ -190,7 +191,7 @@ class AddressChange(db.Model):
     order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=False)
     old_address = db.Column(db.Text)
     new_address = db.Column(db.Text)
-    changed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    changed_at = db.Column(db.DateTime, default=utcnow)
     changed_by = db.Column(db.Integer, db.ForeignKey("users.id"))
 
 
@@ -202,5 +203,5 @@ class ModificationRequest(db.Model):
     description = db.Column(db.Text)
     status = db.Column(db.String(20), default="PENDING")
     price_diff = db.Column(db.Numeric(10, 2), default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
     resolved_at = db.Column(db.DateTime)

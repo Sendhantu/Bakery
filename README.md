@@ -88,7 +88,7 @@ DB_SSL_VERIFY_IDENTITY=true
 
 ```bash
 # Run all portals at once against the TiDB database in .env
-python app.py
+python run_dev_portals.py
 
 # This starts:
 # - Customer portal on http://127.0.0.1:5000
@@ -96,6 +96,14 @@ python app.py
 # - Delivery portal on http://127.0.0.1:5002
 #
 # On startup, migrations are applied with Flask-Migrate.
+```
+
+To run only one portal in development, set `PORTAL_ROLE` and run `app.py`:
+
+```bash
+PORTAL_ROLE=customer python app.py
+PORTAL_ROLE=admin python app.py
+PORTAL_ROLE=delivery python app.py
 ```
 
 ### Running Individual Portals

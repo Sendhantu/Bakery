@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, redirect, url_for, flash, request,
 from flask_login import login_required, current_user
 from app import csrf
 from bootstrap import get_container
+from clock import utcnow
 from exceptions import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from models import (db, Product, ProductVariant, Category, Cart, Wishlist,
@@ -104,7 +105,7 @@ def validate_preorder_requirements(cart_items, scheduled_for):
             continue
 
         minimum_notice_hours = max(1, int(getattr(product, 'minimum_notice_hours', 24) or 24))
-        hours_until_fulfillment = (scheduled_for - datetime.utcnow()).total_seconds() / 3600
+        hours_until_fulfillment = (scheduled_for - utcnow()).total_seconds() / 3600
         if hours_until_fulfillment < minimum_notice_hours:
             raise ValueError(
                 f"{product.name} requires at least {minimum_notice_hours} hours of preorder notice."
@@ -181,7 +182,7 @@ def load_guest_cart_lines():
             changed = True
             continue
 
-        product = Product.query.get(product_id)
+        product = db.session.get(Product, product_id)
         if not product or not product.is_active:
             changed = True
             continue
@@ -277,7 +278,7 @@ def update_guest_cart_item(product_id, variant_id, quantity):
 
         found = True
         if quantity >= 1:
-            product = Product.query.get(product_id)
+            product = db.session.get(Product, product_id)
             variant = resolve_product_variant(product, variant_id) if product else None
             available_stock = int(variant.stock or 0) if variant else quantity
             entry['quantity'] = min(quantity, max(available_stock, 1))
@@ -439,7 +440,7 @@ def products():
 
 @customer_bp.route('/product/<int:product_id>')
 def product_detail(product_id):
-    product  = Product.query.get_or_404(product_id)
+    product  = db.get_or_404(Product, product_id)
     enrich_products([product])
     variants = product.variants.all()
     reviews  = product.reviews.order_by(Review.created_at.desc()).all()
@@ -513,7 +514,7 @@ def add_to_cart():
     variant_id = request.form.get('variant_id', type=int)
     quantity   = max(request.form.get('quantity', 1, type=int) or 1, 1)
 
-    product = Product.query.get_or_404(product_id)
+    product = db.get_or_404(Product, product_id)
     variant = resolve_product_variant(product, variant_id)
 
     if not variant or variant.stock < quantity:
@@ -648,7 +649,7 @@ def wishlist():
 @customer_bp.route('/wishlist/toggle/<int:product_id>')
 @login_required
 def toggle_wishlist(product_id):
-    Product.query.get_or_404(product_id)
+    db.get_or_404(Product, product_id)
     item = Wishlist.query.filter_by(
         user_id=current_user.id, product_id=product_id
     ).first()
@@ -681,7 +682,7 @@ def checkout():
     # Apply membership discount
     discount = Decimal('0')
     sub = Subscription.query.filter_by(user_id=current_user.id, is_active=True).first()
-    if sub and sub.end_date > datetime.utcnow():
+    if sub and sub.end_date > utcnow():
         discount = (subtotal * sub.discount_pct / 100).quantize(Decimal('0.01'))
 
     delivery_threshold = Decimal(str(current_app.config.get('DELIVERY_FREE_THRESHOLD', 500)))
@@ -694,7 +695,7 @@ def checkout():
 
     slot_service = get_container().slot_service
     time_slots = current_app.config['TIME_SLOTS']
-    pickup_available_slots = slot_service.get_available_slots(datetime.utcnow().date())
+    pickup_available_slots = slot_service.get_available_slots(utcnow().date())
     pickup_opening_time, pickup_closing_time = slot_service.business_hours_range()
     saved_addresses = get_saved_addresses_for_user(current_user.id)
     default_saved_address = next((addr for addr in saved_addresses if addr.is_default), saved_addresses[0] if saved_addresses else None)
@@ -837,14 +838,14 @@ def checkout():
 
         # Lock rows to prevent race conditions during checkout
         for item in cart_items:
-            v = ProductVariant.query.with_for_update().get(item.variant_id) if item.variant else None
+            v = db.session.get(ProductVariant, item.variant_id, with_for_update=True) if item.variant else None
             if item.variant and (not v or v.stock < item.quantity):
                 flash(f'Sorry, {item.product.name} is out of stock.', 'danger')
                 db.session.rollback()
                 return redirect(url_for('customer.cart'))
             for recipe_item in item.product.recipe_items.all():
                 from models import RawMaterial
-                material = RawMaterial.query.with_for_update().get(recipe_item.raw_material_id)
+                material = db.session.get(RawMaterial, recipe_item.raw_material_id, with_for_update=True)
                 required_qty = Decimal(recipe_item.quantity_required) * item.quantity
                 if material and material.is_active and Decimal(material.stock) < required_qty:
                     flash(
@@ -893,7 +894,7 @@ def checkout():
 
             suspicious_order_count = Order.query.filter(
                 Order.user_id == current_user.id,
-                Order.placed_at >= datetime.utcnow() - timedelta(minutes=10),
+                Order.placed_at >= utcnow() - timedelta(minutes=10),
                 Order.total == final_total,
             ).count()
             if suspicious_order_count >= 2:
@@ -931,11 +932,11 @@ def checkout():
                     subtotal=price * item.quantity
                 ))
                 if item.variant:
-                    v = ProductVariant.query.with_for_update().get(item.variant_id)
+                    v = db.session.get(ProductVariant, item.variant_id, with_for_update=True)
                     v.stock -= item.quantity
                 for recipe_item in item.product.recipe_items.all():
                     from models import RawMaterial
-                    material = RawMaterial.query.with_for_update().get(recipe_item.raw_material_id)
+                    material = db.session.get(RawMaterial, recipe_item.raw_material_id, with_for_update=True)
                     if material and material.is_active:
                         material.stock = max(
                             Decimal('0'),
@@ -1003,8 +1004,8 @@ def checkout():
                            loyalty_rules=loyalty_rules,
                            delivery_threshold=delivery_threshold,
                            delivery_fee=delivery_fee,
-                           earliest_pickup_date=datetime.utcnow().date().isoformat(),
-                           earliest_delivery_date=(datetime.utcnow().date() + timedelta(days=1)).isoformat())
+                           earliest_pickup_date=utcnow().date().isoformat(),
+                           earliest_delivery_date=(utcnow().date() + timedelta(days=1)).isoformat())
 
 
 @customer_bp.route('/orders')
@@ -1067,7 +1068,7 @@ def cancel_order(order_id):
     # Restore stock
     for item in order.items.all():
         if item.variant_id:
-            v = ProductVariant.query.get(item.variant_id)
+            v = db.session.get(ProductVariant, item.variant_id)
             if v:
                 v.stock += item.quantity
 
@@ -1093,7 +1094,7 @@ def reorder(order_id):
     added = 0
     skipped = []
     for item in order.items.all():
-        variant = ProductVariant.query.get(item.variant_id) if item.variant_id else None
+        variant = db.session.get(ProductVariant, item.variant_id) if item.variant_id else None
         if variant and variant.stock > 0:
             quantity_to_add = min(item.quantity, variant.stock)
             existing = Cart.query.filter_by(

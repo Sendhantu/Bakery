@@ -1,4 +1,5 @@
 from datetime import datetime
+from clock import utcnow
 from .base import db
 
 class Cart(db.Model):
@@ -8,7 +9,7 @@ class Cart(db.Model):
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     variant_id = db.Column(db.Integer, db.ForeignKey('product_variants.id'))
     quantity   = db.Column(db.Integer, default=1)
-    added_at   = db.Column(db.DateTime, default=datetime.utcnow)
+    added_at   = db.Column(db.DateTime, default=utcnow)
     variant    = db.relationship('ProductVariant')
 
     __table_args__ = (
@@ -22,7 +23,7 @@ class Wishlist(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
-    added_at   = db.Column(db.DateTime, default=datetime.utcnow)
+    added_at   = db.Column(db.DateTime, default=utcnow)
 
     __table_args__ = (
         db.Index('idx_wishlist_user', 'user_id'),
@@ -43,8 +44,8 @@ class SavedAddress(db.Model):
     latitude      = db.Column(db.Float)
     longitude     = db.Column(db.Float)
     is_default    = db.Column(db.Boolean, default=False)
-    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at    = db.Column(db.DateTime, default=utcnow)
+    updated_at    = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         db.Index('idx_saved_address_user', 'user_id'),

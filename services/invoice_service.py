@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from models import Order, OrderItem, db
+from clock import utcnow
 
 
 class InvoiceService:
@@ -37,7 +38,7 @@ class InvoiceService:
         pdf.drawString(50, y, f"Tax Invoice — {order.order_number}")
         y -= 24
         pdf.setFont("Helvetica", 10)
-        pdf.drawString(50, y, f"Date: {order.placed_at.strftime('%d-%m-%Y %H:%M') if order.placed_at else datetime.utcnow()}")
+        pdf.drawString(50, y, f"Date: {order.placed_at.strftime('%d-%m-%Y %H:%M') if order.placed_at else utcnow()}")
         y -= 16
         pdf.drawString(50, y, f"Customer: {order.customer.name if order.customer else 'Walk-in'}")
         y -= 24

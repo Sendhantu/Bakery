@@ -1,8 +1,8 @@
 import json
 import logging
 import time
-from datetime import datetime
 
+from clock import utcnow
 from flask import jsonify, request, g
 from sqlalchemy import event
 
@@ -13,7 +13,7 @@ from models import db
 class JsonFormatter(logging.Formatter):
     def format(self, record):
         payload = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),

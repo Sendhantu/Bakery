@@ -26,6 +26,15 @@ def is_vercel_environment():
     )
 
 
+def is_render_environment():
+    return bool(
+        (os.environ.get("RENDER") or "").strip()
+        or (os.environ.get("RENDER_SERVICE_ID") or "").strip()
+        or (os.environ.get("RENDER_SERVICE_NAME") or "").strip()
+        or (os.environ.get("RENDER_EXTERNAL_URL") or "").strip()
+    )
+
+
 def normalize_database_uri(database_uri):
     database_uri = (database_uri or "").strip()
     if database_uri.startswith("mysql://"):
@@ -112,17 +121,31 @@ def build_engine_options(database_uri):
             "connect_args": {"check_same_thread": False},
         }
 
+    render_defaults = is_render_environment()
     options = {
         "pool_pre_ping": True,
         "pool_recycle": int(os.environ.get("DB_POOL_RECYCLE_SECONDS", 280)),
-        "pool_size": int(os.environ.get("DB_POOL_SIZE", 20)),
-        "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", 40)),
-        "pool_timeout": int(os.environ.get("DB_POOL_TIMEOUT", 30)),
+        "pool_size": int(os.environ.get("DB_POOL_SIZE", 5 if render_defaults else 20)),
+        "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", 5 if render_defaults else 40)),
+        "pool_timeout": int(os.environ.get("DB_POOL_TIMEOUT", 10 if render_defaults else 30)),
     }
     connect_args = build_database_connect_args()
     if connect_args:
         options["connect_args"] = connect_args
     return options
+
+
+def build_redis_client_options():
+    return {
+        "socket_connect_timeout": float(
+            os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", 3)
+        ),
+        "socket_timeout": float(os.environ.get("REDIS_SOCKET_TIMEOUT", 3)),
+        "health_check_interval": int(
+            os.environ.get("REDIS_HEALTH_CHECK_INTERVAL", 30)
+        ),
+        "retry_on_timeout": True,
+    }
 
 
 def ensure_instance_dirs():

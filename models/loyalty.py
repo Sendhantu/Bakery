@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from clock import utcnow
 from flask import current_app, has_app_context
 from .base import db
 
@@ -77,7 +78,7 @@ class LoyaltyLedger(db.Model):
     order_id   = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=True)
     points     = db.Column(db.Integer, nullable=False)          # +earn / -redeem
     reason     = db.Column(db.String(100), nullable=False)      # 'order_earned', 'redeemed', 'admin_adj', 'expired'
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow)
     expires_at = db.Column(db.DateTime, nullable=True)
 
     __table_args__ = (
@@ -100,7 +101,7 @@ class LoyaltyLedger(db.Model):
             order_id=order_id,
             points=pts,
             reason='order_earned',
-            expires_at=datetime.utcnow() + timedelta(days=expiry_days)
+            expires_at=utcnow() + timedelta(days=expiry_days)
         )
         db.session.add(entry)
         return pts
@@ -116,7 +117,7 @@ class LoyaltyLedger(db.Model):
             raise ValueError(f'Minimum {redeem_per} points required to redeem.')
 
         from .user import User
-        user = db.session.query(User).with_for_update().get(user_id)
+        user = db.session.get(User, user_id)
         if user is None:
             raise ValueError('User not found.')
         if user.loyalty_points < points_to_redeem:

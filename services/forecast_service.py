@@ -14,11 +14,12 @@ from models import (
     cache,
     db,
 )
+from clock import utcnow
 
 
 class ForecastService:
     def build_daily_forecasts(self, *, target_date=None, branch_id=None):
-        target_date = target_date or (datetime.utcnow().date() + timedelta(days=1))
+        target_date = target_date or (utcnow().date() + timedelta(days=1))
         lookback_days = 28
         start_date = target_date - timedelta(days=lookback_days)
 

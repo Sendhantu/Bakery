@@ -326,7 +326,7 @@ def sync_status():
 
 @api_v2_bp.route("/orders/<int:order_id>/qr")
 def order_qr(order_id):
-    order = Order.query.get_or_404(order_id)
+    order = db.get_or_404(Order, order_id)
     if not getattr(current_user, "is_authenticated", False):
         return jsonify({"ok": False, "message": "Login required."}), 401
     if current_user.id != order.user_id and not has_role(current_user, *ADMIN_PORTAL_ROLES, "delivery"):

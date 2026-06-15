@@ -2,12 +2,13 @@ from datetime import datetime
 from decimal import Decimal
 
 from models import PricingRule, ProductionBatch
+from clock import utcnow
 
 
 class PricingService:
     def resolve_product_price(self, product, variant=None, *, at=None):
         price = Decimal(str((variant.price if variant else product.base_price) or 0))
-        now = at or datetime.utcnow()
+        now = at or utcnow()
         applied_rule = None
 
         rules = (
@@ -52,5 +53,5 @@ class PricingService:
         )
         if batch is None or batch.produced_at is None:
             return False
-        age_hours = (datetime.utcnow() - batch.produced_at).total_seconds() / 3600
+        age_hours = (utcnow() - batch.produced_at).total_seconds() / 3600
         return age_hours >= int(max_batch_age_hours)

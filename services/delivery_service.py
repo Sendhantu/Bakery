@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation
 from exceptions import ValidationError
 from models import Payment, db
 from repositories import OrderRepository
+from clock import utcnow
 
 
 class DeliveryService:
@@ -38,7 +39,7 @@ class DeliveryService:
 
             payment.amount = amount
             payment.method = f"COD_{(payment_mode or 'CASH').strip().upper()}"
-            payment.transaction_id = payment.transaction_id or f"COD-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+            payment.transaction_id = payment.transaction_id or f"COD-{utcnow().strftime('%Y%m%d%H%M%S')}"
             payment.transition_to(
                 "PAID",
                 actor_id=actor_id,
