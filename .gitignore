@@ -17,3 +17,4 @@ instance/
 coverage.xml
 .coverage
 public/
+node_modules/
