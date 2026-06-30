@@ -94,7 +94,21 @@ def build_database_uri(allow_sqlite_fallback=True):
     return ""
 
 
-def build_database_connect_args():
+def build_database_connect_args(database_uri=None):
+    database_uri = normalize_database_uri(database_uri)
+    database_scheme = database_uri.split(":", 1)[0].lower()
+
+    if database_scheme.startswith("postgresql"):
+        sslmode = (
+            os.environ.get("DB_SSLMODE")
+            or os.environ.get("DATABASE_SSLMODE")
+            or ""
+        ).strip()
+        return {"sslmode": sslmode} if sslmode else {}
+
+    if database_scheme and not database_scheme.startswith("mysql"):
+        return {}
+
     ssl_ca = (
         os.environ.get("DB_SSL_CA")
         or os.environ.get("DATABASE_SSL_CA")
@@ -129,7 +143,7 @@ def build_engine_options(database_uri):
         "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", 5 if render_defaults else 40)),
         "pool_timeout": int(os.environ.get("DB_POOL_TIMEOUT", 10 if render_defaults else 30)),
     }
-    connect_args = build_database_connect_args()
+    connect_args = build_database_connect_args(database_uri)
     if connect_args:
         options["connect_args"] = connect_args
     return options

@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pytest
+import yaml
 from flask import Flask
 
 from config.utils import build_engine_options
@@ -92,6 +95,76 @@ def test_render_database_pool_defaults_are_conservative(monkeypatch):
     assert options["pool_size"] == 5
     assert options["max_overflow"] == 5
     assert options["pool_timeout"] == 10
+
+
+def test_postgres_engine_options_ignore_mysql_ssl_env(monkeypatch):
+    monkeypatch.setenv("DB_SSL_CA", "/etc/ssl/certs/ca-certificates.crt")
+    monkeypatch.setenv("DB_SSL_VERIFY_CERT", "true")
+    monkeypatch.setenv("DB_SSL_VERIFY_IDENTITY", "true")
+    monkeypatch.delenv("DB_SSLMODE", raising=False)
+    monkeypatch.delenv("DATABASE_SSLMODE", raising=False)
+
+    options = build_engine_options(
+        "postgresql+psycopg://user:pass@example.com:5432/bakerydb"
+    )
+
+    assert options.get("connect_args", {}) == {}
+
+
+def test_postgres_engine_options_allow_sslmode(monkeypatch):
+    monkeypatch.setenv("DB_SSLMODE", "require")
+
+    options = build_engine_options(
+        "postgresql+psycopg://user:pass@example.com:5432/bakerydb"
+    )
+
+    assert options["connect_args"] == {"sslmode": "require"}
+
+
+def test_mysql_engine_options_include_mysql_ssl_env(monkeypatch):
+    monkeypatch.setenv("DB_SSL_CA", "/etc/ssl/certs/ca-certificates.crt")
+    monkeypatch.setenv("DB_SSL_VERIFY_CERT", "true")
+    monkeypatch.setenv("DB_SSL_VERIFY_IDENTITY", "true")
+
+    options = build_engine_options(
+        "mysql+pymysql://user:pass@example.com:4000/bakerydb"
+    )
+
+    assert options["connect_args"]["ssl_ca"] == "/etc/ssl/certs/ca-certificates.crt"
+    assert options["connect_args"]["ssl_verify_cert"] is True
+    assert options["connect_args"]["ssl_verify_identity"] is True
+
+
+def test_render_blueprint_uses_managed_postgres_and_keyvalue():
+    blueprint_path = Path(__file__).resolve().parents[1] / "render.yaml"
+    blueprint = yaml.safe_load(blueprint_path.read_text())
+
+    databases = {database["name"]: database for database in blueprint["databases"]}
+    services = {service["name"]: service for service in blueprint["services"]}
+    web_env = {
+        env_var["key"]: env_var
+        for env_var in services["bakery-customer-portal"]["envVars"]
+    }
+    worker_env = {
+        env_var["key"]: env_var
+        for env_var in services["bakery-celery-worker"]["envVars"]
+    }
+
+    assert "bakery-db" in databases
+    assert web_env["DATABASE_URL"]["fromDatabase"]["name"] == "bakery-db"
+    assert worker_env["DATABASE_URL"]["fromDatabase"]["name"] == "bakery-db"
+    assert services["bakery-redis"]["type"] == "keyvalue"
+    assert services["bakery-celery-worker"]["plan"] != "free"
+
+    render_backed_env = (
+        services["bakery-customer-portal"]["envVars"]
+        + services["bakery-celery-worker"]["envVars"]
+    )
+    assert not any(env_var["key"].startswith("DB_SSL") for env_var in render_backed_env)
+    for env_var in render_backed_env:
+        source = env_var.get("fromService", {})
+        if source.get("name") == "bakery-redis":
+            assert source["type"] == "keyvalue"
 
 
 def test_production_cloudinary_required_when_storage_required(monkeypatch):

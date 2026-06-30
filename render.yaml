@@ -1,3 +1,10 @@
+databases:
+  - name: bakery-db
+    databaseName: bakery
+    user: bakery_user
+    plan: free
+    region: singapore
+
 services:
   # ─── Web Service (Customer Portal Only) ───────────────────────────────────────
   - type: web
@@ -20,21 +27,17 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
 
-      # TiDB Cloud - External Database (required in production)
+      # Render-managed PostgreSQL database
       - key: DATABASE_URL
-        sync: false
-      - key: DB_SSL_CA
-        value: /etc/ssl/certs/ca-certificates.crt
-      - key: DB_SSL_VERIFY_CERT
-        value: "true"
-      - key: DB_SSL_VERIFY_IDENTITY
-        value: "true"
+        fromDatabase:
+          name: bakery-db
+          property: connectionString
 
-      # Redis - Render-managed and shared by Socket.IO, Celery, cache, and rate limiting
+      # Render Key Value - shared by Socket.IO, Celery, cache, and rate limiting
       - key: REDIS_URL
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
 
       # Mail
@@ -99,29 +102,29 @@ services:
       - key: RATELIMIT_STORAGE_URI
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: SOCKETIO_MESSAGE_QUEUE
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: CELERY_BROKER_URL
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: CELERY_RESULT_BACKEND
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
 
   # ─── Celery Worker ─────────────────────────────────────────────
   - type: worker
     name: bakery-celery-worker
     runtime: python
-    plan: free
+    plan: starter
     region: singapore
     buildCommand: pip install -r requirements.txt
     startCommand: celery -A celery_app.celery worker --loglevel=info --concurrency=2
@@ -142,49 +145,33 @@ services:
           type: web
           envVarKey: JWT_SECRET_KEY
       - key: DATABASE_URL
-        fromService:
-          name: bakery-customer-portal
-          type: web
-          envVarKey: DATABASE_URL
-      - key: DB_SSL_CA
-        fromService:
-          name: bakery-customer-portal
-          type: web
-          envVarKey: DB_SSL_CA
-      - key: DB_SSL_VERIFY_CERT
-        fromService:
-          name: bakery-customer-portal
-          type: web
-          envVarKey: DB_SSL_VERIFY_CERT
-      - key: DB_SSL_VERIFY_IDENTITY
-        fromService:
-          name: bakery-customer-portal
-          type: web
-          envVarKey: DB_SSL_VERIFY_IDENTITY
+        fromDatabase:
+          name: bakery-db
+          property: connectionString
       - key: REDIS_URL
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: RATELIMIT_STORAGE_URI
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: SOCKETIO_MESSAGE_QUEUE
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: CELERY_BROKER_URL
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: CELERY_RESULT_BACKEND
         fromService:
           name: bakery-redis
-          type: redis
+          type: keyvalue
           property: connectionString
       - key: CLOUDINARY_CLOUD_NAME
         fromService:
@@ -280,8 +267,8 @@ services:
       - key: SOCKETIO_ASYNC_MODE
         value: gevent
 
-  # ─── Redis (for SocketIO, Celery, Cache, Rate Limiting) ──────────────────────
+  # ─── Key Value (for SocketIO, Celery, Cache, Rate Limiting) ──────────────────
   - name: bakery-redis
-    type: redis
+    type: keyvalue
     plan: free
     ipAllowList: []
