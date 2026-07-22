@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from clock import utcnow
 from flask import Flask, request, send_from_directory, url_for, jsonify, current_app, redirect, render_template
-from flask_login import LoginManager
+from flask_login import LoginManager, current_user
 from flask_mail import Mail
 from flask_wtf import CSRFProtect
 from flask_socketio import join_room
@@ -93,6 +93,8 @@ def handle_socket_connect():
     portal = (request.args.get("portal") or "customer").strip().lower()
     if portal in {"customer", "admin", "delivery"}:
         join_room(portal)
+    if portal == "customer" and current_user.is_authenticated:
+        join_room(f"customer_{current_user.id}")
     if portal == "admin":
         join_room("kds")
     join_room("global")

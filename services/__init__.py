@@ -32,6 +32,7 @@ from .route_planning_service import RoutePlanningService
 from .slot_service import SlotService
 from .storage_service import StorageService
 from .subscription_service import SubscriptionService
+from .triage_service import generate_smart_triage_report, summarize_triage_report
 
 __all__ = [
     "AuditService",
@@ -51,6 +52,8 @@ __all__ = [
     "SlotService",
     "StorageService",
     "SubscriptionService",
+    "generate_smart_triage_report",
+    "summarize_triage_report",
     "build_category_revenue_rows",
     "enrich_orders",
     "enrich_products",

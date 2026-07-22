@@ -1,8 +1,21 @@
 """Route and portal smoke tests."""
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 
-from models import Coupon, Delivery, DeliveryAgent, Order, Product, ProductVariant, User, db
+from models import (
+    Coupon,
+    Delivery,
+    DeliveryAgent,
+    Order,
+    OrderItem,
+    Product,
+    ProductMaterial,
+    ProductVariant,
+    RawMaterial,
+    User,
+    db,
+)
 from clock import utcnow
 
 
@@ -206,6 +219,109 @@ def test_delivery_cannot_set_packed_status(delivery_client):
         order = db.session.get(Order, order_id)
         assert order is not None
         assert order.status == 'PREPARING'
+
+
+def test_admin_triage_page_renders_pending_order_groups(admin_client):
+    login_response = sign_in(admin_client, 'admin@bakery.com', 'Admin@bakery')
+    assert login_response.status_code == 302
+
+    with admin_client.application.app_context():
+        customer = User.query.filter_by(email='customer@test.com').first()
+        assert customer is not None
+
+        flour = RawMaterial(
+            name='TRIAGE_FLOUR',
+            unit='kg',
+            stock=Decimal('8'),
+            reorder_level=Decimal('3'),
+            is_active=True,
+        )
+        butter = RawMaterial(
+            name='TRIAGE_BUTTER',
+            unit='kg',
+            stock=Decimal('1'),
+            reorder_level=Decimal('2'),
+            is_active=True,
+        )
+        db.session.add_all([flour, butter])
+        db.session.flush()
+
+        product = Product(name='Cake Slice', base_price=199, is_active=True)
+        db.session.add(product)
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                ProductMaterial(
+                    product_id=product.id,
+                    raw_material_id=flour.id,
+                    quantity_required=Decimal('2'),
+                ),
+                ProductMaterial(
+                    product_id=product.id,
+                    raw_material_id=butter.id,
+                    quantity_required=Decimal('1'),
+                ),
+            ]
+        )
+
+        order1 = Order(
+            order_number=Order.generate_order_number(),
+            user_id=customer.id,
+            status='PLACED',
+            subtotal=200,
+            total=200,
+            address_line1='12 Test Street',
+            city='Coimbatore',
+            pincode='641002',
+            phone='9999999999',
+            delivery_slot='09:00 - 11:00',
+            delivery_date=utcnow().date() + timedelta(days=1),
+            placed_at=utcnow() - timedelta(minutes=15),
+        )
+        order2 = Order(
+            order_number=Order.generate_order_number(),
+            user_id=customer.id,
+            status='PLACED',
+            subtotal=200,
+            total=200,
+            address_line1='12 Test Street',
+            city='Coimbatore',
+            pincode='641002',
+            phone='9999999999',
+            delivery_slot='09:00 - 11:00',
+            delivery_date=utcnow().date() + timedelta(days=1),
+            placed_at=utcnow(),
+        )
+        db.session.add_all([order1, order2])
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                OrderItem(
+                    order_id=order1.id,
+                    product_id=product.id,
+                    product_name=product.name,
+                    quantity=2,
+                    unit_price=Decimal('100'),
+                    subtotal=Decimal('200'),
+                ),
+                OrderItem(
+                    order_id=order2.id,
+                    product_id=product.id,
+                    product_name=product.name,
+                    quantity=3,
+                    unit_price=Decimal('100'),
+                    subtotal=Decimal('300'),
+                ),
+            ]
+        )
+        db.session.commit()
+
+    response = admin_client.get('/admin/triage')
+    assert response.status_code == 200
+    assert b'Smart Triage' in response.data
+    assert b'Fulfillable now' in response.data or b'fulfillable now' in response.data.lower()
 
 
 def test_admin_loyalty_page_renders_config(admin_client):

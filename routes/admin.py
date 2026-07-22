@@ -14,6 +14,12 @@ from bootstrap import get_container
 from clock import utcnow
 from exceptions import ValidationError
 from functools import wraps
+from realtime.events import (
+    DELIVERY_RELEVANT_STATUSES,
+    customer_room,
+    emit_order_status_updated,
+    emit_stock_updated,
+)
 from utils.permissions import role_meets_minimum, roles_required
 from models import (
     db,
@@ -59,7 +65,14 @@ from models import (
     can_transition_order_status,
     get_allowed_order_statuses,
 )
-from services import enrich_orders
+from services import enrich_orders, generate_smart_triage_report, summarize_triage_report
+from services.analytics_service import (
+    PERIOD_LABELS,
+    analytics_payload,
+    default_granularity,
+    top_selling_product,
+    total_revenue,
+)
 from utils import (
     ADMIN_PORTAL_ROLES,
     parse_decimal,
@@ -69,8 +82,7 @@ from utils import (
     validate_password,
 )
 from datetime import datetime, timedelta, date, time
-from dateutil.relativedelta import relativedelta  # pip install python-dateutil
-from sqlalchemy import func, extract, or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from decimal import Decimal
 
@@ -410,6 +422,46 @@ def dashboard():
     return render_template("admin/dashboard.html", **context)
 
 
+@admin_bp.route("/triage")
+@admin_required
+def triage():
+    pending_orders = (
+        Order.query.filter(Order.status.in_(["PLACED", "PREPARING"]))
+        .order_by(Order.placed_at.asc(), Order.id.asc())
+        .all()
+    )
+    enrich_orders(pending_orders)
+
+    report = generate_smart_triage_report(pending_orders)
+    summary_payload = summarize_triage_report(report)
+    notes = summary_payload.get("notes", {})
+    order_map = {
+        order_result["order"].id: order_result
+        for grouped in report.get("grouped_results", {}).values()
+        for order_result in grouped
+    }
+
+    context = {
+        "report": report,
+        "notes": notes,
+        "order_map": order_map,
+    }
+
+    if wants_live_fragment_response():
+        return jsonify(
+            {
+                "fragments": {
+                    "#admin-triage-live": render_template(
+                        "admin/_triage_live.html",
+                        **context,
+                    )
+                }
+            }
+        )
+
+    return render_template("admin/triage.html", **context)
+
+
 # ── PRODUCT MANAGEMENT ───────────────────────────────────────
 @admin_bp.route("/products")
 @admin_required
@@ -470,6 +522,8 @@ def add_product():
                 raw_materials=raw_materials,
             )
         db.session.commit()
+        for variant in p.variants.all():
+            emit_stock_updated(variant, include_customer=True)
         flash("Product added!", "success")
         return redirect(url_for("admin.products"))
     return render_template(
@@ -489,6 +543,7 @@ def edit_product(product_id):
         RawMaterial.query.filter_by(is_active=True).order_by(RawMaterial.name).all()
     )
     if request.method == "POST":
+        previous_variant_stock = {variant.id: variant.stock for variant in p.variants.all()}
         try:
             p.name = request.form["name"]
             p.description = request.form.get("description")
@@ -524,6 +579,9 @@ def edit_product(product_id):
                 raw_materials=raw_materials,
             )
         db.session.commit()
+        for variant in p.variants.all():
+            if previous_variant_stock.get(variant.id) != variant.stock:
+                emit_stock_updated(variant, include_customer=True)
         flash("Product updated!", "success")
         return redirect(url_for("admin.products"))
     return render_template(
@@ -691,6 +749,10 @@ def update_order_status(order_id):
         return redirect(url_for("admin.order_detail", order_id=order_id))
 
     get_container().offline_sync_service.cache_order(order)
+    rooms = [customer_room(order.user_id)]
+    if order.status in DELIVERY_RELEVANT_STATUSES:
+        rooms.append("delivery")
+    emit_order_status_updated(order, rooms)
 
     flash(f"Order status updated to {status}.", "success")
     return redirect(url_for("admin.order_detail", order_id=order_id))
@@ -967,6 +1029,7 @@ def update_stock():
         )
         db.session.commit()
         get_container().offline_sync_service.cache_variant(v)
+        emit_stock_updated(v, include_customer=True)
         try:
             check_and_send_inventory_alerts()
         except Exception:
@@ -1624,110 +1687,53 @@ def toggle_agent_access(agent_id):
 @admin_bp.route("/analytics")
 @admin_required
 def analytics():
-    today = utcnow().date()
-
-    # ── Monthly revenue — FIXED: uses dateutil.relativedelta for accurate months ──
-    monthly_data = []
-    try:
-        for i in range(5, -1, -1):
-            month_start = today.replace(day=1) - relativedelta(months=i)
-            next_month = month_start + relativedelta(months=1)
-            rev = (
-                db.session.query(func.sum(Order.total))
-                .filter(
-                    Order.placed_at >= month_start,
-                    Order.placed_at < next_month,
-                    Order.status != "CANCELLED",
-                )
-                .scalar()
-                or 0
-            )
-            monthly_data.append(
-                {"month": month_start.strftime("%b %Y"), "revenue": float(rev)}
-            )
-    except Exception:
-        # Fallback if dateutil not installed
-        monthly_data = [{"month": "N/A", "revenue": 0}]
-
-    # ── Order status breakdown ──
-    status_rows = (
-        db.session.query(Order.status, func.count(Order.id))
-        .group_by(Order.status)
-        .all()
-    )
-    status_counts = {s: c for s, c in status_rows}
-
-    # ── Top products ──
-    top_products = (
-        db.session.query(
-            Product.name,
-            func.sum(OrderItem.quantity).label("sold"),
-            func.sum(OrderItem.subtotal).label("revenue"),
-        )
-        .join(OrderItem)
-        .group_by(Product.id)
-        .order_by(func.sum(OrderItem.quantity).desc())
-        .limit(10)
-        .all()
-    )
-
-    # ── Peak hours ──
-    hour_data = (
-        db.session.query(
-            extract("hour", Order.placed_at).label("hour"),
-            func.count(Order.id).label("count"),
-        )
-        .group_by("hour")
-        .all()
-    )
-
-    # ── Revenue per category ──
-    category_revenue = (
-        db.session.query(Category.name, func.sum(OrderItem.subtotal).label("revenue"))
-        .join(Product, Product.category_id == Category.id)
-        .join(OrderItem, OrderItem.product_id == Product.id)
-        .group_by(Category.id)
-        .order_by(func.sum(OrderItem.subtotal).desc())
-        .all()
-    )
-
-    # ── Loyalty stats ──
-    total_pts_issued = (
-        db.session.query(func.coalesce(func.sum(LoyaltyLedger.points), 0))
-        .filter(LoyaltyLedger.points > 0)
-        .scalar()
-        or 0
-    )
-    total_pts_redeemed = abs(
-        db.session.query(func.coalesce(func.sum(LoyaltyLedger.points), 0))
-        .filter(LoyaltyLedger.points < 0)
-        .scalar()
-        or 0
-    )
-
-    # ── Repeat customer rate ──
-    repeat_customers = (
-        db.session.query(Order.user_id)
-        .group_by(Order.user_id)
-        .having(func.count(Order.id) > 1)
-        .count()
-    )
-    total_customers = User.query.filter_by(role="customer").count()
-    repeat_rate = round(
-        (repeat_customers / total_customers * 100) if total_customers else 0, 1
-    )
+    selected_period = (request.args.get("period") or "month").strip().lower()
+    if selected_period not in PERIOD_LABELS:
+        selected_period = "month"
+    selected_granularity = request.args.get("granularity") or default_granularity(selected_period)
+    selected_payload = analytics_payload(selected_period, granularity=selected_granularity)
+    period_keys = ["today", "week", "month", "year"]
 
     return render_template(
         "admin/analytics.html",
-        monthly_data=monthly_data,
-        status_counts=status_counts,
-        top_products=top_products,
-        hour_data=[(int(h.hour), h.count) for h in hour_data if h.hour is not None],
-        category_revenue=category_revenue,
-        total_pts_issued=int(total_pts_issued),
-        total_pts_redeemed=int(total_pts_redeemed),
-        repeat_rate=repeat_rate,
+        revenue_cards=[
+            {
+                "period": period,
+                "label": PERIOD_LABELS[period],
+                "revenue": float(total_revenue(period)),
+            }
+            for period in period_keys
+        ],
+        best_sellers={
+            period: top_selling_product(period)
+            for period in period_keys
+        },
+        selected_period=selected_period,
+        selected_payload=selected_payload,
+        period_labels=PERIOD_LABELS,
     )
+
+
+@admin_bp.route("/api/analytics/revenue")
+@admin_required
+def analytics_revenue_api():
+    period = (request.args.get("period") or "month").strip().lower()
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    if start_date or end_date:
+        period = "custom"
+    granularity = request.args.get("granularity") or default_granularity(period)
+
+    try:
+        payload = analytics_payload(
+            period,
+            granularity=granularity,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+    return jsonify({"ok": True, **payload})
 
 
 # ── CATEGORIES ───────────────────────────────────────────────

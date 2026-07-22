@@ -11,7 +11,7 @@
     </a>
     <a href="{{ url_for('admin.orders') }}" class="stat-card green" style="text-decoration:none;color:inherit">
       <span class="stat-icon">📦</span>
-      <div class="stat-value">{{ total_orders }}</div>
+      <div class="stat-value" data-rt-counter="total-orders">{{ total_orders }}</div>
       <div class="stat-label">Total Orders</div>
       <div class="trend-chip trend-chip-{{ trend_orders.dir }}">
         {% if trend_orders.dir == 'up' %}↗{% elif trend_orders.dir == 'down' %}↘{% else %}→{% endif %}
@@ -29,12 +29,12 @@
     </a>
     <a href="{{ url_for('admin.orders', scope='pending') }}" class="stat-card rose" style="text-decoration:none;color:inherit">
       <span class="stat-icon">⏳</span>
-      <div class="stat-value">{{ pending_orders }}</div>
+      <div class="stat-value" data-rt-counter="pending-orders">{{ pending_orders }}</div>
       <div class="stat-label">Pending Orders</div>
     </a>
     <a href="{{ url_for('admin.orders', scope='today') }}" class="stat-card orange" style="text-decoration:none;color:inherit">
       <span class="stat-icon">📅</span>
-      <div class="stat-value">{{ today_orders }}</div>
+      <div class="stat-value" data-rt-counter="today-orders">{{ today_orders }}</div>
       <div class="stat-label">Today's Orders</div>
     </a>
     <a href="{{ url_for('admin.analytics') }}" class="stat-card green" style="text-decoration:none;color:inherit">
@@ -113,15 +113,15 @@
         <thead>
           <tr><th>Order #</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th>Action</th></tr>
         </thead>
-        <tbody>
+        <tbody data-admin-orders-table="recent">
           {% for order in recent_orders %}
-          <tr>
+          <tr data-order-id="{{ order.id }}">
             <td><a href="{{ url_for('admin.order_detail', order_id=order.id) }}" style="font-weight:600;color:var(--brown)">#{{ order.order_number }}</a></td>
             <td>{{ order.customer.name }}</td>
             <td>{{ order.item_count }} item{{ 's' if order.item_count != 1 }}</td>
             <td style="font-weight:600;color:var(--caramel)">₹{{ order.total|int }}</td>
             <td>
-              <span class="badge {% if order.status=='DELIVERED' %}badge-green{% elif order.status=='CANCELLED' %}badge-red{% elif order.status=='ON_HOLD' %}badge-orange{% else %}badge-brown{% endif %}">
+              <span class="badge {% if order.status=='DELIVERED' %}badge-green{% elif order.status=='CANCELLED' %}badge-red{% elif order.status=='ON_HOLD' %}badge-orange{% else %}badge-brown{% endif %}" data-order-status="{{ order.id }}">
                 {{ order.status.replace('_',' ') }}
               </span>
             </td>

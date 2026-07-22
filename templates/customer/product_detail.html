@@ -72,7 +72,7 @@
         <span class="live-stock-badge badge
           {% if product.stock_status == 'in_stock' %}badge-green
           {% elif product.stock_status == 'few_left' %}badge-orange
-          {% else %}badge-red{% endif %}">
+          {% else %}badge-red{% endif %}" data-product-stock-badge="{{ product.id }}">
           {% if product.stock_status == 'in_stock' %}In Stock
           {% elif product.stock_status == 'few_left' %}Only {{ product.total_stock }} left!
           {% else %}Out of Stock{% endif %}

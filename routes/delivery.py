@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 from bootstrap import get_container
 from exceptions import ValidationError
 from functools import wraps
+from realtime.events import customer_room, emit_order_status_updated
 from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -176,6 +177,7 @@ def update_status(order_id):
         return redirect(url_for('delivery.order_detail', order_id=order_id))
 
     get_container().offline_sync_service.cache_order(order)
+    emit_order_status_updated(order, [customer_room(order.user_id), "admin", "kds"])
 
     flash(f'Status updated to {status}.', 'success')
     return redirect(url_for('delivery.order_detail', order_id=order.id))

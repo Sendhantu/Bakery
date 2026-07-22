@@ -8,14 +8,14 @@
   {% elif assigned %}
   <div class="delivery-assigned-list">
     {% for delivery in assigned %}
-    <article class="ops-order-card">
+    <article class="ops-order-card" data-order-id="{{ delivery.order_id }}">
       <div class="ops-order-card-head">
         <div>
           <div class="ops-order-kicker">Order #{{ delivery.order.order_number }}</div>
           <h3>{{ delivery.order.customer.name }}</h3>
         </div>
         <div class="ops-order-head-meta">
-          <span class="badge badge-brown">{{ delivery.order.status.replace('_',' ') }}</span>
+          <span class="badge badge-brown" data-order-status="{{ delivery.order_id }}">{{ delivery.order.status.replace('_',' ') }}</span>
           <strong>₹{{ delivery.order.total|int }}</strong>
         </div>
       </div>

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Order #{{ order.order_number }} — {{ bakery_name }}{% endblock %}
 {% block content %}
-<div class="page-wrap" data-live-refresh="1000" data-live-refresh-source="{{ url_for('customer.order_detail', order_id=order.id) }}">
+<div class="page-wrap" data-live-refresh="30000" data-live-refresh-source="{{ url_for('customer.order_detail', order_id=order.id) }}" data-current-order-id="{{ order.id }}">
 <div class="container">
   <div class="flex justify-between items-center mb-4">
     <div>
@@ -9,7 +9,7 @@
       <p class="text-muted">Placed on {{ order.placed_at.strftime('%d %B %Y at %I:%M %p') }}</p>
     </div>
     <div class="flex gap-2 flex-wrap">
-      <span class="badge badge-green">Live updates every 1s</span>
+      <span class="badge badge-green">Realtime updates</span>
       <a href="{{ url_for('customer.invoice', order_id=order.id) }}" class="btn btn-outline btn-sm" target="_blank">🧾 Invoice</a>
       <a href="{{ url_for('customer.order_history') }}" class="btn btn-ghost btn-sm">← Back</a>
     </div>

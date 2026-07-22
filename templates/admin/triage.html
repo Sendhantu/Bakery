@@ -1,0 +1,82 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Smart Triage — Admin{% endblock %}
+
+{% block content %}
+<div class="page-wrap" data-live-refresh="20000" data-live-refresh-source="{{ url_for('admin.triage') }}">
+  {% include 'admin/_triage_live.html' %}
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+      <div>
+        <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin:0">🧠 Smart Triage</h1>
+        <div class="text-muted text-sm">Deterministic order readiness check across live raw-material stock.</div>
+      </div>
+      <div class="flex gap-2" style="align-items:center">
+        <a href="{{ url_for('admin.triage') }}" class="btn btn-outline btn-sm">Refresh now</a>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="badge badge-brown" style="margin-bottom:0.75rem">Priority rule: {{ report.priority_rule }}</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Suggested queue</th>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th>Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for order_id in report.priority_order %}
+              {% set order_result = order_map[order_id] %}
+              <tr>
+                <td>#{{ loop.index }}</td>
+                <td><a href="{{ url_for('admin.order_detail', order_id=order_result.order.id) }}">#{{ order_result.order.order_number }}</a></td>
+                <td>{{ order_result.order.customer.name if order_result.order.customer else 'Guest' }}</td>
+                <td>
+                  <span class="badge {% if order_result.status == 'fulfillable_now' %}badge-green{% elif order_result.status == 'fulfillable_with_restock' %}badge-orange{% else %}badge-red{% endif %}">
+                    {{ order_result.status.replace('_', ' ') }}
+                  </span>
+                </td>
+                <td>{{ notes.get(order_result.order.id, order_result.note) }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--text-muted)">No pending orders are queued right now.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% for status in ['fulfillable_now', 'fulfillable_with_restock', 'blocked'] %}
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header">
+        {% if status == 'fulfillable_now' %}✅ Fulfillable now{% elif status == 'fulfillable_with_restock' %}⚠️ Fulfillable with restock{% else %}🛑 Blocked{% endif %}
+      </div>
+      <div class="card-body">
+        {% if report.grouped_results[status] %}
+          {% for order_result in report.grouped_results[status] %}
+            <div class="card" style="margin-bottom:0.75rem;padding:1rem;background:var(--cream-soft)">
+              <div style="font-weight:700;color:var(--brown)">Order #{{ order_result.order.order_number }}</div>
+              <div class="text-sm text-muted">Customer: {{ order_result.order.customer.name if order_result.order.customer else 'Guest' }}</div>
+              <div class="text-sm text-muted">Items: {{ order_result.item_count }}</div>
+              {% if order_result.shortages %}
+                <ul style="margin:0.75rem 0 0 1rem">
+                  {% for shortage in order_result.shortages %}
+                    <li>{{ shortage.material_name }} needs {{ shortage.shortage_qty }} {{ shortage.unit }} more.</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+              <div style="margin-top:0.75rem;color:var(--brown)">{{ notes.get(order_result.order.id, order_result.note) }}</div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted">No orders in this bucket.</div>
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,7 +1,7 @@
 {% if orders %}
 <div style="display:flex;flex-direction:column;gap:1rem">
   {% for order in orders %}
-  <div class="card" style="border-radius:var(--radius-lg)">
+  <div class="card" style="border-radius:var(--radius-lg)" data-order-id="{{ order.id }}">
     <div style="padding:1.25rem 1.5rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)">
       <div>
         <a href="{{ url_for('customer.order_detail', order_id=order.id) }}" style="font-family:var(--font-display);font-size:1.1rem;font-weight:600;color:var(--brown)">#{{ order.order_number }}</a>
@@ -13,7 +13,7 @@
           {% elif order.status == 'CANCELLED' %}badge-red
           {% elif order.status == 'OUT_FOR_DELIVERY' %}badge-blue
           {% elif order.status == 'ON_HOLD' %}badge-orange
-          {% else %}badge-brown{% endif %}">
+          {% else %}badge-brown{% endif %}" data-order-status="{{ order.id }}">
           {{ order.status.replace('_',' ') }}
         </span>
         <span style="font-family:var(--font-display);font-weight:700;color:var(--caramel)">₹{{ order.total|int }}</span>

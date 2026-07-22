@@ -1,7 +1,7 @@
 {% extends 'delivery/base_delivery.html' %}
 {% block title %}Order #{{ order.order_number }} — Delivery{% endblock %}
 {% block content %}
-<div class="page-wrap"><div class="container" style="max-width:800px">
+<div class="page-wrap" data-current-order-id="{{ order.id }}"><div class="container" style="max-width:800px">
   <div class="flex justify-between items-center mb-4">
     <div>
       <h1 class="section-title">Order #{{ order.order_number }}</h1>
@@ -52,7 +52,7 @@
             </form>
             {% endif %}
           {% endfor %}
-          <span class="badge badge-brown">Current: {{ order.status.replace('_', ' ') }}</span>
+          <span class="badge badge-brown" data-order-status="{{ order.id }}">Current: {{ order.status.replace('_', ' ') }}</span>
         </div>
       </div>
     </div>

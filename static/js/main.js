@@ -1208,8 +1208,155 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }, 3000);
 
+  const badgeClassForOrderStatus = (status) => {
+    if (status === 'DELIVERED') return 'badge-green';
+    if (status === 'CANCELLED') return 'badge-red';
+    if (status === 'OUT_FOR_DELIVERY') return 'badge-blue';
+    if (status === 'ON_HOLD') return 'badge-orange';
+    return 'badge-brown';
+  };
+
+  const badgeClassForStock = (stock) => {
+    if (stock <= 0) return 'badge-red';
+    if (stock <= 5) return 'badge-orange';
+    return 'badge-green';
+  };
+
+  const stockLabel = (stock, compact = false) => {
+    if (stock <= 0) return compact ? 'Out of Stock' : 'Out of Stock';
+    if (stock <= 5) return compact ? `Only ${stock} left!` : 'Low Stock';
+    return compact ? 'In Stock' : 'OK';
+  };
+
+  const setOrderStatusBadge = (badge, status) => {
+    if (!badge || !status) return;
+    const prefix = badge.textContent.trim().startsWith('Current:') ? 'Current: ' : '';
+    badge.className = `badge ${badgeClassForOrderStatus(status)}`;
+    badge.textContent = `${prefix}${status.replace(/_/g, ' ')}`;
+  };
+
+  const updateVisibleOrderStatus = (orderId, status) => {
+    if (!orderId || !status) return;
+    document.querySelectorAll(`[data-order-status="${orderId}"]`).forEach((badge) => {
+      setOrderStatusBadge(badge, status);
+    });
+  };
+
+  const incrementRealtimeCounter = (name) => {
+    document.querySelectorAll(`[data-rt-counter="${name}"]`).forEach((counter) => {
+      const current = Number((counter.textContent || '').replace(/[^\d.-]/g, '')) || 0;
+      counter.textContent = String(current + 1);
+    });
+  };
+
+  const makeCell = (text) => {
+    const cell = document.createElement('td');
+    cell.textContent = text;
+    return cell;
+  };
+
+  const prependAdminOrder = (payload) => {
+    if (!payload?.order_id) return;
+    document.querySelectorAll('[data-admin-orders-table]').forEach((tbody) => {
+      if (tbody.querySelector(`[data-order-id="${payload.order_id}"]`)) return;
+      tbody.querySelector('td[colspan]')?.closest('tr')?.remove();
+
+      const row = document.createElement('tr');
+      row.dataset.orderId = payload.order_id;
+
+      const linkCell = document.createElement('td');
+      const link = document.createElement('a');
+      link.href = payload.detail_url || `/admin/orders/${payload.order_id}`;
+      link.style.fontWeight = '600';
+      link.style.color = 'var(--brown)';
+      link.textContent = `#${payload.order_number || payload.order_id}`;
+      linkCell.appendChild(link);
+      row.appendChild(linkCell);
+
+      row.appendChild(makeCell(payload.customer_name || 'Customer'));
+      row.appendChild(makeCell(payload.item_summary || 'New order'));
+
+      const totalCell = makeCell(formatCurrency(payload.total || 0));
+      totalCell.style.fontWeight = '600';
+      totalCell.style.color = 'var(--caramel)';
+      row.appendChild(totalCell);
+
+      if (tbody.dataset.adminOrdersTable === 'orders') {
+        const paymentCell = document.createElement('td');
+        const paymentBadge = document.createElement('span');
+        paymentBadge.className = 'badge badge-orange';
+        paymentBadge.textContent = 'PENDING';
+        paymentCell.appendChild(paymentBadge);
+        row.appendChild(paymentCell);
+      }
+
+      const statusCell = document.createElement('td');
+      const statusBadge = document.createElement('span');
+      statusBadge.dataset.orderStatus = payload.order_id;
+      setOrderStatusBadge(statusBadge, payload.status || 'PLACED');
+      statusCell.appendChild(statusBadge);
+      row.appendChild(statusCell);
+
+      const date = payload.timestamp ? new Date(payload.timestamp) : new Date();
+      row.appendChild(makeCell(date.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })));
+
+      const actionCell = document.createElement('td');
+      const action = document.createElement('a');
+      action.href = payload.detail_url || `/admin/orders/${payload.order_id}`;
+      action.className = 'btn btn-ghost btn-sm';
+      action.textContent = 'View';
+      actionCell.appendChild(action);
+      row.appendChild(actionCell);
+
+      tbody.prepend(row);
+    });
+
+    incrementRealtimeCounter('total-orders');
+    incrementRealtimeCounter('pending-orders');
+    incrementRealtimeCounter('today-orders');
+  };
+
+  const updateStockIndicators = (payload) => {
+    const variantId = payload?.variant_id;
+    const newStock = Number(payload?.new_stock);
+    if (!variantId || Number.isNaN(newStock)) return;
+
+    document.querySelectorAll(`[data-stock-value="${variantId}"]`).forEach((valueEl) => {
+      valueEl.textContent = String(newStock);
+      valueEl.style.color = newStock <= 0
+        ? 'var(--dusty-rose)'
+        : newStock <= 5 ? 'var(--caramel)' : 'var(--sage)';
+    });
+
+    document.querySelectorAll(`[data-stock-status="${variantId}"]`).forEach((badge) => {
+      badge.className = `badge ${badgeClassForStock(newStock)}`;
+      badge.textContent = stockLabel(newStock);
+    });
+
+    document.querySelectorAll(`[data-stock-input="${variantId}"]`).forEach((input) => {
+      input.value = String(newStock);
+    });
+
+    document.querySelectorAll(`.variant-btn[data-variant-id="${variantId}"]`).forEach((button) => {
+      button.dataset.stock = String(newStock);
+      button.disabled = newStock <= 0;
+      button.style.opacity = newStock <= 0 ? '0.5' : '';
+      button.style.cursor = newStock <= 0 ? 'not-allowed' : '';
+      if (button.classList.contains('active')) {
+        const stockBadge = document.querySelector(`[data-product-stock-badge="${payload.product_id}"], .live-stock-badge`);
+        if (stockBadge) {
+          stockBadge.className = `badge ${badgeClassForStock(newStock)} live-stock-badge`;
+          stockBadge.textContent = stockLabel(newStock, true);
+        }
+        const qtyInput = document.querySelector('.qty-input');
+        if (qtyInput) qtyInput.max = String(Math.max(newStock, 0));
+      }
+    });
+  };
+
   // ─── Live refresh for order/admin pages ─────────
   const liveRefreshTarget = document.querySelector('[data-live-refresh]');
+  let refreshLiveSections = async () => {};
   if (liveRefreshTarget) {
     const intervalMs = Number(liveRefreshTarget.dataset.liveRefresh || 15000);
     const liveRefreshSource = liveRefreshTarget.dataset.liveRefreshSource || '';
@@ -1223,8 +1370,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     if (liveRefreshSource) {
-      window.setInterval(async () => {
-        if (document.hidden || hasActiveEditor() || isFetching) return;
+      refreshLiveSections = async ({respectEditors = false} = {}) => {
+        if (document.hidden || isFetching || (respectEditors && hasActiveEditor())) return;
         isFetching = true;
 
         try {
@@ -1250,6 +1397,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
           isFetching = false;
         }
+      };
+
+      window.setInterval(async () => {
+        refreshLiveSections({respectEditors: true});
       }, intervalMs);
     } else {
       window.setInterval(() => {
@@ -1260,6 +1411,58 @@ document.addEventListener('DOMContentLoaded', () => {
       }, intervalMs);
     }
   }
+
+  const initRealtimeSocket = () => {
+    const portal = document.body.dataset.pageRole;
+    if (!window.io || !['customer', 'admin', 'delivery'].includes(portal)) return;
+    if (window.sweetCrumbsSocket) return;
+
+    const socket = window.io({
+      query: { portal },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 60000,
+      randomizationFactor: 0.2,
+    });
+    window.sweetCrumbsSocket = socket;
+
+    socket.on('new_order', (payload) => {
+      if (portal === 'admin') {
+        prependAdminOrder(payload);
+        if (document.querySelector('[data-socket-room="kds"]')) {
+          window.location.reload();
+          return;
+        }
+        refreshLiveSections({respectEditors: true});
+      }
+    });
+
+    socket.on('order_status_updated', (payload) => {
+      updateVisibleOrderStatus(payload?.order_id, payload?.new_status);
+      if (document.querySelector('[data-socket-room="kds"]')) {
+        window.location.reload();
+        return;
+      }
+      refreshLiveSections({respectEditors: true});
+    });
+
+    socket.on('stock_updated', updateStockIndicators);
+    socket.on('delivery_updated', () => refreshLiveSections({respectEditors: true}));
+    socket.on('kds_refresh', () => {
+      if (document.querySelector('[data-socket-room="kds"]')) window.location.reload();
+    });
+    socket.on('order_updated', () => {
+      if (document.querySelector('[data-socket-room="kds"]')) {
+        window.location.reload();
+        return;
+      }
+      refreshLiveSections({respectEditors: true});
+    });
+  };
+
+  initRealtimeSocket();
 
 });
 

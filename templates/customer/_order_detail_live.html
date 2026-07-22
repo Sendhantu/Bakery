@@ -8,7 +8,7 @@
       {% for s in statuses %}
       {% set is_active = s == order.status %}
       {% set is_done = statuses.index(s) < statuses.index(order.status) if order.status in statuses else false %}
-      <div class="tracker-step {% if is_active %}active{% elif is_done %}completed{% endif %}">
+      <div class="tracker-step {% if is_active %}active{% elif is_done %}completed{% endif %}" data-tracker-status="{{ s }}">
         <div class="tracker-icon">{{ icons[loop.index0] }}</div>
         <div class="tracker-label">{{ s.replace('_',' ') }}</div>
       </div>

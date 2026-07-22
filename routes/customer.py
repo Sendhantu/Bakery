@@ -8,8 +8,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from models import (db, Product, ProductVariant, Category, Cart, Wishlist,
                     Order, OrderItem, Payment, Refund, Coupon, Subscription,
                     Review, Message, Notification, AddressChange, ModificationRequest,
-                    PaymentLink, LoyaltyLedger, FraudAlert, calculate_loyalty_redemption, get_loyalty_config, cache)
+                    PaymentLink, LoyaltyLedger, FraudAlert, RawMaterial,
+                    calculate_loyalty_redemption, get_loyalty_config, cache)
 from recommendation_engine import get_recommendation_engine
+from realtime.events import emit_new_order, emit_stock_updated
 from services import (
     enrich_products,
     get_customer_orders_page,
@@ -835,6 +837,8 @@ def checkout():
         final_total = subtotal - total_discount + applied_delivery_charge
 
         default_branch_id = current_app.config.get("DEFAULT_BRANCH_ID")
+        stock_update_variant_ids = []
+        stock_update_material_ids = []
 
         # Lock rows to prevent race conditions during checkout
         for item in cart_items:
@@ -843,129 +847,133 @@ def checkout():
                 flash(f'Sorry, {item.product.name} is out of stock.', 'danger')
                 db.session.rollback()
                 return redirect(url_for('customer.cart'))
-            for recipe_item in item.product.recipe_items.all():
-                from models import RawMaterial
-                material = db.session.get(RawMaterial, recipe_item.raw_material_id, with_for_update=True)
-                required_qty = Decimal(recipe_item.quantity_required) * item.quantity
-                if material and material.is_active and Decimal(material.stock) < required_qty:
-                    flash(
-                        f'Not enough {material.name} is available to complete {item.product.name} right now.',
-                        'danger'
-                    )
-                    db.session.rollback()
-                    return redirect(url_for('customer.cart'))
 
         payment_link = None
-        with db.session.begin_nested():
-            order = Order(user_id=current_user.id, branch_id=default_branch_id)
-            order.order_number = order.generate_order_number()
-            order.subtotal = subtotal
-            order.discount = discount + coupon_discount
-            order.loyalty_discount = loyalty_discount
-            order.delivery_charge = applied_delivery_charge
-            order.total = final_total
-            order.fulfillment_type = fulfillment_type
-            if fulfillment_type == 'PICKUP':
-                order.address_line1 = current_app.config['STORE_DETAILS'].get('address_line1', '')
-                order.address_line2 = current_app.config['STORE_DETAILS'].get('address_line2', '')
-                order.city = current_app.config['STORE_DETAILS'].get('city', '')
-                order.pincode = current_app.config['STORE_DETAILS'].get('pincode', '')
-                order.phone = order_contact_phone
-                order.delivery_latitude = None
-                order.delivery_longitude = None
-            else:
-                order.address_line1 = checkout_address['address_line1']
-                order.address_line2 = checkout_address['address_line2']
-                order.city = checkout_address['city']
-                order.pincode = checkout_address['pincode']
-                order.phone = order_contact_phone
-                order.delivery_latitude = checkout_address.get('latitude')
-                order.delivery_longitude = checkout_address.get('longitude')
-            order.delivery_slot = selected_time_slot
-            order.delivery_date = delivery_target_date
-            order.special_note = request.form.get('special_note')
-            order.occasion = request.form.get('occasion')
-            order.payment_method = request.form.get('payment_method', 'COD')
-            order.payment_status = 'PENDING'
-            order.coupon_code = coupon_code if coupon_discount > 0 else None
-            order.status = 'PLACED'
-            db.session.add(order)
-            db.session.flush()
+        try:
+            with db.session.begin_nested():
+                order = Order(user_id=current_user.id, branch_id=default_branch_id)
+                order.order_number = order.generate_order_number()
+                order.subtotal = subtotal
+                order.discount = discount + coupon_discount
+                order.loyalty_discount = loyalty_discount
+                order.delivery_charge = applied_delivery_charge
+                order.total = final_total
+                order.fulfillment_type = fulfillment_type
+                if fulfillment_type == 'PICKUP':
+                    order.address_line1 = current_app.config['STORE_DETAILS'].get('address_line1', '')
+                    order.address_line2 = current_app.config['STORE_DETAILS'].get('address_line2', '')
+                    order.city = current_app.config['STORE_DETAILS'].get('city', '')
+                    order.pincode = current_app.config['STORE_DETAILS'].get('pincode', '')
+                    order.phone = order_contact_phone
+                    order.delivery_latitude = None
+                    order.delivery_longitude = None
+                else:
+                    order.address_line1 = checkout_address['address_line1']
+                    order.address_line2 = checkout_address['address_line2']
+                    order.city = checkout_address['city']
+                    order.pincode = checkout_address['pincode']
+                    order.phone = order_contact_phone
+                    order.delivery_latitude = checkout_address.get('latitude')
+                    order.delivery_longitude = checkout_address.get('longitude')
+                order.delivery_slot = selected_time_slot
+                order.delivery_date = delivery_target_date
+                order.special_note = request.form.get('special_note')
+                order.occasion = request.form.get('occasion')
+                order.payment_method = request.form.get('payment_method', 'COD')
+                order.payment_status = 'PENDING'
+                order.coupon_code = coupon_code if coupon_discount > 0 else None
+                order.status = 'PLACED'
+                db.session.add(order)
+                db.session.flush()
 
-            suspicious_order_count = Order.query.filter(
-                Order.user_id == current_user.id,
-                Order.placed_at >= utcnow() - timedelta(minutes=10),
-                Order.total == final_total,
-            ).count()
-            if suspicious_order_count >= 2:
-                order.is_suspicious = True
-                db.session.add(
-                    FraudAlert(
-                        order_id=order.id,
-                        user_id=current_user.id,
-                        alert_type="rapid_repeat_order",
-                        severity="high",
-                        details="Multiple matching-value orders were placed within a short time window.",
-                    )
-                )
-                get_container().audit_service.alert(
-                    "fraud_detected",
-                    "Suspicious repeat order",
-                    f"User {current_user.id} placed duplicate-value orders rapidly.",
-                    severity="high",
-                    user_id=current_user.id,
-                )
-
-            if loyalty_points_applied > 0:
-                LoyaltyLedger.redeem(current_user.id, order.id, loyalty_points_applied)
-
-            for item in cart_items:
-                price = get_container().pricing_service.resolve_product_price(item.product, item.variant)["price"]
-                db.session.add(OrderItem(
-                    order_id=order.id,
-                    product_id=item.product_id,
-                    variant_id=item.variant_id,
-                    product_name=item.product.name,
-                    variant_name=item.variant.name if item.variant else '',
-                    quantity=item.quantity,
-                    unit_price=price,
-                    subtotal=price * item.quantity
-                ))
-                if item.variant:
-                    v = db.session.get(ProductVariant, item.variant_id, with_for_update=True)
-                    v.stock -= item.quantity
-                for recipe_item in item.product.recipe_items.all():
-                    from models import RawMaterial
-                    material = db.session.get(RawMaterial, recipe_item.raw_material_id, with_for_update=True)
-                    if material and material.is_active:
-                        material.stock = max(
-                            Decimal('0'),
-                            Decimal(material.stock) - (Decimal(recipe_item.quantity_required) * item.quantity)
+                suspicious_order_count = Order.query.filter(
+                    Order.user_id == current_user.id,
+                    Order.placed_at >= utcnow() - timedelta(minutes=10),
+                    Order.total == final_total,
+                ).count()
+                if suspicious_order_count >= 2:
+                    order.is_suspicious = True
+                    db.session.add(
+                        FraudAlert(
+                            order_id=order.id,
+                            user_id=current_user.id,
+                            alert_type="rapid_repeat_order",
+                            severity="high",
+                            details="Multiple matching-value orders were placed within a short time window.",
                         )
+                    )
+                    get_container().audit_service.alert(
+                        "fraud_detected",
+                        "Suspicious repeat order",
+                        f"User {current_user.id} placed duplicate-value orders rapidly.",
+                        severity="high",
+                        user_id=current_user.id,
+                    )
 
-            db.session.add(Payment(
-                order_id=order.id,
-                amount=final_total,
-                status='PENDING',
-                method=order.payment_method,
-                transaction_id=f'TXN{random.randint(100000,999999)}'
-            ))
+                if loyalty_points_applied > 0:
+                    LoyaltyLedger.redeem(current_user.id, order.id, loyalty_points_applied)
 
-            if order.payment_method in ['UPI', 'CARD']:
-                payment_link = create_order_payment_link(order)
+                for item in cart_items:
+                    price = get_container().pricing_service.resolve_product_price(item.product, item.variant)["price"]
+                    db.session.add(OrderItem(
+                        order_id=order.id,
+                        product_id=item.product_id,
+                        variant_id=item.variant_id,
+                        product_name=item.product.name,
+                        variant_name=item.variant.name if item.variant else '',
+                        quantity=item.quantity,
+                        unit_price=price,
+                        subtotal=price * item.quantity
+                    ))
+                    if item.variant:
+                        v = db.session.get(ProductVariant, item.variant_id, with_for_update=True)
+                        v.stock -= item.quantity
+                        stock_update_variant_ids.append(v.id)
 
-            if request.form.get('save_address_for_future'):
-                save_address_for_customer(
-                    user_id=current_user.id,
-                    payload=checkout_address,
-                    make_default=bool(request.form.get('make_default')),
+                stock_update_material_ids = get_container().inventory_service.deduct_order_raw_materials(
+                    cart_items,
+                    order,
+                    created_by=None,
                 )
 
-            Cart.query.filter_by(user_id=current_user.id).delete()
+                db.session.add(Payment(
+                    order_id=order.id,
+                    amount=final_total,
+                    status='PENDING',
+                    method=order.payment_method,
+                    transaction_id=f'TXN{random.randint(100000,999999)}'
+                ))
+
+                if order.payment_method in ['UPI', 'CARD']:
+                    payment_link = create_order_payment_link(order)
+
+                if request.form.get('save_address_for_future'):
+                    save_address_for_customer(
+                        user_id=current_user.id,
+                        payload=checkout_address,
+                        make_default=bool(request.form.get('make_default')),
+                    )
+
+                Cart.query.filter_by(user_id=current_user.id).delete()
+        except ValidationError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+            return redirect(url_for('customer.cart'))
 
         notify(current_user.id, 'Order Placed! 🎉',
                f'Your order #{order.order_number} has been placed successfully.',
                'order', url_for('customer.order_detail', order_id=order.id))
+        db.session.commit()
+
+        emit_new_order(order)
+        for variant_id in set(stock_update_variant_ids):
+            variant = db.session.get(ProductVariant, variant_id)
+            if variant:
+                emit_stock_updated(variant, include_customer=True)
+        for material_id in set(stock_update_material_ids):
+            material = db.session.get(RawMaterial, material_id)
+            if material:
+                emit_stock_updated(material)
 
         try:
             from tasks.operations import generate_invoice_pdf

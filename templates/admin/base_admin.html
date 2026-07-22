@@ -82,6 +82,8 @@
         <span class="icon">📁</span>Categories</a></li>
       <li><a href="{{ url_for('admin.inventory') }}" class="{{ 'active' if 'inventory' in request.endpoint }}">
         <span class="icon">📦</span>Inventory</a></li>
+      <li><a href="{{ url_for('admin.triage') }}" class="{{ 'active' if request.endpoint == 'admin.triage' }}">
+        <span class="icon">🧠</span>Smart Triage</a></li>
       <li><a href="{{ url_for('admin.raw_materials') }}" class="{{ 'active' if 'raw_material' in request.endpoint }}">
         <span class="icon">🧂</span>Raw Materials</a></li>
 
@@ -144,6 +146,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
 <script>

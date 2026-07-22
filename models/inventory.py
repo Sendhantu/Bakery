@@ -19,6 +19,7 @@ class RawMaterial(db.Model):
     created_at    = db.Column(db.DateTime, default=utcnow)
     updated_at    = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
     recipe_items  = db.relationship('ProductMaterial', backref='raw_material', lazy='dynamic')
+    stock_movements = db.relationship('StockMovement', backref='raw_material', lazy='dynamic')
 
     branch = db.relationship('Branch', backref='raw_materials')
 
@@ -47,6 +48,27 @@ class ProductMaterial(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint('product_id', 'raw_material_id', name='uq_product_material'),
+    )
+
+
+class StockMovement(db.Model):
+    __tablename__ = 'stock_movements'
+    id = db.Column(db.Integer, primary_key=True)
+    raw_material_id = db.Column(db.Integer, db.ForeignKey('raw_materials.id'), nullable=False)
+    change_amount = db.Column(db.Numeric(10, 2), nullable=False)
+    stock_after = db.Column(db.Numeric(10, 2), nullable=False)
+    reason = db.Column(db.String(40), nullable=False)
+    reference_order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    reference_order = db.relationship('Order', backref='stock_movements')
+    actor = db.relationship('User', backref='stock_movements')
+
+    __table_args__ = (
+        db.Index('idx_stock_movement_material_created', 'raw_material_id', 'created_at'),
+        db.Index('idx_stock_movement_order', 'reference_order_id'),
+        db.Index('idx_stock_movement_reason', 'reason'),
     )
 
 

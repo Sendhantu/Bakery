@@ -20,16 +20,16 @@
       <thead><tr><th>Product</th><th>Product Status</th><th>Variant</th><th>Stock</th><th>Stock Status</th><th>Update Stock</th></tr></thead>
       <tbody>
         {% for v in variants %}
-        <tr>
+        <tr data-variant-id="{{ v.id }}">
           <td style="font-weight:500">{{ v.product.name }}</td>
           <td><span class="badge {% if v.product.is_active %}badge-green{% else %}badge-red{% endif %}">{% if v.product.is_active %}Live{% else %}Inactive{% endif %}</span></td>
           <td>{{ v.name }}</td>
-          <td style="font-family:var(--font-display);font-size:1.1rem;font-weight:700;color:{% if v.stock==0 %}var(--dusty-rose){% elif v.stock<=5 %}var(--caramel){% else %}var(--sage){% endif %}">{{ v.stock }}</td>
-          <td><span class="badge {% if v.stock==0 %}badge-red{% elif v.stock<=5 %}badge-orange{% else %}badge-green{% endif %}">{% if v.stock==0 %}Out of Stock{% elif v.stock<=5 %}Low Stock{% else %}OK{% endif %}</span></td>
+          <td style="font-family:var(--font-display);font-size:1.1rem;font-weight:700;color:{% if v.stock==0 %}var(--dusty-rose){% elif v.stock<=5 %}var(--caramel){% else %}var(--sage){% endif %}" data-stock-value="{{ v.id }}">{{ v.stock }}</td>
+          <td><span class="badge {% if v.stock==0 %}badge-red{% elif v.stock<=5 %}badge-orange{% else %}badge-green{% endif %}" data-stock-status="{{ v.id }}">{% if v.stock==0 %}Out of Stock{% elif v.stock<=5 %}Low Stock{% else %}OK{% endif %}</span></td>
           <td>
             <form method="POST" action="{{ url_for('admin.update_stock') }}" style="display:flex;gap:0.5rem">
               <input type="hidden" name="variant_id" value="{{ v.id }}">
-              <input class="form-control" type="number" name="stock" value="{{ v.stock }}" min="0" style="max-width:90px">
+              <input class="form-control" type="number" name="stock" value="{{ v.stock }}" min="0" style="max-width:90px" data-stock-input="{{ v.id }}">
               <button type="submit" class="btn btn-primary btn-sm">Save</button>
             </form>
           </td>

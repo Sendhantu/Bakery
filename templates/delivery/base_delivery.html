@@ -50,26 +50,9 @@
 {% block content %}{% endblock %}
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
-<script>
-if (typeof io !== 'undefined' && document.body.dataset.pageRole === 'delivery') {
-  const socket = io({
-    query: { portal: 'delivery' },
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 60000,
-    randomizationFactor: 0.2,
-  });
-  socket.on('delivery_updated', () => {
-    const live = document.querySelector('[data-live-refresh]');
-    if (live) window.location.reload();
-  });
-}
-</script>
-{% block scripts %}{% endblock %}
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+	<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+	{% block scripts %}{% endblock %}
 <script>
   function _triggerOfflineSync() {
     try {

@@ -30,13 +30,3 @@
   </div>
 </div>
 {% endblock %}
-{% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
-<script>
-if (typeof io !== 'undefined') {
-  const socket = io({ query: { portal: 'admin' }, transports: ['websocket', 'polling'], reconnection: true });
-  socket.on('kds_refresh', () => window.location.reload());
-  socket.on('order_updated', () => window.location.reload());
-}
-</script>
-{% endblock %}

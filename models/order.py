@@ -132,6 +132,7 @@ class Order(db.Model):
     __table_args__ = (
         db.Index("idx_order_user", "user_id"),
         db.Index("idx_order_status", "status"),
+        db.Index("idx_order_status_payment_placed", "status", "payment_status", "placed_at"),
         db.Index("idx_order_branch_status_date", "branch_id", "status", "delivery_date"),
         db.Index("idx_order_user_status_placed", "user_id", "status", "placed_at"),
     )

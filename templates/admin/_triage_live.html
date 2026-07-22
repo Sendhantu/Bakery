@@ -1,0 +1,32 @@
+<div id="admin-triage-live">
+  <div class="card">
+    <div class="card-header">Queue snapshot</div>
+    <div class="card-body">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Priority</th>
+              <th>Order</th>
+              <th>Status</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for order_id in report.priority_order %}
+              {% set order_result = order_map[order_id] %}
+              <tr>
+                <td>#{{ loop.index }}</td>
+                <td><a href="{{ url_for('admin.order_detail', order_id=order_result.order.id) }}">#{{ order_result.order.order_number }}</a></td>
+                <td><span class="badge {% if order_result.status == 'fulfillable_now' %}badge-green{% elif order_result.status == 'fulfillable_with_restock' %}badge-orange{% else %}badge-red{% endif %}">{{ order_result.status.replace('_', ' ') }}</span></td>
+                <td>{{ notes.get(order_result.order.id, order_result.note) }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4" style="text-align:center;padding:1.5rem;color:var(--text-muted)">No pending orders to triage.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
