@@ -4,6 +4,8 @@ from services import (
     AuditService,
     AuthService,
     DeliveryService,
+    FinanceExportService,
+    FinanceService,
     ForecastService,
     InventoryService,
     InvoiceService,
@@ -58,6 +60,8 @@ class ServiceContainer:
         self.subscription_service = SubscriptionService()
         self.push_service = PushService(app.config)
         self.invoice_service = InvoiceService(self.storage_service)
+        self.finance_service = FinanceService()
+        self.finance_export_service = FinanceExportService()
         self.loyalty_service = LoyaltyService()
         self.offline_sync_service = OfflineSyncService(app, self.audit_service)
         self._register_default_handlers()

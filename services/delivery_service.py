@@ -47,13 +47,18 @@ class DeliveryService:
             )
             order.mark_status_change()
             if self.audit_service is not None:
-                self.audit_service.record(
+                self.audit_service.log(
+                    actor_id,
                     "cod_payment_collected",
                     "Order",
                     order.id,
-                    actor_id=actor_id,
+                    before={"payment_status": order.payment_status},
+                    after={
+                        "payment_status": "PAID",
+                        "payment_mode": payment_mode,
+                        "amount": amount,
+                    },
                     branch_id=order.branch_id,
-                    metadata={"amount": float(amount), "payment_mode": payment_mode},
                     change_summary=f"COD collected via {payment_mode}",
                 )
         db.session.commit()

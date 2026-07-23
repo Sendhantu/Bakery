@@ -27,13 +27,14 @@ class OrderService:
             order.mark_status_change()
             self._sync_delivery_status(order, status)
             if self.audit_service is not None:
-                self.audit_service.record(
+                self.audit_service.log(
+                    actor_id,
                     "order_status_changed",
                     "Order",
                     order.id,
-                    actor_id=actor_id,
+                    before={"status": old_status},
+                    after={"status": status, "actor": actor},
                     branch_id=order.branch_id,
-                    metadata={"old_status": old_status, "new_status": status, "actor": actor},
                     change_summary=f"Order status changed from {old_status} to {status}",
                 )
         db.session.commit()

@@ -1,0 +1,61 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Record Transaction — Finance{% endblock %}
+{% block content %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1.5rem">Record Transaction</h1>
+<div class="card" style="max-width:720px">
+  <div class="card-body">
+    <form method="POST">
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select class="form-control" name="transaction_type" required>
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select class="form-control" name="category_id" required>
+          {% for category in categories %}
+          <option value="{{ category.id }}">{{ category.label }} ({{ category.transaction_type }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Amount (INR)</label>
+        <input class="form-control" type="number" step="0.01" min="0" name="amount" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">GST / Tax portion (optional)</label>
+        <input class="form-control" type="number" step="0.01" min="0" name="tax_amount">
+      </div>
+      <div class="form-group">
+        <label class="form-label">TDS withheld (optional, vendor payments)</label>
+        <input class="form-control" type="number" step="0.01" min="0" name="tds_withheld">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Counterparty (vendor/customer)</label>
+        <input class="form-control" name="counterparty" placeholder="Vendor or customer name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea class="form-control" name="description" rows="3"></textarea>
+      </div>
+      {% if branches %}
+      <div class="form-group">
+        <label class="form-label">Store / Branch</label>
+        <select class="form-control" name="branch_id">
+          <option value="">Default store</option>
+          {% for branch in branches %}
+          <option value="{{ branch.id }}">{{ branch.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div class="flex gap-2">
+        <button type="submit" class="btn btn-primary">Save Transaction</button>
+        <a href="{{ url_for('admin.finance_dashboard') }}" class="btn btn-ghost">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

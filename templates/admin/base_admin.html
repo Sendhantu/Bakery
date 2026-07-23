@@ -92,6 +92,8 @@
         <span class="icon">🛒</span>All Orders</a></li>
       <li><a href="{{ url_for('admin.modifications') }}" class="{{ 'active' if 'modification' in request.endpoint }}">
         <span class="icon">✏️</span>Modifications</a></li>
+      <li><a href="{{ url_for('admin.reviews') }}" class="{{ 'active' if 'review' in request.endpoint }}">
+        <span class="icon">⭐</span>Reviews</a></li>
 
       <li class="section-label">Customers</li>
       <li><a href="{{ url_for('admin.customers') }}" class="{{ 'active' if request.endpoint in ['admin.customers','admin.customer_detail'] }}">
@@ -106,6 +108,8 @@
         <span class="icon">⭐</span>Loyalty Points</a></li>
 
       <li class="section-label">Finance</li>
+      <li><a href="{{ url_for('admin.finance_dashboard') }}" class="{{ 'active' if 'finance' in request.endpoint }}">
+        <span class="icon">💰</span>Finance</a></li>
       <li><a href="{{ url_for('admin.coupons') }}" class="{{ 'active' if 'coupon' in request.endpoint }}">
         <span class="icon">🎟</span>Coupons</a></li>
 
@@ -133,7 +137,7 @@
       <li><a href="{{ url_for('admin.pricing') }}" class="{{ 'active' if request.endpoint == 'admin.pricing' }}">
         <span class="icon">🏷️</span>Pricing</a></li>
       <li><a href="{{ url_for('admin.audit') }}" class="{{ 'active' if request.endpoint == 'admin.audit' }}">
-        <span class="icon">🛡️</span>Audit</a></li>
+        <span class="icon">🛡️</span>Audit Log</a></li>
       <li><a href="{{ url_for('admin.offline_admin') }}" class="{{ 'active' if request.endpoint == 'admin.offline_admin' }}">
         <span class="icon">📴</span>Offline / Sync</a></li>
       <li><a href="{{ url_for('admin.qr_scanner') }}" class="{{ 'active' if request.endpoint == 'admin.qr_scanner' }}">

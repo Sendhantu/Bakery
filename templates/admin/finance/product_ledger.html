@@ -1,0 +1,27 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Product Ledger — Finance{% endblock %}
+{% block content %}
+{% include 'admin/finance/_period_nav.html' %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1rem">Product Ledger</h1>
+<p class="text-muted text-sm" style="margin-bottom:1rem">Revenue from delivered/paid orders. COGS = recipe quantities × raw material cost per unit (Phase 3 data).</p>
+<div class="flex gap-2" style="margin-bottom:1rem">
+  <a href="{{ url_for('admin.finance_export', report='products', file_format='csv', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Export CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='products', file_format='pdf', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Export PDF</a>
+</div>
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th><th>COGS (est.)</th><th>Gross Profit</th></tr></thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.product_name }}</td>
+      <td>{{ row.units_sold }}</td>
+      <td>₹{{ row.revenue|int }}</td>
+      <td>₹{{ row.cogs|int }}</td>
+      <td>₹{{ row.gross_profit|int }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="text-center text-muted" style="padding:1.5rem">No product sales in this period.</td></tr>
+    {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

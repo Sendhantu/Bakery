@@ -1,0 +1,14 @@
+<form method="GET" class="card" style="margin-bottom:1rem">
+  <div class="card-body flex gap-2 items-end flex-wrap">
+    <div class="form-group" style="margin:0">
+      <label class="form-label">From</label>
+      <input class="form-control" type="date" name="start_date" value="{{ start_date }}">
+    </div>
+    <div class="form-group" style="margin:0">
+      <label class="form-label">To</label>
+      <input class="form-control" type="date" name="end_date" value="{{ end_date }}">
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    <a href="{{ url_for('admin.finance_dashboard') }}" class="btn btn-ghost btn-sm">Finance Home</a>
+  </div>
+</form>

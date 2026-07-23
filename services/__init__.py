@@ -1,6 +1,8 @@
 from .audit_service import AuditService
 from .auth_service import AuthService
 from .delivery_service import DeliveryService
+from .finance_export_service import FinanceExportService
+from .finance_service import FinanceService
 from .forecast_service import ForecastService
 from .inventory_service import InventoryService
 from .invoice_service import InvoiceService
@@ -33,11 +35,14 @@ from .slot_service import SlotService
 from .storage_service import StorageService
 from .subscription_service import SubscriptionService
 from .triage_service import generate_smart_triage_report, summarize_triage_report
+from .review_reply_service import generate_review_reply_draft, review_needs_attention
 
 __all__ = [
     "AuditService",
     "AuthService",
     "DeliveryService",
+    "FinanceExportService",
+    "FinanceService",
     "ForecastService",
     "InventoryService",
     "InvoiceService",
@@ -54,6 +59,8 @@ __all__ = [
     "SubscriptionService",
     "generate_smart_triage_report",
     "summarize_triage_report",
+    "generate_review_reply_draft",
+    "review_needs_attention",
     "build_category_revenue_rows",
     "enrich_orders",
     "enrich_products",

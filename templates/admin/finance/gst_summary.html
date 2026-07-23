@@ -1,0 +1,44 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}GST Summary — Finance{% endblock %}
+{% block content %}
+{% include 'admin/finance/_period_nav.html' %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1rem">GST Summary</h1>
+<div class="stat-grid" style="margin-bottom:1rem">
+  <div class="stat-card green"><div class="stat-value">₹{{ summary.gst_collected|int }}</div><div class="stat-label">GST Collected (output)</div></div>
+  <div class="stat-card orange"><div class="stat-value">₹{{ summary.gst_paid|int }}</div><div class="stat-label">GST Paid (input credit)</div></div>
+  <div class="stat-card brown"><div class="stat-value">₹{{ summary.net_gst_liability|int }}</div><div class="stat-label">Net GST Liability</div></div>
+</div>
+<div class="flex gap-2 flex-wrap" style="margin-bottom:1rem">
+  <a href="{{ url_for('admin.finance_export', report='gst', file_format='csv', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Export CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='gst', file_format='pdf', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Export PDF</a>
+</div>
+<div class="card" style="margin-bottom:1rem">
+  <div class="card-header">Save review snapshot</div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('admin.finance_gst_snapshot', start_date=start_date, end_date=end_date) }}">
+      <input type="hidden" name="period_type" value="month">
+      <div class="form-group">
+        <label class="form-label">Accountant notes / adjustments</label>
+        <textarea class="form-control" name="admin_notes" rows="2" placeholder="Optional notes — not filed automatically"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Save GST Snapshot</button>
+    </form>
+  </div>
+</div>
+{% if records %}
+<div class="card"><div class="card-header">Saved Snapshots</div><div class="table-wrap"><table>
+  <thead><tr><th>Period</th><th>Collected</th><th>Paid</th><th>Net</th><th>Computed</th></tr></thead>
+  <tbody>
+    {% for record in records %}
+    <tr>
+      <td>{{ record.period_start }} → {{ record.period_end }}</td>
+      <td>₹{{ record.gst_collected|int }}</td>
+      <td>₹{{ record.gst_paid|int }}</td>
+      <td>₹{{ record.net_gst_liability|int }}</td>
+      <td class="text-sm text-muted">{{ record.computed_at.strftime('%d %b %Y %H:%M') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table></div></div>
+{% endif %}
+{% endblock %}

@@ -154,6 +154,11 @@ class BaseConfig:
 
     DEFAULT_BRANCH_ID = int(os.environ.get("DEFAULT_BRANCH_ID", "1") or 1)
 
+    FINANCIAL_DATA_ENCRYPTION_KEY = os.environ.get("FINANCIAL_DATA_ENCRYPTION_KEY", "")
+    ALLOW_DEV_FINANCIAL_KEY_DERIVATION = env_flag(
+        "ALLOW_DEV_FINANCIAL_KEY_DERIVATION", default=True
+    )
+
     OFFLINE_SYNC_ENABLED = env_flag("OFFLINE_SYNC_ENABLED", default=True)
     OFFLINE_SYNC_DB_TEMPLATE = str(
         BASE_DIR / "instance" / "offline" / "{portal_role}_offline_sync.sqlite"

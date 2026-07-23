@@ -96,6 +96,13 @@ class Payment(db.Model):
                 reason=reason,
             )
         )
+        if new_state == "PAID":
+            try:
+                from services.finance_service import maybe_record_sale_on_payment
+
+                maybe_record_sale_on_payment(self, actor_id=actor_id)
+            except Exception:
+                pass
         return self
 
 

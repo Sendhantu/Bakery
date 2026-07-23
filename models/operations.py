@@ -14,6 +14,9 @@ class AuditLog(db.Model):
     entity_id = db.Column(db.String(80), nullable=False)
     action = db.Column(db.String(80), nullable=False)
     change_summary = db.Column(db.Text)
+    before_value = db.Column(db.Text)
+    after_value = db.Column(db.Text)
+    ip_address = db.Column(db.String(64))
     metadata_json = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 

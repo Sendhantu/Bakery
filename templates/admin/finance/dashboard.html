@@ -1,0 +1,67 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Finance — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">💰 Finance</h1>
+  <div class="flex gap-2 flex-wrap">
+    <a href="{{ url_for('admin.finance_add_transaction') }}" class="btn btn-primary btn-sm">+ Record Transaction</a>
+    <a href="{{ url_for('admin.finance_tax_rates') }}" class="btn btn-outline btn-sm">Tax Rates</a>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <div class="card-body">
+    <form method="GET" class="flex gap-2 items-end flex-wrap">
+      <div class="form-group" style="margin:0">
+        <label class="form-label">From</label>
+        <input class="form-control" type="date" name="start_date" value="{{ start_date }}">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">To</label>
+        <input class="form-control" type="date" name="end_date" value="{{ end_date }}">
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    </form>
+    <p class="text-sm text-muted" style="margin-top:0.75rem;margin-bottom:0">Record-keeping aid only — review all figures with your accountant before filing GST/ITR.</p>
+  </div>
+</div>
+
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card green"><span class="stat-icon">📈</span><div class="stat-value">₹{{ pnl.income|int }}</div><div class="stat-label">Income</div></div>
+  <div class="stat-card rose"><span class="stat-icon">📉</span><div class="stat-value">₹{{ pnl.expenses|int }}</div><div class="stat-label">Expenses</div></div>
+  <div class="stat-card brown"><span class="stat-icon">🧾</span><div class="stat-value">₹{{ pnl.net_profit|int }}</div><div class="stat-label">Net P&amp;L</div></div>
+  <div class="stat-card orange"><span class="stat-icon">🏛</span><div class="stat-value">₹{{ gst.net_gst_liability|int }}</div><div class="stat-label">Net GST (est.)</div></div>
+</div>
+
+<div class="flex gap-2 flex-wrap" style="margin-bottom:1.5rem">
+  <a href="{{ url_for('admin.finance_product_ledger', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Product Ledger</a>
+  <a href="{{ url_for('admin.finance_store_ledger', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Store Ledger</a>
+  <a href="{{ url_for('admin.finance_gst_summary', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">GST Summary</a>
+  <a href="{{ url_for('admin.finance_tds_summary', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">TDS Summary</a>
+  <a href="{{ url_for('admin.finance_export', report='pnl', file_format='csv', start_date=start_date, end_date=end_date) }}" class="btn btn-ghost btn-sm">Export P&amp;L CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='transactions', file_format='csv', start_date=start_date, end_date=end_date) }}" class="btn btn-ghost btn-sm">Export Transactions CSV</a>
+</div>
+
+<div class="card">
+  <div class="card-header">Recent Transactions</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Store</th><th>Description</th></tr></thead>
+      <tbody>
+        {% for txn in transactions %}
+        <tr>
+          <td class="text-sm">{{ txn.created_at.strftime('%d %b %Y') }}</td>
+          <td><span class="badge {% if txn.transaction_type == 'income' %}badge-green{% else %}badge-orange{% endif %}">{{ txn.transaction_type }}</span></td>
+          <td>{{ txn.category.label if txn.category else '—' }}</td>
+          <td style="font-weight:600">₹{{ txn.amount|int }}</td>
+          <td class="text-sm text-muted">{{ txn.store_location or '—' }}</td>
+          <td class="text-sm">{{ txn.description or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted" style="padding:1.5rem">No transactions in this period yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

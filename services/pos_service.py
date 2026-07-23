@@ -25,4 +25,24 @@ class POSService:
             db.session.add(payment)
             db.session.flush()
             payment.transition_to('PAID', actor_id=actor_id, reason='pos_sale')
+            try:
+                from bootstrap import get_container
+
+                get_container().audit_service.log(
+                    actor_id,
+                    "pos_sale_created",
+                    "Order",
+                    order.id,
+                    before=None,
+                    after={
+                        "order_number": order.order_number,
+                        "variant_id": variant_id,
+                        "quantity": quantity,
+                        "payment_mode": payment_mode,
+                        "total": subtotal,
+                    },
+                    change_summary=f"POS sale for order #{order.order_number}",
+                )
+            except Exception:
+                pass
         return order

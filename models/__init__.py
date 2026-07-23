@@ -9,6 +9,7 @@ from .payment import PAYMENT_STATES, Payment, PaymentLink, Refund, Coupon, Payme
 from .inventory import RawMaterial, ProductMaterial, StockMovement, Supplier, Branch, ProductionPlan, ProductionBatch
 from .delivery import DeliveryAgent, Delivery
 from .communication import Message, Notification, EmailLog
+from .finance import FinancialCategory, FinancialTransaction, TaxRate, TaxRecord
 from .operations import AuditLog, OperationalAlert, InventoryForecast, DeliveryRoutePlan, StaffShift, AttendanceRecord, SalaryRecord, SearchAnalytics, BackupVerification, QueueMetric, ApiUsageLog, FraudAlert, PushDevice, PricingRule, SubscriptionSchedule, CashbackWalletEntry, ReferralReward, SyncConflict
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     'RawMaterial', 'ProductMaterial', 'StockMovement', 'Supplier', 'Branch', 'ProductionPlan', 'ProductionBatch',
     'DeliveryAgent', 'Delivery',
     'Message', 'Notification', 'EmailLog',
-    'AuditLog', 'OperationalAlert', 'InventoryForecast', 'DeliveryRoutePlan', 'StaffShift', 'AttendanceRecord', 'SalaryRecord', 'SearchAnalytics', 'BackupVerification', 'QueueMetric', 'ApiUsageLog', 'FraudAlert', 'PushDevice', 'PricingRule', 'SubscriptionSchedule', 'CashbackWalletEntry', 'ReferralReward', 'SyncConflict',
+    'AuditLog', 'OperationalAlert', 'InventoryForecast', 'DeliveryRoutePlan', 'StaffShift', 'AttendanceRecord', 'SalaryRecord', 'SearchAnalytics', 'BackupVerification', 'QueueMetric', 'ApiUsageLog', 'FraudAlert', 'PushDevice', 'PricingRule', 'SubscriptionSchedule',     'CashbackWalletEntry', 'ReferralReward', 'SyncConflict',
+    'FinancialCategory', 'FinancialTransaction', 'TaxRate', 'TaxRecord',
     'safe_create_all',
 ]

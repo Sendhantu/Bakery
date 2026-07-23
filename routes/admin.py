@@ -8,19 +8,23 @@ from flask import (
     jsonify,
     current_app,
     abort,
+    send_file,
 )
 from flask_login import login_required, current_user
 from bootstrap import get_container
 from clock import utcnow
 from exceptions import ValidationError
 from functools import wraps
+from decimal import Decimal
+from datetime import date, timedelta
+from sqlalchemy.orm import selectinload
 from realtime.events import (
     DELIVERY_RELEVANT_STATUSES,
     customer_room,
     emit_order_status_updated,
     emit_stock_updated,
 )
-from utils.permissions import role_meets_minimum, roles_required
+from utils.permissions import role_meets_minimum, roles_required, has_role
 from models import (
     db,
     User,
@@ -40,6 +44,11 @@ from models import (
     LoginHistory,
     Review,
     ModificationRequest,
+    FinancialCategory,
+    FinancialTransaction,
+    StockMovement,
+    TaxRate,
+    TaxRecord,
     RawMaterial,
     ProductMaterial,
     Supplier,
@@ -66,6 +75,7 @@ from models import (
     get_allowed_order_statuses,
 )
 from services import enrich_orders, generate_smart_triage_report, summarize_triage_report
+from services.review_reply_service import generate_review_reply_draft, review_needs_attention
 from services.analytics_service import (
     PERIOD_LABELS,
     analytics_payload,
@@ -108,6 +118,20 @@ def admin_required(f):
         ):
             flash("Admin access required.", "danger")
             return redirect(url_for("auth.login"))
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def finance_required(f):
+    """Finance module — restricted to admin and super_admin only."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or not has_role(
+            current_user, "admin", "super_admin"
+        ):
+            flash("Finance access requires admin privileges.", "danger")
+            return redirect(url_for("admin.dashboard"))
         return f(*args, **kwargs)
 
     return decorated
@@ -522,6 +546,14 @@ def add_product():
                 raw_materials=raw_materials,
             )
         db.session.commit()
+        get_container().audit_service.log(
+            current_user,
+            "product_created",
+            "Product",
+            p.id,
+            after={"name": p.name, "base_price": str(p.base_price)},
+            change_summary=f"Product created: {p.name}",
+        )
         for variant in p.variants.all():
             emit_stock_updated(variant, include_customer=True)
         flash("Product added!", "success")
@@ -544,6 +576,11 @@ def edit_product(product_id):
     )
     if request.method == "POST":
         previous_variant_stock = {variant.id: variant.stock for variant in p.variants.all()}
+        before_snapshot = {
+            "base_price": str(p.base_price),
+            "name": p.name,
+            "is_active": p.is_active,
+        }
         try:
             p.name = request.form["name"]
             p.description = request.form.get("description")
@@ -579,6 +616,32 @@ def edit_product(product_id):
                 raw_materials=raw_materials,
             )
         db.session.commit()
+        after_snapshot = {
+            "base_price": str(p.base_price),
+            "name": p.name,
+            "is_active": p.is_active,
+        }
+        audit = get_container().audit_service
+        if before_snapshot["base_price"] != after_snapshot["base_price"]:
+            audit.log(
+                current_user,
+                "product_price_changed",
+                "Product",
+                p.id,
+                before={"base_price": before_snapshot["base_price"]},
+                after={"base_price": after_snapshot["base_price"]},
+                change_summary=f"Product price updated for {p.name}",
+            )
+        else:
+            audit.log(
+                current_user,
+                "product_updated",
+                "Product",
+                p.id,
+                before=before_snapshot,
+                after=after_snapshot,
+                change_summary=f"Product updated: {p.name}",
+            )
         for variant in p.variants.all():
             if previous_variant_stock.get(variant.id) != variant.stock:
                 emit_stock_updated(variant, include_customer=True)
@@ -824,6 +887,7 @@ def modifications():
 def resolve_modification(req_id):
     req = db.get_or_404(ModificationRequest, req_id)
     action = request.form.get("action")
+    before_status = req.status
     req.status = "APPROVED" if action == "approve" else "REJECTED"
     req.resolved_at = utcnow()
     req.order.is_locked = False
@@ -853,8 +917,75 @@ def resolve_modification(req_id):
                 )
             )
     db.session.commit()
+    get_container().audit_service.log(
+        current_user,
+        "modification_request_resolved",
+        "ModificationRequest",
+        req.id,
+        before={"status": before_status},
+        after={"status": req.status, "action": action},
+        change_summary=f"Modification request {req.status.lower()} for order #{req.order.order_number}",
+    )
     flash("Modification request resolved.", "success")
     return redirect(url_for("admin.modifications"))
+
+
+# ── REVIEWS ──────────────────────────────────────────────────
+@admin_bp.route("/reviews")
+@admin_required
+def reviews():
+    review_rows = (
+        Review.query.options(
+            selectinload(Review.product),
+            selectinload(Review.author),
+        )
+        .order_by(Review.created_at.desc())
+        .all()
+    )
+    attention_by_id = {
+        review.id: review_needs_attention(review) for review in review_rows
+    }
+    return render_template(
+        "admin/reviews.html",
+        reviews=review_rows,
+        attention_by_id=attention_by_id,
+    )
+
+
+@admin_bp.route("/reviews/<int:review_id>/generate-draft", methods=["POST"])
+@admin_required
+def generate_review_draft(review_id):
+    review = (
+        Review.query.options(
+            selectinload(Review.product),
+            selectinload(Review.author),
+        )
+        .filter_by(id=review_id)
+        .first_or_404()
+    )
+    payload = generate_review_reply_draft(
+        review,
+        current_app.config.get("BAKERY_NAME", "Sweet Crumbs Bakery"),
+        current_app.config.get("STORE_DETAILS") or {},
+    )
+    status_code = 200 if payload.get("ok") else 503
+    return jsonify(payload), status_code
+
+
+@admin_bp.route("/reviews/<int:review_id>/reply", methods=["POST"])
+@admin_required
+def post_review_reply(review_id):
+    review = db.get_or_404(Review, review_id)
+    reply_text = (request.form.get("admin_reply") or "").strip()
+    if not reply_text:
+        flash("Reply cannot be empty.", "warning")
+        return redirect(url_for("admin.reviews"))
+
+    review.admin_reply = reply_text
+    review.admin_reply_at = utcnow()
+    db.session.commit()
+    flash("Reply posted successfully.", "success")
+    return redirect(url_for("admin.reviews"))
 
 
 # ── CUSTOMERS ────────────────────────────────────────────────
@@ -1017,14 +1148,16 @@ def update_stock():
         expected_version = request.form.get('expected_version')
         from utils.optimistic import assert_version
         assert_version(v, expected_version, entity_name='ProductVariant')
+        previous_stock = v.stock
         v.stock = new_stock
         v.version = int(v.version or 0) + 1
-        get_container().audit_service.record(
-            "inventory_stock_updated",
+        get_container().audit_service.log(
+            current_user,
+            "stock_adjusted",
             "ProductVariant",
             v.id,
-            actor_id=current_user.id,
-            metadata={"stock": new_stock},
+            before={"stock": previous_stock},
+            after={"stock": new_stock},
             change_summary=f"Variant stock set to {new_stock}",
         )
         db.session.commit()
@@ -1087,23 +1220,33 @@ def update_raw_material_stock():
         expected_version = request.form.get('expected_version')
         from utils.optimistic import assert_version
         assert_version(mat, expected_version, entity_name='RawMaterial')
-        mat.stock = new_stock
-        mat.version = int(mat.version or 0) + 1
-        get_container().audit_service.record(
-            "raw_material_stock_updated",
-            "RawMaterial",
-            mat.id,
-            actor_id=current_user.id,
-            branch_id=mat.branch_id,
-            metadata={"stock": float(new_stock)},
-            change_summary=f"Material stock set to {new_stock}",
-        )
+        previous_stock = Decimal(str(mat.stock or 0))
+        inventory_service = get_container().inventory_service
+        if new_stock > previous_stock:
+            movement = inventory_service.increase_raw_material_stock(
+                mat,
+                new_stock - previous_stock,
+                reason="manual_restock",
+                created_by=current_user.id,
+            )
+        elif new_stock != previous_stock:
+            movement = inventory_service.set_raw_material_stock(
+                mat,
+                new_stock,
+                reason="correction",
+                created_by=current_user.id,
+            )
+        else:
+            movement = None
         db.session.commit()
         get_container().offline_sync_service.cache_material(mat)
         try:
             check_and_send_inventory_alerts()
         except Exception:
             pass
+        if movement and Decimal(str(movement.change_amount or 0)) > 0 and movement.reason == "manual_restock":
+            flash("Raw material restocked. Log the purchase expense when ready.", "info")
+            return redirect(url_for("admin.finance_log_restock", movement_id=movement.id))
         flash("Raw material stock updated!", "success")
     except SQLAlchemyError:
         db.session.rollback()
@@ -1668,6 +1811,7 @@ def toggle_agent_access(agent_id):
         flash("This delivery profile is not linked to a login account yet.", "danger")
         return redirect(url_for("admin.agents"))
 
+    previous_active = agent.user.is_active
     agent.user.is_active = not agent.user.is_active
     if not agent.user.is_active:
         agent.availability = False
@@ -1680,6 +1824,15 @@ def toggle_agent_access(agent_id):
         flash(f"{agent.name} has been reactivated.", "success")
 
     db.session.commit()
+    get_container().audit_service.log(
+        current_user,
+        "user_access_changed",
+        "User",
+        agent.user.id,
+        before={"is_active": previous_active, "role": agent.user.role},
+        after={"is_active": agent.user.is_active, "role": agent.user.role},
+        change_summary=f"Delivery access toggled for {agent.name}",
+    )
     return redirect(url_for("admin.agents"))
 
 
@@ -1802,6 +1955,7 @@ def loyalty_adjust():
         flash("User and points are required.", "danger")
         return redirect(url_for("admin.loyalty"))
     user = db.get_or_404(User, user_id)
+    before_points = user.loyalty_balance
     LoyaltyLedger.admin_adjust(user_id, points, reason)
     notify(
         user_id,
@@ -1810,6 +1964,15 @@ def loyalty_adjust():
         "loyalty",
     )
     db.session.commit()
+    get_container().audit_service.log(
+        current_user,
+        "loyalty_points_adjusted",
+        "User",
+        user_id,
+        before={"loyalty_balance": before_points},
+        after={"loyalty_balance": user.loyalty_balance, "delta": points, "reason": reason},
+        change_summary=f"Loyalty adjusted by {points:+d} for {user.name}",
+    )
     flash(f"Adjusted {points:+d} pts for {user.name}.", "success")
     return redirect(url_for("admin.loyalty"))
 
@@ -2075,6 +2238,20 @@ def pricing():
             max_batch_age_hours=request.form.get("max_batch_age_hours", type=int),
         )
         db.session.add(rule)
+        db.session.flush()
+        get_container().audit_service.log(
+            current_user,
+            "pricing_rule_created",
+            "PricingRule",
+            rule.id,
+            after={
+                "name": rule.name,
+                "rule_type": rule.rule_type,
+                "percent_discount": float(rule.percent_discount or 0),
+            },
+            branch_id=rule.branch_id,
+            change_summary=f"Pricing rule created: {rule.name}",
+        )
         db.session.commit()
         flash("Pricing rule saved.", "success")
         return redirect(url_for("admin.pricing"))
@@ -2093,12 +2270,41 @@ def subscriptions_admin():
 
 
 @admin_bp.route("/audit")
+@admin_bp.route("/audit-log")
 @admin_required
 def audit():
-    logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(100).all()
-    alerts = OperationalAlert.query.order_by(OperationalAlert.created_at.desc()).limit(50).all()
-    fraud_alerts = FraudAlert.query.order_by(FraudAlert.created_at.desc()).limit(50).all()
-    return render_template("admin/audit.html", logs=logs, alerts=alerts, fraud_alerts=fraud_alerts)
+    audit_service = get_container().audit_service
+    actor_id = request.args.get("actor_id", type=int)
+    action = (request.args.get("action") or "").strip() or None
+    start_date = request.args.get("start_date") or None
+    end_date = request.args.get("end_date") or None
+    logs = audit_service.query_logs(
+        actor_id=actor_id,
+        action=action,
+        start_date=start_date,
+        end_date=end_date,
+        limit=250,
+    )
+    actors = (
+        User.query.filter(User.role.in_(("admin", "super_admin", "branch_manager", "cashier", "kitchen_staff", "delivery")))
+        .order_by(User.name.asc())
+        .all()
+    )
+    actions = audit_service.distinct_actions()
+    alerts = OperationalAlert.query.order_by(OperationalAlert.created_at.desc()).limit(20).all()
+    fraud_alerts = FraudAlert.query.order_by(FraudAlert.created_at.desc()).limit(20).all()
+    return render_template(
+        "admin/audit_log.html",
+        logs=logs,
+        actors=actors,
+        actions=actions,
+        selected_actor_id=actor_id,
+        selected_action=action or "",
+        start_date=start_date or "",
+        end_date=end_date or "",
+        alerts=alerts,
+        fraud_alerts=fraud_alerts,
+    )
 
 
 @admin_bp.route("/queue-monitor")
@@ -2192,3 +2398,301 @@ def plan_delivery_routes():
 @admin_required
 def qr_scanner():
     return render_template("admin/qr_scanner.html")
+
+
+def _finance_date_range():
+    today = utcnow().date()
+    default_start = today.replace(day=1)
+    start_date = request.args.get("start_date") or request.form.get("start_date") or default_start.isoformat()
+    end_date = request.args.get("end_date") or request.form.get("end_date") or today.isoformat()
+    return start_date, end_date
+
+
+# ── FINANCE ──────────────────────────────────────────────────
+@admin_bp.route("/finance")
+@finance_required
+def finance_dashboard():
+    finance = get_container().finance_service
+    finance.ensure_default_categories()
+    start_date, end_date = _finance_date_range()
+    pnl = finance.profit_and_loss(start_date=start_date, end_date=end_date)
+    gst = finance.gst_summary(start_date=start_date, end_date=end_date)
+    transactions = finance.recent_transactions(limit=25)
+    return render_template(
+        "admin/finance/dashboard.html",
+        pnl=pnl,
+        gst=gst,
+        transactions=transactions,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@admin_bp.route("/finance/transactions/add", methods=["GET", "POST"])
+@finance_required
+def finance_add_transaction():
+    finance = get_container().finance_service
+    finance.ensure_default_categories()
+    categories = finance.active_categories()
+    if request.method == "POST":
+        try:
+            amount = parse_decimal(request.form.get("amount"), "amount")
+            tax_amount_raw = (request.form.get("tax_amount") or "").strip()
+            tax_amount = parse_decimal(tax_amount_raw, "tax amount") if tax_amount_raw else None
+            tds_raw = (request.form.get("tds_withheld") or "").strip()
+            tds_withheld = parse_decimal(tds_raw, "TDS withheld") if tds_raw else None
+        except ValueError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("admin.finance_add_transaction"))
+
+        category_id = request.form.get("category_id", type=int)
+        category = db.session.get(FinancialCategory, category_id)
+        if category is None:
+            flash("Choose a valid category.", "danger")
+            return redirect(url_for("admin.finance_add_transaction"))
+
+        finance.create_manual_transaction(
+            transaction_type=request.form.get("transaction_type") or category.transaction_type,
+            category_id=category.id,
+            amount=amount,
+            tax_amount=tax_amount,
+            description=request.form.get("description", ""),
+            counterparty=request.form.get("counterparty", ""),
+            branch_id=request.form.get("branch_id", type=int),
+            tds_withheld=tds_withheld,
+            created_by=current_user.id,
+        )
+        db.session.commit()
+        flash("Financial transaction recorded.", "success")
+        return redirect(url_for("admin.finance_dashboard"))
+
+    branches = Branch.query.filter_by(is_active=True).order_by(Branch.name.asc()).all()
+    return render_template(
+        "admin/finance/transaction_form.html",
+        categories=categories,
+        branches=branches,
+    )
+
+
+@admin_bp.route("/finance/ledger/products")
+@finance_required
+def finance_product_ledger():
+    start_date, end_date = _finance_date_range()
+    rows = get_container().finance_service.product_ledger(start_date=start_date, end_date=end_date)
+    return render_template(
+        "admin/finance/product_ledger.html",
+        rows=rows,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@admin_bp.route("/finance/ledger/stores")
+@finance_required
+def finance_store_ledger():
+    start_date, end_date = _finance_date_range()
+    rows = get_container().finance_service.store_ledger(start_date=start_date, end_date=end_date)
+    return render_template(
+        "admin/finance/store_ledger.html",
+        rows=rows,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@admin_bp.route("/finance/gst")
+@finance_required
+def finance_gst_summary():
+    start_date, end_date = _finance_date_range()
+    finance = get_container().finance_service
+    summary = finance.gst_summary(start_date=start_date, end_date=end_date)
+    records = TaxRecord.query.order_by(TaxRecord.computed_at.desc()).limit(12).all()
+    return render_template(
+        "admin/finance/gst_summary.html",
+        summary=summary,
+        records=records,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@admin_bp.route("/finance/gst/snapshot", methods=["POST"])
+@finance_required
+def finance_gst_snapshot():
+    start_date, end_date = _finance_date_range()
+    period_type = (request.form.get("period_type") or "month").strip().lower()
+    notes = request.form.get("admin_notes", "")
+    get_container().finance_service.save_tax_record(
+        period_type,
+        start_date,
+        end_date,
+        admin_notes=notes,
+    )
+    db.session.commit()
+    flash("GST snapshot saved for review. Figures are not filed automatically.", "success")
+    return redirect(url_for("admin.finance_gst_summary", start_date=start_date, end_date=end_date))
+
+
+@admin_bp.route("/finance/tds")
+@finance_required
+def finance_tds_summary():
+    start_date, end_date = _finance_date_range()
+    summary = get_container().finance_service.tds_summary(start_date=start_date, end_date=end_date)
+    return render_template(
+        "admin/finance/tds_summary.html",
+        summary=summary,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@admin_bp.route("/finance/restock/<int:movement_id>", methods=["GET", "POST"])
+@finance_required
+def finance_log_restock(movement_id):
+    movement = db.get_or_404(StockMovement, movement_id)
+    finance = get_container().finance_service
+    suggested = finance.suggest_restock_expense_amount(movement)
+    if request.method == "POST":
+        try:
+            amount = parse_decimal(request.form.get("amount"), "amount")
+            tax_raw = (request.form.get("tax_amount") or "").strip()
+            tax_amount = parse_decimal(tax_raw, "tax amount") if tax_raw else None
+        except ValueError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("admin.finance_log_restock", movement_id=movement_id))
+
+        finance.log_restock_expense(
+            movement,
+            amount=amount,
+            tax_amount=tax_amount,
+            counterparty=request.form.get("counterparty", ""),
+            created_by=current_user.id,
+        )
+        db.session.commit()
+        flash("Restock expense logged.", "success")
+        return redirect(url_for("admin.finance_dashboard"))
+
+    return render_template(
+        "admin/finance/log_restock.html",
+        movement=movement,
+        suggested_amount=suggested,
+    )
+
+
+@admin_bp.route("/finance/tax-rates")
+@finance_required
+def finance_tax_rates():
+    rates = TaxRate.query.order_by(TaxRate.effective_from.desc()).all()
+    return render_template("admin/finance/tax_rates.html", rates=rates)
+
+
+@admin_bp.route("/finance/tax-rates/add", methods=["POST"])
+@finance_required
+def finance_add_tax_rate():
+    try:
+        rate_percent = parse_decimal(request.form.get("rate_percent"), "rate")
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("admin.finance_tax_rates"))
+
+    code = (request.form.get("code") or "").strip().lower().replace(" ", "_")
+    if not code:
+        flash("Tax rate code is required.", "danger")
+        return redirect(url_for("admin.finance_tax_rates"))
+
+    effective_from = request.form.get("effective_from") or utcnow().date().isoformat()
+    db.session.add(
+        TaxRate(
+            name=(request.form.get("name") or code).strip(),
+            code=code,
+            rate_percent=rate_percent,
+            applies_to=(request.form.get("applies_to") or "sales").strip(),
+            effective_from=date.fromisoformat(effective_from),
+            is_active=True,
+            notes=(request.form.get("notes") or "").strip() or None,
+        )
+    )
+    db.session.commit()
+    flash("Tax rate added. Review applicability with your accountant.", "success")
+    return redirect(url_for("admin.finance_tax_rates"))
+
+
+@admin_bp.route("/finance/export/<report>/<file_format>")
+@finance_required
+def finance_export(report, file_format):
+    import io
+
+    start_date, end_date = _finance_date_range()
+    finance = get_container().finance_service
+    export = get_container().finance_export_service
+    file_format = (file_format or "csv").lower()
+    report = (report or "pnl").lower()
+
+    if report == "pnl":
+        payload = finance.profit_and_loss(start_date=start_date, end_date=end_date)
+        if file_format == "pdf":
+            content = export.profit_and_loss_pdf(payload)
+            mimetype = "application/pdf"
+            filename = f"pnl_{start_date}_{end_date}.pdf"
+        else:
+            content = export.rows_csv(
+                ["Income", "Expenses", "Net Profit"],
+                [[payload["income"], payload["expenses"], payload["net_profit"]]],
+            )
+            mimetype = "text/csv"
+            filename = f"pnl_{start_date}_{end_date}.csv"
+    elif report == "products":
+        rows = finance.product_ledger(start_date=start_date, end_date=end_date)
+        if file_format == "pdf":
+            start, end = finance.profit_and_loss(start_date=start_date, end_date=end_date)["start"], finance.profit_and_loss(start_date=start_date, end_date=end_date)["end"]
+            content = export.product_ledger_pdf(rows, start, end)
+            mimetype = "application/pdf"
+            filename = f"product_ledger_{start_date}_{end_date}.pdf"
+        else:
+            content = export.rows_csv(
+                ["Product", "Units Sold", "Revenue", "COGS", "Gross Profit"],
+                [
+                    [r["product_name"], r["units_sold"], r["revenue"], r["cogs"], r["gross_profit"]]
+                    for r in rows
+                ],
+            )
+            mimetype = "text/csv"
+            filename = f"product_ledger_{start_date}_{end_date}.csv"
+    elif report == "stores":
+        rows = finance.store_ledger(start_date=start_date, end_date=end_date)
+        content = export.rows_csv(
+            ["Store", "Income", "Expenses", "Net"],
+            [[r["store"], r["income"], r["expenses"], r["net"]] for r in rows],
+        )
+        mimetype = "text/csv"
+        filename = f"store_ledger_{start_date}_{end_date}.csv"
+    elif report == "gst":
+        payload = finance.gst_summary(start_date=start_date, end_date=end_date)
+        if file_format == "pdf":
+            content = export.gst_summary_pdf(payload)
+            mimetype = "application/pdf"
+            filename = f"gst_summary_{start_date}_{end_date}.pdf"
+        else:
+            content = export.rows_csv(
+                ["GST Collected", "GST Paid", "Net GST Liability"],
+                [[payload["gst_collected"], payload["gst_paid"], payload["net_gst_liability"]]],
+            )
+            mimetype = "text/csv"
+            filename = f"gst_summary_{start_date}_{end_date}.csv"
+    elif report == "transactions":
+        txns = finance._transactions_in_period(
+            finance.profit_and_loss(start_date=start_date, end_date=end_date)["start"],
+            finance.profit_and_loss(start_date=start_date, end_date=end_date)["end"],
+        )
+        content = export.transactions_csv(txns)
+        mimetype = "text/csv"
+        filename = f"transactions_{start_date}_{end_date}.csv"
+    else:
+        abort(404)
+
+    return send_file(
+        io.BytesIO(content),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=filename,
+    )

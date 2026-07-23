@@ -1,0 +1,32 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Log Restock Expense — Finance{% endblock %}
+{% block content %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1rem">Log Restock Expense</h1>
+<div class="card" style="max-width:720px">
+  <div class="card-body">
+    <p class="text-sm text-muted" style="margin-bottom:1rem">
+      Restock recorded for <strong>{{ movement.raw_material.name if movement.raw_material else 'material' }}</strong>
+      (+{{ movement.change_amount }} {{ movement.raw_material.unit if movement.raw_material else '' }}).
+      Confirm purchase cost — suggested from cost per unit × quantity.
+    </p>
+    <form method="POST">
+      <div class="form-group">
+        <label class="form-label">Purchase amount (INR)</label>
+        <input class="form-control" type="number" step="0.01" min="0" name="amount" value="{{ suggested_amount }}" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Input GST / tax portion (optional)</label>
+        <input class="form-control" type="number" step="0.01" min="0" name="tax_amount">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Vendor / supplier</label>
+        <input class="form-control" name="counterparty" value="{{ movement.raw_material.supplier if movement.raw_material else '' }}">
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="btn btn-primary">Log Expense</button>
+        <a href="{{ url_for('admin.finance_dashboard') }}" class="btn btn-ghost">Skip for now</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

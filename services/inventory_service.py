@@ -242,7 +242,36 @@ class InventoryService:
         )
         db.session.add(movement)
         self._notify_admin_low_stock_crossing(material, previous_stock, new_stock)
+        self._audit_stock_change(
+            movement,
+            material,
+            previous_stock,
+            new_stock,
+            created_by,
+        )
         return movement
+
+    def _audit_stock_change(self, movement, material, previous_stock, new_stock, actor_id):
+        try:
+            from bootstrap import get_container
+
+            get_container().audit_service.log(
+                actor_id,
+                "stock_adjusted",
+                "StockMovement",
+                movement.id,
+                before={"raw_material_id": material.id, "stock": float(previous_stock)},
+                after={
+                    "raw_material_id": material.id,
+                    "stock": float(new_stock),
+                    "change_amount": float(movement.change_amount or 0),
+                    "reason": movement.reason,
+                },
+                branch_id=material.branch_id,
+                change_summary=f"Stock adjusted for {material.name} ({movement.reason})",
+            )
+        except Exception:
+            pass
 
     def increase_raw_material_stock(self, material, quantity, reason="manual_restock", created_by=None):
         change = Decimal(quantity or 0)

@@ -1,0 +1,24 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Store Ledger — Finance{% endblock %}
+{% block content %}
+{% include 'admin/finance/_period_nav.html' %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1rem">Store Ledger</h1>
+<div class="flex gap-2" style="margin-bottom:1rem">
+  <a href="{{ url_for('admin.finance_export', report='stores', file_format='csv', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Export CSV</a>
+</div>
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>Store</th><th>Income</th><th>Expenses</th><th>Net</th></tr></thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.store }}</td>
+      <td>₹{{ row.income|int }}</td>
+      <td>₹{{ row.expenses|int }}</td>
+      <td>₹{{ row.net|int }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="text-center text-muted" style="padding:1.5rem">No store-level transactions in this period.</td></tr>
+    {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

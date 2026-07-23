@@ -1,0 +1,30 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}TDS Summary — Finance{% endblock %}
+{% block content %}
+{% include 'admin/finance/_period_nav.html' %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1rem">TDS / Withholding Summary</h1>
+{% if summary.placeholder_note %}
+<div class="card" style="margin-bottom:1rem;border-left:4px solid var(--caramel)">
+  <div class="card-body text-sm">{{ summary.placeholder_note }}</div>
+</div>
+{% endif %}
+<div class="stat-card brown" style="margin-bottom:1rem;padding:1rem;border-radius:var(--radius-lg)">
+  <div class="stat-value">₹{{ summary.tds_withheld|int }}</div>
+  <div class="stat-label">Total TDS Withheld (from manual expense entries)</div>
+</div>
+{% if summary.rows %}
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>Vendor</th><th>Payment</th><th>TDS</th><th>Date</th></tr></thead>
+  <tbody>
+    {% for row in summary.rows %}
+    <tr>
+      <td>{{ row.counterparty }}</td>
+      <td>₹{{ row.amount|int }}</td>
+      <td>₹{{ row.tds_withheld|int }}</td>
+      <td class="text-sm">{{ row.created_at.strftime('%d %b %Y') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table></div></div>
+{% endif %}
+{% endblock %}
