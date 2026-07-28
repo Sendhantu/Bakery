@@ -14,14 +14,17 @@ def retry_offline_sync_actions():
 
 @celery.task
 def build_inventory_forecasts():
-    forecasts = current_app.extensions["service_container"].forecast_service.build_daily_forecasts()
+    forecasts = current_app.extensions[
+        "service_container"
+    ].forecast_service.build_daily_forecasts()
     return len(forecasts)
 
 
 @celery.task
 def generate_subscription_orders():
-    orders = current_app.extensions["service_container"].subscription_service.create_due_orders()
-    return len(orders)
+    return current_app.extensions[
+        "service_container"
+    ].subscription_service.create_due_orders()
 
 
 @celery.task
@@ -41,7 +44,9 @@ def capture_queue_metrics():
 
 @celery.task
 def verify_backup_health():
-    storage_result = current_app.extensions["service_container"].storage_service.verify_connection()
+    storage_result = current_app.extensions[
+        "service_container"
+    ].storage_service.verify_connection()
     db_result = "ok"
     try:
         db.session.execute(db.select(1))
@@ -50,8 +55,16 @@ def verify_backup_health():
         db.session.rollback()
 
     entries = [
-        BackupVerification(provider="tidb", status=db_result, details=f"checked_at={utcnow().isoformat()}"),
-        BackupVerification(provider="cloudinary", status=storage_result.get("status", "unknown"), details=storage_result.get("error", "")),
+        BackupVerification(
+            provider="tidb",
+            status=db_result,
+            details=f"checked_at={utcnow().isoformat()}",
+        ),
+        BackupVerification(
+            provider="cloudinary",
+            status=storage_result.get("status", "unknown"),
+            details=storage_result.get("error", ""),
+        ),
     ]
     db.session.add_all(entries)
     db.session.commit()
@@ -64,7 +77,10 @@ def aggregate_analytics_snapshot():
     from realtime.events import emit_analytics_updated
 
     total_orders = Order.query.count()
-    total_revenue = sum(float(order.total or 0) for order in Order.query.all())
+    total_revenue = sum(
+        float(order.total or 0) + float(order.gift_card_redemption_amount or 0)
+        for order in Order.query.all()
+    )
     summary = {
         "total_orders": total_orders,
         "total_revenue": total_revenue,
@@ -76,14 +92,30 @@ def aggregate_analytics_snapshot():
 
 
 @celery.task
+def refresh_weather_forecast():
+    forecast = current_app.extensions[
+        "service_container"
+    ].weather_service.refresh_forecast()
+    return {
+        "status": forecast.get("status"),
+        "days": len(forecast.get("daily", [])),
+        "location": forecast.get("location_label"),
+    }
+
+
+@celery.task
 def generate_invoice_pdf(order_id):
-    return current_app.extensions["service_container"].invoice_service.generate_and_store(order_id)
+    return current_app.extensions[
+        "service_container"
+    ].invoice_service.generate_and_store(order_id)
 
 
 @celery.task
 def process_birthday_rewards():
     return len(
-        current_app.extensions["service_container"].loyalty_service.process_birthday_rewards()
+        current_app.extensions[
+            "service_container"
+        ].loyalty_service.process_birthday_rewards()
     )
 
 

@@ -28,7 +28,7 @@
       {% endif %}
     </div>
     <div class="portal-auth-card-body">
-      <form method="POST" action="{{ url_for('auth.login') }}">
+      <form method="POST" action="{{ url_for('auth.login', next=request.args.get('next')) if request.args.get('next') else url_for('auth.login') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
           <label class="form-label">Email Address</label>
@@ -60,23 +60,6 @@
         {% endif %}
       </div>
 
-      {% if show_demo_accounts and current_portal_role != 'customer' %}
-      <div class="portal-auth-note">
-        <strong>Available credentials</strong>
-        {% if current_portal_role == 'admin' %}
-        <span>{{ portal_demo_credentials.admin.email }} / {{ portal_demo_credentials.admin.password }}</span>
-        {% endif %}
-        {% if current_portal_role == 'delivery' %}
-        <span>{{ portal_demo_credentials.delivery.email }} / {{ portal_demo_credentials.delivery.password }}</span>
-        {% endif %}
-      </div>
-      {% endif %}
-
-      {% if current_portal_role == 'customer' %}
-      <div class="portal-auth-note portal-auth-note--soft">
-        Create your own customer account here. Admin and delivery credentials are shown in the terminal output while the portals are running.
-      </div>
-      {% endif %}
     </div>
   </div>
 </div>

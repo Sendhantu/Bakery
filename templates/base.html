@@ -55,6 +55,7 @@
       {% else %}
         <li><a href="{{ url_for('customer.home') }}" {% if request.endpoint == 'customer.home' %}class="active"{% endif %}>Discover</a></li>
         <li><a href="{{ url_for('customer.products') }}" {% if request.endpoint == 'customer.products' %}class="active"{% endif %}>Shop</a></li>
+        <li><a href="{{ url_for('customer.gift_cards') }}" {% if request.endpoint == 'customer.gift_cards' %}class="active"{% endif %}>Gift Cards</a></li>
         {% if current_user.is_authenticated %}
           {% if current_user.role == 'admin' %}
             <li><a href="{{ portal_urls.admin }}/admin/">Admin</a></li>
@@ -92,6 +93,8 @@
               <li><a href="{{ url_for('auth.profile') }}" class="user-dropdown-link">👤 Profile</a></li>
               <li><a href="{{ url_for('customer.order_history') }}" class="user-dropdown-link">📦 My Orders</a></li>
               <li><a href="{{ url_for('customer.subscription') }}" class="user-dropdown-link">⭐ Membership</a></li>
+              <li><a href="{{ url_for('customer.gift_cards') }}" class="user-dropdown-link">🎁 Gift Cards</a></li>
+              <li><a href="{{ url_for('customer.recurring_subscriptions') }}" class="user-dropdown-link">🔁 Recurring Orders</a></li>
               <li><a href="{{ url_for('customer.chat') }}" class="user-dropdown-link">💬 Chat with Us</a></li>
               <li class="user-dropdown-item user-dropdown-item--danger">
                 <a href="{{ url_for('auth.logout') }}" class="user-dropdown-link user-dropdown-link--danger">🚪 Logout</a>
@@ -207,6 +210,8 @@
           <li><a href="{{ url_for('auth.login') }}">Login</a></li>
           <li><a href="{{ url_for('customer.order_history') }}">My Orders</a></li>
           <li><a href="{{ url_for('customer.subscription') }}">Membership</a></li>
+          <li><a href="{{ url_for('customer.gift_cards') }}">Gift Cards</a></li>
+          <li><a href="{{ url_for('customer.recurring_subscriptions') }}">Recurring Orders</a></li>
         </ul>
       </div>
       <div>
@@ -259,8 +264,15 @@
   // Trigger server-side offline sync when navigator becomes online (for admin/delivery portals)
   if (window && 'ononline' in window) {
     function triggerSync() {
+      const pageRole = document.body?.dataset?.pageRole;
+      if (!['admin', 'delivery'].includes(pageRole)) return;
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
       try {
-        fetch('/internal/trigger_offline_sync', { method: 'POST', credentials: 'include' }).catch(()=>{});
+        fetch('/internal/trigger_offline_sync', {
+          method: 'POST',
+          credentials: 'include',
+          headers: csrfToken ? { 'X-CSRFToken': csrfToken } : {}
+        }).catch(()=>{});
       } catch (e) {}
     }
     window.addEventListener('online', triggerSync);

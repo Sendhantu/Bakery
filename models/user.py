@@ -22,6 +22,7 @@ class User(UserMixin, db.Model):
         nullable=False,
     )
     permissions = db.Column(db.Text, default="[]")
+    admin_tier = db.Column(db.String(20), default="owner", nullable=False)
     is_active = db.Column(db.Boolean, default=True)
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
     birthday = db.Column(db.Date)
@@ -103,6 +104,24 @@ class User(UserMixin, db.Model):
     def has_any_role(self, *role_names):
         normalized = {(role or "").strip().lower() for role in role_names}
         return (self.role or "").strip().lower() in normalized
+
+    @property
+    def effective_admin_tier(self):
+        role = (self.role or "").strip().lower()
+        if role == "super_admin":
+            return "owner"
+        if role == "branch_manager":
+            return "manager"
+        if role in {"cashier", "kitchen_staff"}:
+            return "staff"
+        if role == "admin":
+            return (self.admin_tier or "owner").strip().lower() or "owner"
+        return None
+
+    def can_access_admin_tier(self, *tiers):
+        from utils.permissions import admin_tier_meets
+
+        return admin_tier_meets(self, *tiers)
 
     @property
     def loyalty_points(self):

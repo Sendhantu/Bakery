@@ -55,8 +55,13 @@
 	{% block scripts %}{% endblock %}
 <script>
   function _triggerOfflineSync() {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     try {
-      fetch('/internal/trigger_offline_sync', { method: 'POST', credentials: 'include' }).catch(()=>{});
+      fetch('/internal/trigger_offline_sync', {
+        method: 'POST',
+        credentials: 'include',
+        headers: csrfToken ? { 'X-CSRFToken': csrfToken } : {}
+      }).catch(()=>{});
     } catch (e) {}
   }
   window.addEventListener('online', _triggerOfflineSync);

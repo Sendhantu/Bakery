@@ -1,8 +1,12 @@
 {% extends 'admin/base_admin.html' %}
 {% block title %}Finance — Admin{% endblock %}
 {% block content %}
+{% set period_args = {'period': period, 'start_date': start_date, 'end_date': end_date} %}
 <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">💰 Finance</h1>
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">Finance Command Center</h1>
+    <p class="text-sm text-muted" style="margin:0">Sales performance, P&amp;L, ledgers, and tax estimates use one selected period.</p>
+  </div>
   <div class="flex gap-2 flex-wrap">
     <a href="{{ url_for('admin.finance_add_transaction') }}" class="btn btn-primary btn-sm">+ Record Transaction</a>
     <a href="{{ url_for('admin.finance_tax_rates') }}" class="btn btn-outline btn-sm">Tax Rates</a>
@@ -11,39 +15,201 @@
 
 <div class="card" style="margin-bottom:1rem">
   <div class="card-body">
-    <form method="GET" class="flex gap-2 items-end flex-wrap">
+    <form method="GET" class="flex gap-2 items-end flex-wrap" data-finance-period-form>
       <div class="form-group" style="margin:0">
+        <label class="form-label">Period</label>
+        <select class="form-control" name="period" data-finance-period-select>
+          <option value="day" {% if period == 'day' %}selected{% endif %}>Today</option>
+          <option value="week" {% if period == 'week' %}selected{% endif %}>This Week</option>
+          <option value="month" {% if period == 'month' %}selected{% endif %}>This Month</option>
+          <option value="year" {% if period == 'year' %}selected{% endif %}>This Year</option>
+          <option value="financial_year" {% if period == 'financial_year' %}selected{% endif %}>Financial Year</option>
+          <option value="custom" {% if period == 'custom' %}selected{% endif %}>Custom Range</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0" data-finance-custom-date>
         <label class="form-label">From</label>
         <input class="form-control" type="date" name="start_date" value="{{ start_date }}">
       </div>
-      <div class="form-group" style="margin:0">
+      <div class="form-group" style="margin:0" data-finance-custom-date>
         <label class="form-label">To</label>
         <input class="form-control" type="date" name="end_date" value="{{ end_date }}">
       </div>
       <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+      <span class="badge badge-brown">{{ selected_period.label }}: {{ start_date }} to {{ end_date }}</span>
     </form>
-    <p class="text-sm text-muted" style="margin-top:0.75rem;margin-bottom:0">Record-keeping aid only — review all figures with your accountant before filing GST/ITR.</p>
+    <p class="text-sm text-muted" style="margin-top:0.75rem;margin-bottom:0">Record-keeping aid only — financial year in India runs from 1 April to 31 March. Review all figures with your accountant before filing GST or ITR.</p>
   </div>
 </div>
 
+{% if not dashboard.consistency.matches %}
+<div class="flash-msg flash-warning" style="margin-bottom:1rem">
+  <span>⚠️</span>
+  <span>Revenue check needs review: orders ₹{{ dashboard.consistency.order_revenue|int }} vs ledger ₹{{ dashboard.consistency.ledger_revenue|int }}; missing sale ledger entries {{ dashboard.consistency.missing_count }}.</span>
+</div>
+{% endif %}
+
 <div class="stat-grid" style="margin-bottom:1.5rem">
-  <div class="stat-card green"><span class="stat-icon">📈</span><div class="stat-value">₹{{ pnl.income|int }}</div><div class="stat-label">Income</div></div>
+  {% for card in dashboard.period_cards %}
+  <div class="stat-card {% if card.key in ['day','month'] %}green{% elif card.key == 'week' %}orange{% else %}brown{% endif %}">
+    <span class="stat-icon">₹</span>
+    <div class="stat-value">₹{{ card.revenue|int }}</div>
+    <div class="stat-label">{{ card.label }} Revenue</div>
+    <div class="text-sm text-muted">Expense ₹{{ card.expenses|int }} · Net ₹{{ card.net_profit|int }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card green"><span class="stat-icon">📈</span><div class="stat-value">₹{{ pnl.sales_revenue|int }}</div><div class="stat-label">Sales Revenue</div></div>
+  <div class="stat-card brown"><span class="stat-icon">➕</span><div class="stat-value">₹{{ pnl.other_income|int }}</div><div class="stat-label">Other Income</div></div>
   <div class="stat-card rose"><span class="stat-icon">📉</span><div class="stat-value">₹{{ pnl.expenses|int }}</div><div class="stat-label">Expenses</div></div>
-  <div class="stat-card brown"><span class="stat-icon">🧾</span><div class="stat-value">₹{{ pnl.net_profit|int }}</div><div class="stat-label">Net P&amp;L</div></div>
-  <div class="stat-card orange"><span class="stat-icon">🏛</span><div class="stat-value">₹{{ gst.net_gst_liability|int }}</div><div class="stat-label">Net GST (est.)</div></div>
+  <div class="stat-card orange"><span class="stat-icon">🧾</span><div class="stat-value">₹{{ pnl.net_profit|int }}</div><div class="stat-label">Net Profit</div></div>
 </div>
 
 <div class="flex gap-2 flex-wrap" style="margin-bottom:1.5rem">
-  <a href="{{ url_for('admin.finance_product_ledger', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Product Ledger</a>
-  <a href="{{ url_for('admin.finance_store_ledger', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">Store Ledger</a>
-  <a href="{{ url_for('admin.finance_gst_summary', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">GST Summary</a>
-  <a href="{{ url_for('admin.finance_tds_summary', start_date=start_date, end_date=end_date) }}" class="btn btn-outline btn-sm">TDS Summary</a>
-  <a href="{{ url_for('admin.finance_export', report='pnl', file_format='csv', start_date=start_date, end_date=end_date) }}" class="btn btn-ghost btn-sm">Export P&amp;L CSV</a>
-  <a href="{{ url_for('admin.finance_export', report='transactions', file_format='csv', start_date=start_date, end_date=end_date) }}" class="btn btn-ghost btn-sm">Export Transactions CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='dashboard', file_format='csv', **period_args) }}" class="btn btn-outline btn-sm">Export Dashboard CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='dashboard', file_format='pdf', **period_args) }}" class="btn btn-outline btn-sm">Export Dashboard PDF</a>
+  <a href="{{ url_for('admin.finance_export', report='sales', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Sales CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='categories', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Categories CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='products', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Products CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='stores', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Stores CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='vendors', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Vendors CSV</a>
+  <a href="{{ url_for('admin.finance_export', report='gst', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Tax CSV</a>
+  <form method="POST" action="{{ url_for('admin.finance_consistency_check', **period_args) }}" style="display:inline">
+    <button type="submit" class="btn btn-outline btn-sm">Run Consistency Check</button>
+  </form>
 </div>
 
-<div class="card">
-  <div class="card-header">Recent Transactions</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;margin-bottom:1.5rem">
+  <section class="card">
+    <div class="card-header">Sales Performance</div>
+    <div class="card-body">
+      <div class="flex justify-between mb-2"><span class="text-muted">Units sold</span><strong>{{ dashboard.sales.units_sold|sum(attribute='units_sold') }}</strong></div>
+      <div class="flex justify-between mb-2"><span class="text-muted">Best seller by units</span><strong>{{ dashboard.sales.top_sellers.by_units.product_name if dashboard.sales.top_sellers.by_units else '—' }}</strong></div>
+      <div class="flex justify-between mb-3"><span class="text-muted">Best seller by revenue</span><strong>{{ dashboard.sales.top_sellers.by_revenue.product_name if dashboard.sales.top_sellers.by_revenue else '—' }}</strong></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Product</th><th>Units</th><th>Revenue</th></tr></thead>
+          <tbody>
+            {% for row in dashboard.sales.units_sold[:5] %}
+            <tr><td>{{ row.product_name }}</td><td>{{ row.units_sold }}</td><td>₹{{ row.revenue|int }}</td></tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center text-muted">No paid delivered sales in this period.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">Tax Summary</div>
+    <div class="card-body">
+      <div class="flex justify-between mb-2"><span class="text-muted">GST collected</span><strong>₹{{ gst.gst_collected|int }}</strong></div>
+      <div class="flex justify-between mb-2"><span class="text-muted">GST paid</span><strong>₹{{ gst.gst_paid|int }}</strong></div>
+      <div class="flex justify-between mb-2"><span class="text-muted">Net GST liability</span><strong>₹{{ gst.net_gst_liability|int }}</strong></div>
+      <div class="flex justify-between"><span class="text-muted">TDS withheld</span><strong>₹{{ dashboard.tds.tds_withheld|int }}</strong></div>
+    </div>
+  </section>
+</div>
+
+<section class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">Vendor Spend</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Vendor</th><th>Purchases</th><th>Total Spend</th><th>GST Paid</th><th>ITC</th></tr></thead>
+      <tbody>
+        {% for row in dashboard.vendor_spend %}
+        <tr>
+          <td><a href="{{ url_for('admin.vendor_detail', vendor_id=row.vendor_id) }}">{{ row.vendor_name }}</a></td>
+          <td>{{ row.transaction_count }}</td>
+          <td>₹{{ row.total_spend|int }}</td>
+          <td>₹{{ row.gst_paid|int }}</td>
+          <td><span class="badge {% if row.input_tax_credit_eligible %}badge-green{% else %}badge-orange{% endif %}">{{ 'Eligible' if row.input_tax_credit_eligible else 'No GSTIN' }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted">No vendor-linked purchases in this period.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;margin-bottom:1.5rem">
+  <section class="card">
+    <div class="card-header">Income Breakdown</div>
+    <div class="card-body" style="padding:0">
+      {% for row in dashboard.category_breakdown.income %}
+      <div style="padding:0.75rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><span>{{ row.category }}</span><strong>₹{{ row.amount|int }}</strong></div>
+      {% else %}
+      <div style="padding:1.25rem" class="text-muted">No income in this period.</div>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-header">Expense Breakdown</div>
+    <div class="card-body" style="padding:0">
+      {% for row in dashboard.category_breakdown.expenses %}
+      <div style="padding:0.75rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><span>{{ row.category }}</span><strong>₹{{ row.amount|int }}</strong></div>
+      {% else %}
+      <div style="padding:1.25rem" class="text-muted">No expenses in this period.</div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;margin-bottom:1.5rem">
+  <section class="card">
+    <div class="card-header">Product-wise P&amp;L</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Product</th><th>Units</th><th>Revenue</th><th>COGS</th><th>Gross</th></tr></thead>
+        <tbody>
+          {% for row in dashboard.product_ledger[:8] %}
+          <tr><td>{{ row.product_name }}</td><td>{{ row.units_sold }}</td><td>₹{{ row.revenue|int }}</td><td>₹{{ row.cogs|int }}</td><td>₹{{ row.gross_profit|int }}</td></tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted">No product P&amp;L in this period.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-header">Store-wise P&amp;L</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Store</th><th>Income</th><th>Expense</th><th>Net</th></tr></thead>
+        <tbody>
+          {% for row in dashboard.store_ledger %}
+          <tr><td>{{ row.store }}</td><td>₹{{ row.income|int }}</td><td>₹{{ row.expenses|int }}</td><td>₹{{ row.net|int }}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted">No store P&amp;L in this period.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<section class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">Financial Health at a Glance — {{ dashboard.itr_health.label }}</div>
+  <div class="card-body">
+    <div class="stat-grid">
+      <div class="stat-card green"><div class="stat-value">₹{{ dashboard.itr_health.total_income|int }}</div><div class="stat-label">FY Income</div></div>
+      <div class="stat-card rose"><div class="stat-value">₹{{ dashboard.itr_health.total_expenses|int }}</div><div class="stat-label">FY Expenses</div></div>
+      <div class="stat-card brown"><div class="stat-value">₹{{ dashboard.itr_health.net_income|int }}</div><div class="stat-label">FY Net Income</div></div>
+      <div class="stat-card orange"><div class="stat-value">₹{{ dashboard.itr_health.net_tax_liability|int }}</div><div class="stat-label">FY Net Tax</div></div>
+    </div>
+    <div class="flex gap-2 flex-wrap" style="margin-top:1rem">
+      <a href="{{ url_for('admin.finance_export', report='itr', file_format='csv') }}" class="btn btn-outline btn-sm">Export FY Health CSV</a>
+      <a href="{{ url_for('admin.finance_export', report='itr', file_format='pdf') }}" class="btn btn-outline btn-sm">Export FY Health PDF</a>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Recent Transactions in Selected Period</div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Store</th><th>Description</th></tr></thead>
@@ -63,5 +229,9 @@
       </tbody>
     </table>
   </div>
-</div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/finance_dashboard.js') }}"></script>
 {% endblock %}

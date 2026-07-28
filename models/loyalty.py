@@ -6,20 +6,20 @@ from .base import db
 # ─────────────────────────────────────────
 # LOYALTY CONSTANTS
 # ─────────────────────────────────────────
-LOYALTY_EARN_RATE   = 1       # 1 point per ₹10 spent
-LOYALTY_EARN_PER    = 10      # ₹10 = 1 point
-LOYALTY_REDEEM_RATE = 10      # 100 points = ₹10 off
-LOYALTY_REDEEM_PER  = 100     # 100 points minimum to redeem
-LOYALTY_POINTS_TTL_DAYS = 365 # points expire after 1 year
+LOYALTY_EARN_RATE = 1  # 1 point per ₹10 spent
+LOYALTY_EARN_PER = 10  # ₹10 = 1 point
+LOYALTY_REDEEM_RATE = 10  # 100 points = ₹10 off
+LOYALTY_REDEEM_PER = 100  # 100 points minimum to redeem
+LOYALTY_POINTS_TTL_DAYS = 365  # points expire after 1 year
 
 
 def get_loyalty_config():
     defaults = {
-        'LOYALTY_EARN_RATE': LOYALTY_EARN_RATE,
-        'LOYALTY_EARN_PER': LOYALTY_EARN_PER,
-        'LOYALTY_REDEEM_RATE': LOYALTY_REDEEM_RATE,
-        'LOYALTY_REDEEM_PER': LOYALTY_REDEEM_PER,
-        'LOYALTY_EXPIRY_DAYS': LOYALTY_POINTS_TTL_DAYS,
+        "LOYALTY_EARN_RATE": LOYALTY_EARN_RATE,
+        "LOYALTY_EARN_PER": LOYALTY_EARN_PER,
+        "LOYALTY_REDEEM_RATE": LOYALTY_REDEEM_RATE,
+        "LOYALTY_REDEEM_PER": LOYALTY_REDEEM_PER,
+        "LOYALTY_EXPIRY_DAYS": LOYALTY_POINTS_TTL_DAYS,
     }
     if not has_app_context():
         return defaults
@@ -35,8 +35,8 @@ def get_loyalty_config():
 
 def calculate_loyalty_redemption(points_requested, subtotal, available_points=None):
     loyalty = get_loyalty_config()
-    redeem_per = max(1, loyalty['LOYALTY_REDEEM_PER'])
-    redeem_rate = max(1, loyalty['LOYALTY_REDEEM_RATE'])
+    redeem_per = max(1, loyalty["LOYALTY_REDEEM_PER"])
+    redeem_rate = max(1, loyalty["LOYALTY_REDEEM_RATE"])
 
     try:
         points_requested = int(points_requested or 0)
@@ -60,38 +60,41 @@ def calculate_loyalty_redemption(points_requested, subtotal, available_points=No
     discount = (points_applied // redeem_per) * redeem_rate if redeem_per else 0
 
     return {
-        'points_requested': normalized_points,
-        'points_applied': points_applied,
-        'discount': round(float(discount), 2),
-        'requested_discount': round(float((normalized_points // redeem_per) * redeem_rate if redeem_per else 0), 2),
-        'max_allowed_discount': max_allowed_discount,
-        'capped': points_applied < normalized_points,
-        'redeem_per': redeem_per,
-        'redeem_rate': redeem_rate,
+        "points_requested": normalized_points,
+        "points_applied": points_applied,
+        "discount": round(float(discount), 2),
+        "requested_discount": round(
+            float((normalized_points // redeem_per) * redeem_rate if redeem_per else 0),
+            2,
+        ),
+        "max_allowed_discount": max_allowed_discount,
+        "capped": points_applied < normalized_points,
+        "redeem_per": redeem_per,
+        "redeem_rate": redeem_rate,
     }
 
 
 class LoyaltyLedger(db.Model):
-    __tablename__ = 'loyalty_ledger'
-    id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    order_id   = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=True)
-    points     = db.Column(db.Integer, nullable=False)          # +earn / -redeem
-    reason     = db.Column(db.String(100), nullable=False)      # 'order_earned', 'redeemed', 'admin_adj', 'expired'
+    __tablename__ = "loyalty_ledger"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=True)
+    points = db.Column(db.Integer, nullable=False)  # +earn / -redeem
+    reason = db.Column(
+        db.String(100), nullable=False
+    )  # 'order_earned', 'redeemed', 'admin_adj', 'expired'
     created_at = db.Column(db.DateTime, default=utcnow)
     expires_at = db.Column(db.DateTime, nullable=True)
 
-    __table_args__ = (
-        db.Index('idx_loyalty_user', 'user_id'),
-    )
+    __table_args__ = (db.Index("idx_loyalty_user", "user_id"),)
 
     @classmethod
     def earn(cls, user_id, order_id, order_total):
         """Award points for a completed order."""
         loyalty = get_loyalty_config()
-        earn_per = max(1, loyalty['LOYALTY_EARN_PER'])
-        earn_rate = max(1, loyalty['LOYALTY_EARN_RATE'])
-        expiry_days = max(1, loyalty['LOYALTY_EXPIRY_DAYS'])
+        earn_per = max(1, loyalty["LOYALTY_EARN_PER"])
+        earn_rate = max(1, loyalty["LOYALTY_EARN_RATE"])
+        expiry_days = max(1, loyalty["LOYALTY_EXPIRY_DAYS"])
 
         pts = int(float(order_total) // earn_per) * earn_rate
         if pts <= 0:
@@ -100,8 +103,8 @@ class LoyaltyLedger(db.Model):
             user_id=user_id,
             order_id=order_id,
             points=pts,
-            reason='order_earned',
-            expires_at=utcnow() + timedelta(days=expiry_days)
+            reason="order_earned",
+            expires_at=utcnow() + timedelta(days=expiry_days),
         )
         db.session.add(entry)
         return pts
@@ -110,31 +113,32 @@ class LoyaltyLedger(db.Model):
     def redeem(cls, user_id, order_id, points_to_redeem):
         """Deduct points at redemption. Returns ₹ discount or raises ValueError."""
         loyalty = get_loyalty_config()
-        redeem_per = max(1, loyalty['LOYALTY_REDEEM_PER'])
-        redeem_rate = max(1, loyalty['LOYALTY_REDEEM_RATE'])
+        redeem_per = max(1, loyalty["LOYALTY_REDEEM_PER"])
+        redeem_rate = max(1, loyalty["LOYALTY_REDEEM_RATE"])
 
         if points_to_redeem < redeem_per:
-            raise ValueError(f'Minimum {redeem_per} points required to redeem.')
+            raise ValueError(f"Minimum {redeem_per} points required to redeem.")
 
         from .user import User
+
         user = db.session.get(User, user_id)
         if user is None:
-            raise ValueError('User not found.')
+            raise ValueError("User not found.")
         if user.loyalty_points < points_to_redeem:
-            raise ValueError('Not enough loyalty points.')
+            raise ValueError("Not enough loyalty points.")
 
         discount = (points_to_redeem // redeem_per) * redeem_rate
         entry = cls(
             user_id=user_id,
             order_id=order_id,
             points=-points_to_redeem,
-            reason='redeemed',
+            reason="redeemed",
         )
         db.session.add(entry)
         return discount
 
     @classmethod
-    def admin_adjust(cls, user_id, points, reason='admin_adj'):
+    def admin_adjust(cls, user_id, points, reason="admin_adj"):
         entry = cls(user_id=user_id, points=points, reason=reason)
         db.session.add(entry)
         return entry

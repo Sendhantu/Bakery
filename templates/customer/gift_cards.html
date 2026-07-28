@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block title %}Gift Cards — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="container">
+    <div class="flex justify-between items-center mb-4">
+      <div>
+        <h1 class="section-title mb-1">Gift Cards</h1>
+        <p class="text-muted">Buy stored-value gift cards for yourself or someone you love.</p>
+      </div>
+    </div>
+
+    <div class="page-grid">
+      <section class="card">
+        <div class="card-header">Buy a Gift Card</div>
+        <div class="card-body">
+          <form method="POST" action="{{ url_for('customer.gift_cards') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+              <label class="form-label">Amount</label>
+              <input class="form-control" name="amount" type="number" min="50" step="0.01" placeholder="500" required>
+              <p class="text-sm text-muted mt-1">Expiry is intentionally unset; configure a store policy before adding expiry dates.</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Recipient Email</label>
+              <input class="form-control" name="recipient_email" type="email" value="{{ current_user.email }}" placeholder="name@example.com">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Message</label>
+              <textarea class="form-control" name="message" rows="3" placeholder="Optional note"></textarea>
+            </div>
+            <button class="btn btn-primary" type="submit">Buy Gift Card</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">Purchased Cards</div>
+        <div class="card-body">
+          {% if cards %}
+          <div class="table-responsive">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Initial</th>
+                  <th>Balance</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for card in cards %}
+                <tr>
+                  <td><strong>{{ card.code }}</strong></td>
+                  <td>₹{{ '%.2f'|format(card.initial_value or 0) }}</td>
+                  <td>₹{{ '%.2f'|format(card.current_balance or 0) }}</td>
+                  <td><span class="badge badge-brown">{{ card.status|title }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="text-muted">No gift cards purchased yet.</p>
+          {% endif %}
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}

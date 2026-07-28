@@ -1,0 +1,35 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Purchase Orders — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Purchase Orders</h1>
+    <p class="text-muted">Restock history tied to vendors, inventory, and finance.</p>
+  </div>
+  {% if can_admin_manager %}
+  <a href="{{ url_for('admin.new_purchase_order') }}" class="btn btn-primary btn-sm">New Purchase Order</a>
+  {% endif %}
+</div>
+
+<section class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>PO</th><th>Vendor</th><th>Date</th><th>Expected</th><th>Status</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for po in purchase_orders %}
+        <tr>
+          <td><a href="{{ url_for('admin.purchase_order_detail', order_id=po.id) }}">#{{ po.id }}</a></td>
+          <td>{{ po.vendor.name }}</td>
+          <td>{{ po.order_date.strftime('%d %b %Y') }}</td>
+          <td>{{ po.expected_delivery_date.strftime('%d %b %Y') if po.expected_delivery_date else '—' }}</td>
+          <td><span class="badge badge-brown">{{ po.status }}</span></td>
+          <td>₹{{ po.subtotal|int }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted" style="padding:1rem">No purchase orders yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

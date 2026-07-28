@@ -102,7 +102,9 @@ class OfflineSyncService:
 
         # Also check Redis if configured for stronger online detection
         try:
-            redis_url = self.app.config.get("REDIS_URL") or self.app.config.get("SOCKETIO_MESSAGE_QUEUE")
+            redis_url = self.app.config.get("REDIS_URL") or self.app.config.get(
+                "SOCKETIO_MESSAGE_QUEUE"
+            )
             if redis_url:
                 from redis import Redis
 
@@ -241,7 +243,15 @@ class OfflineSyncService:
             )
             connection.commit()
 
-    def record_conflict(self, request_id, entity_type, entity_id, action_type, local_payload, remote_payload):
+    def record_conflict(
+        self,
+        request_id,
+        entity_type,
+        entity_id,
+        action_type,
+        local_payload,
+        remote_payload,
+    ):
         if not self.enabled:
             return
         with self.lock, self._connect() as connection:
@@ -327,9 +337,9 @@ class OfflineSyncService:
                 "phone": order.phone,
                 "city": order.city,
                 "total": float(order.total or 0),
-                "delivery_date": order.delivery_date.isoformat()
-                if order.delivery_date
-                else None,
+                "delivery_date": (
+                    order.delivery_date.isoformat() if order.delivery_date else None
+                ),
                 "delivery_slot": order.delivery_slot,
                 "version": order.version,
             },
@@ -371,7 +381,13 @@ class OfflineSyncService:
         )
 
     def queue_variant_stock_update_by_id(
-        self, variant_id, stock, *, actor_id=None, expected_version=None, snapshot_payload=None
+        self,
+        variant_id,
+        stock,
+        *,
+        actor_id=None,
+        expected_version=None,
+        snapshot_payload=None,
     ):
         request_id = self.queue_action(
             "update_variant_stock",
@@ -381,9 +397,13 @@ class OfflineSyncService:
             expected_version=expected_version,
         )
         if snapshot_payload is None:
-            snapshot_payload = self.get_snapshot("variants", variant_id) or {"id": variant_id}
+            snapshot_payload = self.get_snapshot("variants", variant_id) or {
+                "id": variant_id
+            }
             snapshot_payload["stock"] = int(stock)
-            snapshot_payload["version"] = expected_version or snapshot_payload.get("version")
+            snapshot_payload["version"] = expected_version or snapshot_payload.get(
+                "version"
+            )
         self.cache_snapshot("variants", variant_id, snapshot_payload)
         return request_id
 
@@ -405,7 +425,13 @@ class OfflineSyncService:
         )
 
     def queue_material_stock_update_by_id(
-        self, material_id, stock, *, actor_id=None, expected_version=None, snapshot_payload=None
+        self,
+        material_id,
+        stock,
+        *,
+        actor_id=None,
+        expected_version=None,
+        snapshot_payload=None,
     ):
         request_id = self.queue_action(
             "update_raw_material_stock",
@@ -415,9 +441,13 @@ class OfflineSyncService:
             expected_version=expected_version,
         )
         if snapshot_payload is None:
-            snapshot_payload = self.get_snapshot("raw_materials", material_id) or {"id": material_id}
+            snapshot_payload = self.get_snapshot("raw_materials", material_id) or {
+                "id": material_id
+            }
             snapshot_payload["stock"] = float(stock)
-            snapshot_payload["version"] = expected_version or snapshot_payload.get("version")
+            snapshot_payload["version"] = expected_version or snapshot_payload.get(
+                "version"
+            )
         self.cache_snapshot("raw_materials", material_id, snapshot_payload)
         return request_id
 
@@ -436,14 +466,22 @@ class OfflineSyncService:
                 "phone": order.phone,
                 "city": order.city,
                 "total": float(order.total or 0),
-                "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
+                "delivery_date": (
+                    order.delivery_date.isoformat() if order.delivery_date else None
+                ),
                 "delivery_slot": order.delivery_slot,
                 "version": order.version,
             },
         )
 
     def queue_order_status_update_by_id(
-        self, order_id, new_status, *, actor_id=None, expected_version=None, snapshot_payload=None
+        self,
+        order_id,
+        new_status,
+        *,
+        actor_id=None,
+        expected_version=None,
+        snapshot_payload=None,
     ):
         request_id = self.queue_action(
             "update_order_status",
@@ -455,7 +493,9 @@ class OfflineSyncService:
         if snapshot_payload is None:
             snapshot_payload = self.get_snapshot("orders", order_id) or {"id": order_id}
             snapshot_payload["status"] = new_status
-            snapshot_payload["version"] = expected_version or snapshot_payload.get("version")
+            snapshot_payload["version"] = expected_version or snapshot_payload.get(
+                "version"
+            )
         self.cache_snapshot("orders", order_id, snapshot_payload)
         return request_id
 
@@ -477,7 +517,13 @@ class OfflineSyncService:
         )
 
     def queue_delivery_status_update_by_id(
-        self, delivery_id, new_status, *, actor_id=None, expected_version=None, snapshot_payload=None
+        self,
+        delivery_id,
+        new_status,
+        *,
+        actor_id=None,
+        expected_version=None,
+        snapshot_payload=None,
     ):
         request_id = self.queue_action(
             "update_delivery_status",
@@ -487,9 +533,13 @@ class OfflineSyncService:
             expected_version=expected_version,
         )
         if snapshot_payload is None:
-            snapshot_payload = self.get_snapshot("deliveries", delivery_id) or {"id": delivery_id}
+            snapshot_payload = self.get_snapshot("deliveries", delivery_id) or {
+                "id": delivery_id
+            }
             snapshot_payload["status"] = new_status
-            snapshot_payload["version"] = expected_version or snapshot_payload.get("version")
+            snapshot_payload["version"] = expected_version or snapshot_payload.get(
+                "version"
+            )
         self.cache_snapshot("deliveries", delivery_id, snapshot_payload)
         return request_id
 
@@ -509,7 +559,9 @@ class OfflineSyncService:
                 "phone": order.phone,
                 "city": order.city,
                 "total": float(order.total or 0),
-                "delivery_date": order.delivery_date.isoformat() if order.delivery_date else None,
+                "delivery_date": (
+                    order.delivery_date.isoformat() if order.delivery_date else None
+                ),
                 "delivery_slot": order.delivery_slot,
                 "version": order.version,
             },
@@ -539,7 +591,9 @@ class OfflineSyncService:
         if snapshot_payload is None:
             snapshot_payload = self.get_snapshot("orders", order_id) or {"id": order_id}
             snapshot_payload["payment_status"] = "PAID"
-            snapshot_payload["version"] = expected_version or snapshot_payload.get("version")
+            snapshot_payload["version"] = expected_version or snapshot_payload.get(
+                "version"
+            )
         self.cache_snapshot("orders", order_id, snapshot_payload)
         return request_id
 
@@ -550,10 +604,21 @@ class OfflineSyncService:
         synced = 0
         conflicts = 0
         retried = 0
-        for action in self.pending_actions(limit=limit or self.app.config.get("SYNC_BATCH_SIZE", 50)):
+        for action in self.pending_actions(
+            limit=limit or self.app.config.get("SYNC_BATCH_SIZE", 50)
+        ):
             request_id = action["request_id"]
             payload = json.loads(action["payload_json"])
-            self.app.logger.debug("offline_sync_attempt", extra={"request_id": request_id, "action": action["action_type"], "entity": action.get("entity_type"), "entity_id": action.get("entity_id"), "attempts": action.get("attempts", 0)})
+            self.app.logger.debug(
+                "offline_sync_attempt",
+                extra={
+                    "request_id": request_id,
+                    "action": action["action_type"],
+                    "entity": action.get("entity_type"),
+                    "entity_id": action.get("entity_id"),
+                    "attempts": action.get("attempts", 0),
+                },
+            )
             try:
                 self._apply_action(
                     request_id=request_id,
@@ -566,12 +631,18 @@ class OfflineSyncService:
                 db.session.commit()
                 synced += 1
             except ValidationError as exc:
-                self.app.logger.warning("offline_sync_retry", exc_info=exc, extra={"request_id": request_id})
+                self.app.logger.warning(
+                    "offline_sync_retry", exc_info=exc, extra={"request_id": request_id}
+                )
                 self.mark_retry(request_id, exc)
                 db.session.rollback()
                 retried += 1
             except ConflictError as exc:
-                self.app.logger.warning("offline_sync_conflict", exc_info=exc, extra={"request_id": request_id})
+                self.app.logger.warning(
+                    "offline_sync_conflict",
+                    exc_info=exc,
+                    extra={"request_id": request_id},
+                )
                 self.record_conflict(
                     request_id,
                     exc.entity_type,
@@ -583,12 +654,18 @@ class OfflineSyncService:
                 db.session.commit()
                 conflicts += 1
             except SQLAlchemyError as exc:
-                self.app.logger.error("offline_sync_error", exc_info=exc, extra={"request_id": request_id})
+                self.app.logger.error(
+                    "offline_sync_error", exc_info=exc, extra={"request_id": request_id}
+                )
                 self.mark_retry(request_id, exc)
                 db.session.rollback()
                 retried += 1
             except Exception as exc:  # pragma: no cover
-                self.app.logger.exception("offline_sync_unexpected", exc_info=exc, extra={"request_id": request_id})
+                self.app.logger.exception(
+                    "offline_sync_unexpected",
+                    exc_info=exc,
+                    extra={"request_id": request_id},
+                )
                 self.mark_retry(request_id, exc)
                 db.session.rollback()
                 retried += 1
@@ -602,21 +679,31 @@ class OfflineSyncService:
             db.session.commit()
         return {"synced": synced, "conflicts": conflicts, "retried": retried}
 
-    def _apply_action(self, *, request_id, action_type, entity_id, payload, expected_version):
+    def _apply_action(
+        self, *, request_id, action_type, entity_id, payload, expected_version
+    ):
         if self.audit_service.already_processed(request_id):
             return
 
         if action_type == "update_variant_stock":
-            self._apply_variant_stock_update(request_id, entity_id, payload, expected_version)
+            self._apply_variant_stock_update(
+                request_id, entity_id, payload, expected_version
+            )
             return
         if action_type == "update_raw_material_stock":
-            self._apply_raw_material_stock_update(request_id, entity_id, payload, expected_version)
+            self._apply_raw_material_stock_update(
+                request_id, entity_id, payload, expected_version
+            )
             return
         if action_type == "update_order_status":
-            self._apply_order_status_update(request_id, entity_id, payload, expected_version)
+            self._apply_order_status_update(
+                request_id, entity_id, payload, expected_version
+            )
             return
         if action_type == "update_delivery_status":
-            self._apply_delivery_status_update(request_id, entity_id, payload, expected_version)
+            self._apply_delivery_status_update(
+                request_id, entity_id, payload, expected_version
+            )
             return
         if action_type == "collect_cod_payment":
             self._apply_cod_collection(request_id, entity_id, payload, expected_version)
@@ -640,7 +727,9 @@ class OfflineSyncService:
                 },
             )
 
-    def _apply_variant_stock_update(self, request_id, entity_id, payload, expected_version):
+    def _apply_variant_stock_update(
+        self, request_id, entity_id, payload, expected_version
+    ):
         variant = db.session.get(ProductVariant, int(entity_id))
         if variant is None:
             raise ValidationError("Product variant not found during sync.")
@@ -659,7 +748,9 @@ class OfflineSyncService:
         )
         self.cache_variant(variant)
 
-    def _apply_raw_material_stock_update(self, request_id, entity_id, payload, expected_version):
+    def _apply_raw_material_stock_update(
+        self, request_id, entity_id, payload, expected_version
+    ):
         material = db.session.get(RawMaterial, int(entity_id))
         if material is None:
             raise ValidationError("Raw material not found during sync.")
@@ -678,7 +769,9 @@ class OfflineSyncService:
         )
         self.cache_material(material)
 
-    def _apply_order_status_update(self, request_id, entity_id, payload, expected_version):
+    def _apply_order_status_update(
+        self, request_id, entity_id, payload, expected_version
+    ):
         order = db.session.get(Order, int(entity_id))
         if order is None:
             raise ValidationError("Order not found during sync.")
@@ -697,7 +790,9 @@ class OfflineSyncService:
         )
         self.cache_order(order)
 
-    def _apply_delivery_status_update(self, request_id, entity_id, payload, expected_version):
+    def _apply_delivery_status_update(
+        self, request_id, entity_id, payload, expected_version
+    ):
         delivery = db.session.get(Delivery, int(entity_id))
         if delivery is None:
             raise ValidationError("Delivery not found during sync.")
@@ -732,22 +827,28 @@ class OfflineSyncService:
         try:
             from utils.optimistic import assert_version
 
-            assert_version(payment, payload.get("expected_payment_version"), entity_name='Payment')
+            assert_version(
+                payment, payload.get("expected_payment_version"), entity_name="Payment"
+            )
         except Exception:
             # convert into ConflictError expected by calling code
             raise ConflictError(
-                entity_type='Payment',
-                entity_id=getattr(payment, 'id', None),
+                entity_type="Payment",
+                entity_id=getattr(payment, "id", None),
                 remote_payload={
-                    "id": getattr(payment, 'id', None),
-                    "version": int(getattr(payment, 'version', 0) or 0),
+                    "id": getattr(payment, "id", None),
+                    "version": int(getattr(payment, "version", 0) or 0),
                 },
             )
 
         payment.amount = payload["amount"]
         payment.method = f"COD_{str(payload.get('payment_mode', 'CASH')).upper()}"
-        payment.transaction_id = payment.transaction_id or f"COD-SYNC-{uuid.uuid4().hex[:10].upper()}"
-        payment.transition_to("PAID", actor_id=payload.get("actor_id"), reason="offline_cod_sync")
+        payment.transaction_id = (
+            payment.transaction_id or f"COD-SYNC-{uuid.uuid4().hex[:10].upper()}"
+        )
+        payment.transition_to(
+            "PAID", actor_id=payload.get("actor_id"), reason="offline_cod_sync"
+        )
         order.mark_status_change()
         self.audit_service.record(
             "offline_cod_collection_sync",
@@ -756,7 +857,10 @@ class OfflineSyncService:
             actor_id=payload.get("actor_id"),
             branch_id=order.branch_id,
             request_id=request_id,
-            metadata={"payment_status": order.payment_status, "amount": payload["amount"]},
+            metadata={
+                "payment_status": order.payment_status,
+                "amount": payload["amount"],
+            },
             change_summary="COD payment synced after offline collection",
         )
         self.cache_order(order)
@@ -782,70 +886,68 @@ class OfflineSyncService:
                 "actor_id": actor_id,
             },
         )
-        snapshot = self.get_snapshot("variants", variant_id) or {"id": variant_id, "stock": 0}
+        snapshot = self.get_snapshot("variants", variant_id) or {
+            "id": variant_id,
+            "stock": 0,
+        }
         snapshot["stock"] = max(0, int(snapshot.get("stock", 0)) - int(quantity))
         self.cache_snapshot("variants", variant_id, snapshot)
         return request_id
 
     def _apply_pos_sale(self, request_id, payload):
-        walkin_email = "walkin@sweetcrumbs.local"
         variant = db.session.get(ProductVariant, int(payload["variant_id"]))
         if variant is None or variant.product is None:
             raise ValidationError("POS variant not found during sync.")
         quantity = max(1, int(payload["quantity"]))
-        if int(variant.stock or 0) < quantity:
-            raise ValidationError("Insufficient stock to sync POS sale.")
 
-        customer = User.query.filter_by(email=walkin_email).first()
+        customer_phone = payload.get("customer_phone") or ""
+        customer = None
+        if customer_phone:
+            customer = User.query.filter_by(
+                phone=customer_phone,
+                role="customer",
+                is_active=True,
+            ).first()
         if customer is None:
             customer = User(
                 name="Walk-in Customer",
-                email=walkin_email,
+                email=f"walkin-{uuid.uuid4().hex[:10]}@sweetcrumbs.local",
                 role="customer",
                 is_active=True,
-                phone=payload.get("customer_phone") or None,
+                phone=customer_phone or None,
             )
             db.session.add(customer)
             db.session.flush()
 
-        subtotal = variant.price * quantity
-        order = Order(
-            order_number=Order.generate_order_number(),
+        from bootstrap import get_container
+
+        order_service = get_container().order_service
+        line = order_service.build_line_from_variant(variant, quantity)
+        subtotal = line.unit_price * line.quantity
+        creation = order_service.create_order(
             user_id=customer.id,
-            source="POS",
-            status="DELIVERED",
-            fulfillment_type="PICKUP",
-            payment_method=str(payload.get("payment_mode") or "CASH").upper(),
-            payment_status="PAID",
+            branch_id=self.app.config.get("DEFAULT_BRANCH_ID"),
+            lines=[line],
             subtotal=subtotal,
             total=subtotal,
+            payment_method=str(payload.get("payment_mode") or "CASH").upper(),
+            payment_status="PAID",
+            status="DELIVERED",
+            channel="counter",
+            source="POS",
+            fulfillment_type="PICKUP",
             address_line1=self.app.config["STORE_DETAILS"].get("address_line1", ""),
+            address_line2=self.app.config["STORE_DETAILS"].get("address_line2", ""),
             city=self.app.config["STORE_DETAILS"].get("city", ""),
             pincode=self.app.config["STORE_DETAILS"].get("pincode", ""),
-            phone=payload.get("customer_phone") or self.app.config["STORE_DETAILS"].get("phone_tel", ""),
+            phone=customer_phone
+            or self.app.config["STORE_DETAILS"].get("phone_tel", ""),
             delivery_slot="Walk-in",
             delivery_date=utcnow().date(),
+            actor_id=payload.get("actor_id"),
+            payment_reason="offline_pos_sync",
         )
-        db.session.add(order)
-        db.session.flush()
-        db.session.add(
-            OrderItem(
-                order_id=order.id,
-                product_id=variant.product_id,
-                variant_id=variant.id,
-                product_name=variant.product.name,
-                variant_name=variant.name,
-                quantity=quantity,
-                unit_price=variant.price,
-                subtotal=subtotal,
-            )
-        )
-        variant.stock = max(0, int(variant.stock or 0) - quantity)
-        variant.version = int(variant.version or 0) + 1
-        payment = Payment(order_id=order.id, amount=subtotal, method=order.payment_method)
-        db.session.add(payment)
-        db.session.flush()
-        payment.transition_to("PAID", actor_id=payload.get("actor_id"), reason="offline_pos_sync")
+        order = creation.order
         self.audit_service.record(
             "offline_pos_sale_sync",
             "Order",
@@ -866,7 +968,10 @@ class OfflineSyncService:
 
         local_payload = json.loads(conflict.local_payload or "{}")
         entity_id = conflict.entity_id
-        if resolution == "accept_local" and conflict.action_type == "update_variant_stock":
+        if (
+            resolution == "accept_local"
+            and conflict.action_type == "update_variant_stock"
+        ):
             variant = db.session.get(ProductVariant, int(entity_id))
             if variant:
                 variant.stock = int(local_payload.get("stock", variant.stock))

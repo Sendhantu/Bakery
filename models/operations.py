@@ -73,6 +73,50 @@ class InventoryForecast(db.Model):
     )
 
 
+class LocalEvent(db.Model):
+    __tablename__ = "local_events"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False)
+    event_date = db.Column(db.Date, nullable=False)
+    expected_impact = db.Column(db.String(20), nullable=False, default="medium")
+    notes = db.Column(db.Text)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    creator = db.relationship("User")
+
+    __table_args__ = (
+        db.Index("idx_local_events_date", "event_date"),
+        db.Index("idx_local_events_impact_date", "expected_impact", "event_date"),
+    )
+
+
+class WeatherSnapshot(db.Model):
+    __tablename__ = "weather_snapshots"
+    id = db.Column(db.Integer, primary_key=True)
+    forecast_date = db.Column(db.Date, nullable=False)
+    source = db.Column(db.String(40), nullable=False, default="openweathermap")
+    location_label = db.Column(db.String(160))
+    condition = db.Column(db.String(80))
+    description = db.Column(db.String(160))
+    temp_min_c = db.Column(db.Numeric(5, 2))
+    temp_max_c = db.Column(db.Numeric(5, 2))
+    humidity_avg = db.Column(db.Numeric(5, 2))
+    precipitation_probability = db.Column(db.Numeric(5, 2))
+    fetched_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "forecast_date",
+            "source",
+            "location_label",
+            name="uq_weather_snapshot_scope",
+        ),
+        db.Index("idx_weather_snapshot_date", "forecast_date"),
+    )
+
+
 class DeliveryRoutePlan(db.Model):
     __tablename__ = "delivery_route_plans"
     id = db.Column(db.Integer, primary_key=True)

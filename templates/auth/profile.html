@@ -3,6 +3,19 @@
 {% block content %}
 <div class="page-wrap"><div class="container" style="max-width:800px">
   <h1 class="section-title mb-4">👤 My Profile</h1>
+  {% if current_user.role == 'customer' %}
+  <div class="card" style="margin-bottom:2rem">
+    <div class="card-header">⭐ Loyalty Rewards</div>
+    <div class="card-body">
+      <div class="stat-grid">
+        <div class="stat-card green"><div class="stat-value">{{ current_user.loyalty_points }}</div><div class="stat-label">Available Points</div></div>
+        <div class="stat-card brown"><div class="stat-value">{{ current_user.loyalty_tier }}</div><div class="stat-label">Rewards Tier</div></div>
+        <div class="stat-card orange"><div class="stat-value">₹{{ loyalty_config.LOYALTY_REDEEM_RATE }}</div><div class="stat-label">Per {{ loyalty_config.LOYALTY_REDEEM_PER }} Points</div></div>
+      </div>
+      <p class="text-sm text-muted" style="margin-top:0.75rem;margin-bottom:0">Earn {{ loyalty_config.LOYALTY_EARN_RATE }} point{% if loyalty_config.LOYALTY_EARN_RATE != 1 %}s{% endif %} for every ₹{{ loyalty_config.LOYALTY_EARN_PER }} on paid delivered orders. Coupons and loyalty discounts can stack at checkout when all rules are met.</p>
+    </div>
+  </div>
+  {% endif %}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
     <div class="card">
       <div class="card-header">Edit Profile</div>

@@ -1,48 +1,71 @@
-from models import Order, OrderItem, ProductVariant, Payment, db
-from exceptions import ValidationError
 from decimal import Decimal
+import uuid
+
+from clock import utcnow
+from exceptions import ValidationError
+from models import ProductVariant, User, db
+
 
 class POSService:
-    def create_pos_sale(self, variant_id, quantity, payment_mode='CASH', customer_phone='', actor_id=None):
-        variant = db.get_or_404(ProductVariant, variant_id)
-        unit_price = variant.price
-        subtotal = unit_price * quantity
-        # Minimal POS implementation: create order, items, payment, adjust stock
-        with db.session.begin():
-            # create walk-in customer placeholder
-            from models import User
-            customer = User.query.filter_by(email='walkin@sweetcrumbs.local').first()
-            if not customer:
-                customer = User(name='Walk-in Customer', email='walkin@sweetcrumbs.local', role='customer', is_active=True, phone=customer_phone or None)
-                db.session.add(customer)
-                db.session.flush()
-            order = Order(order_number=Order.generate_order_number(), user_id=customer.id, source='POS', status='DELIVERED', payment_method=payment_mode, payment_status='PAID', subtotal=subtotal, total=subtotal)
-            db.session.add(order)
-            db.session.flush()
-            db.session.add(OrderItem(order_id=order.id, product_id=variant.product_id, variant_id=variant.id, product_name=variant.product.name, variant_name=variant.name, quantity=quantity, unit_price=unit_price, subtotal=subtotal))
-            variant.stock = max(0, int(variant.stock or 0) - quantity)
-            payment = Payment(order_id=order.id, amount=subtotal, method=payment_mode)
-            db.session.add(payment)
-            db.session.flush()
-            payment.transition_to('PAID', actor_id=actor_id, reason='pos_sale')
-            try:
-                from bootstrap import get_container
+    def create_pos_sale(
+        self,
+        variant_id,
+        quantity,
+        payment_mode="CASH",
+        customer_phone="",
+        actor_id=None,
+    ):
+        from bootstrap import get_container
 
-                get_container().audit_service.log(
-                    actor_id,
-                    "pos_sale_created",
-                    "Order",
-                    order.id,
-                    before=None,
-                    after={
-                        "order_number": order.order_number,
-                        "variant_id": variant_id,
-                        "quantity": quantity,
-                        "payment_mode": payment_mode,
-                        "total": subtotal,
-                    },
-                    change_summary=f"POS sale for order #{order.order_number}",
-                )
-            except Exception:
-                pass
-        return order
+        variant = db.session.get(ProductVariant, int(variant_id))
+        if variant is None:
+            raise ValidationError("POS variant not found.")
+
+        customer = None
+        customer_phone = (customer_phone or "").strip()
+        if customer_phone:
+            customer = User.query.filter_by(
+                phone=customer_phone,
+                role="customer",
+                is_active=True,
+            ).first()
+        if customer is None:
+            customer = User(
+                name="Walk-in Customer",
+                email=f"walkin-{uuid.uuid4().hex[:10]}@sweetcrumbs.local",
+                role="customer",
+                is_active=True,
+                phone=customer_phone or None,
+            )
+            db.session.add(customer)
+            db.session.flush()
+
+        order_service = get_container().order_service
+        line = order_service.build_line_from_variant(variant, quantity)
+        subtotal = Decimal(str(line.unit_price)) * line.quantity
+        store_details = get_container().app.config["STORE_DETAILS"]
+        with db.session.begin_nested():
+            creation = order_service.create_order(
+                user_id=customer.id,
+                branch_id=get_container().app.config.get("DEFAULT_BRANCH_ID"),
+                lines=[line],
+                subtotal=subtotal,
+                total=subtotal,
+                payment_method=payment_mode,
+                payment_status="PAID",
+                status="DELIVERED",
+                channel="counter",
+                source="POS",
+                fulfillment_type="PICKUP",
+                address_line1=store_details.get("address_line1", ""),
+                address_line2=store_details.get("address_line2", ""),
+                city=store_details.get("city", ""),
+                pincode=store_details.get("pincode", ""),
+                phone=customer_phone or store_details.get("phone_tel", ""),
+                delivery_slot="Walk-in",
+                delivery_date=utcnow().date(),
+                actor_id=actor_id,
+                payment_reason="pos_sale",
+            )
+        db.session.commit()
+        return creation.order

@@ -2,6 +2,8 @@
 
 A complete, production-grade bakery management and e-commerce platform built with Flask, featuring hybrid cloud deployment, offline-first operations, mobile delivery support, and enterprise-grade operational tooling.
 
+For an internal developer-focused map of the codebase, data flows, services, models, realtime events, permissions, tests, and known limitations, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## 🏗️ Architecture Overview
 
 ### Hybrid Deployment Model

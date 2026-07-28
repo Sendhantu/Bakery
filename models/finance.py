@@ -16,7 +16,9 @@ class FinancialCategory(db.Model):
     sort_order = db.Column(db.Integer, default=0, nullable=False)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
-    transactions = db.relationship("FinancialTransaction", backref="category", lazy="dynamic")
+    transactions = db.relationship(
+        "FinancialTransaction", backref="category", lazy="dynamic"
+    )
 
 
 class TaxRate(db.Model):
@@ -40,13 +42,21 @@ class FinancialTransaction(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     transaction_type = db.Column(db.String(20), nullable=False)
-    category_id = db.Column(db.Integer, db.ForeignKey("financial_categories.id"), nullable=False)
+    category_id = db.Column(
+        db.Integer, db.ForeignKey("financial_categories.id"), nullable=False
+    )
     amount = db.Column(EncryptedDecimal, nullable=False)
     tax_amount = db.Column(EncryptedDecimal)
     description = db.Column(EncryptedText)
     counterparty = db.Column(EncryptedText)
     reference_order_id = db.Column(db.Integer, db.ForeignKey("orders.id"))
-    reference_stock_movement_id = db.Column(db.Integer, db.ForeignKey("stock_movements.id"))
+    reference_stock_movement_id = db.Column(
+        db.Integer, db.ForeignKey("stock_movements.id")
+    )
+    reference_purchase_order_id = db.Column(
+        db.Integer, db.ForeignKey("purchase_orders.id")
+    )
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"))
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
     store_location = db.Column(db.String(150))
     tds_withheld = db.Column(EncryptedDecimal)
@@ -56,7 +66,13 @@ class FinancialTransaction(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     order = db.relationship("Order", foreign_keys=[reference_order_id])
-    stock_movement = db.relationship("StockMovement", foreign_keys=[reference_stock_movement_id])
+    stock_movement = db.relationship(
+        "StockMovement", foreign_keys=[reference_stock_movement_id]
+    )
+    purchase_order = db.relationship(
+        "PurchaseOrder", foreign_keys=[reference_purchase_order_id]
+    )
+    vendor = db.relationship("Vendor", foreign_keys=[vendor_id])
     branch = db.relationship("Branch", foreign_keys=[branch_id])
     creator = db.relationship("User", foreign_keys=[created_by])
 
@@ -65,6 +81,8 @@ class FinancialTransaction(db.Model):
         db.Index("idx_fin_txn_branch_created", "branch_id", "created_at"),
         db.Index("idx_fin_txn_order", "reference_order_id"),
         db.Index("idx_fin_txn_movement", "reference_stock_movement_id"),
+        db.Index("idx_fin_txn_purchase_order", "reference_purchase_order_id"),
+        db.Index("idx_fin_txn_vendor_created", "vendor_id", "created_at"),
     )
 
 
@@ -83,5 +101,7 @@ class TaxRecord(db.Model):
     computed_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
     __table_args__ = (
-        db.UniqueConstraint("period_type", "period_start", "period_end", name="uq_tax_record_period"),
+        db.UniqueConstraint(
+            "period_type", "period_start", "period_end", name="uq_tax_record_period"
+        ),
     )

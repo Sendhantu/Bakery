@@ -1,0 +1,91 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}{{ vendor.name }} — Vendor{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">{{ vendor.name }}</h1>
+    <p class="text-muted">{{ vendor.contact_person or 'No contact person' }} · {{ vendor.phone or vendor.email or 'No contact details' }}</p>
+  </div>
+  {% if can_admin_manager %}
+  <a href="{{ url_for('admin.new_purchase_order') }}?vendor_id={{ vendor.id }}" class="btn btn-primary btn-sm">New Purchase Order</a>
+  {% endif %}
+</div>
+
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card brown"><div class="stat-value">₹{{ spend.total_spend|int if spend else 0 }}</div><div class="stat-label">Total Spend</div></div>
+  <div class="stat-card green"><div class="stat-value">₹{{ spend.gst_paid|int if spend else 0 }}</div><div class="stat-label">GST Paid</div></div>
+  <div class="stat-card orange"><div class="stat-value">{{ purchase_orders|length }}</div><div class="stat-label">Purchase Orders</div></div>
+  <div class="stat-card {% if vendor.gstin %}green{% else %}rose{% endif %}"><div class="stat-value">{{ 'Yes' if vendor.gstin else 'No' }}</div><div class="stat-label">GST Registered</div></div>
+</div>
+
+{% if not vendor.gstin %}
+<div class="flash-msg flash-warning" style="margin-bottom:1rem">
+  <span>GSTIN missing: input tax credit likely does not apply for purchases from this vendor.</span>
+</div>
+{% endif %}
+
+<div class="page-grid page-grid-sidebar">
+  <section class="card">
+    <div class="card-header">Purchase History</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>PO</th><th>Date</th><th>Status</th><th>Items</th><th>Total</th></tr></thead>
+        <tbody>
+          {% for po in purchase_orders %}
+          <tr>
+            <td><a href="{{ url_for('admin.purchase_order_detail', order_id=po.id) }}">#{{ po.id }}</a></td>
+            <td>{{ po.order_date.strftime('%d %b %Y') }}</td>
+            <td><span class="badge badge-brown">{{ po.status }}</span></td>
+            <td>{{ po.items.count() }}</td>
+            <td>₹{{ po.subtotal|int }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted" style="padding:1rem">No purchase orders yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="card">
+    <div class="card-header">Vendor Details</div>
+    <div class="card-body">
+      {% if can_admin_manager %}
+      <form method="POST" action="{{ url_for('admin.edit_vendor', vendor_id=vendor.id) }}">
+        <div class="form-group"><label class="form-label">Name</label><input class="form-control" name="name" value="{{ vendor.name }}" required></div>
+        <div class="form-group"><label class="form-label">Contact Person</label><input class="form-control" name="contact_person" value="{{ vendor.contact_person or '' }}"></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Phone</label><input class="form-control" name="phone" value="{{ vendor.phone or '' }}"></div>
+          <div class="form-group"><label class="form-label">Email</label><input class="form-control" name="email" value="{{ vendor.email or '' }}"></div>
+        </div>
+        <div class="form-group"><label class="form-label">GSTIN</label><input class="form-control" name="gstin" value="{{ vendor.gstin or '' }}"></div>
+        <div class="form-group"><label class="form-label">Payment Terms</label><input class="form-control" name="payment_terms" value="{{ vendor.payment_terms or '' }}"></div>
+        <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" name="address" rows="3">{{ vendor.address or '' }}</textarea></div>
+        <label class="flex gap-2 items-center mb-3"><input type="checkbox" name="is_active" {% if vendor.is_active %}checked{% endif %}> Active</label>
+        <button class="btn btn-primary btn-block" type="submit">Save Vendor</button>
+      </form>
+      {% else %}
+      <p><strong>Terms:</strong> {{ vendor.payment_terms or '—' }}</p>
+      <p><strong>GSTIN:</strong> {{ vendor.gstin or '—' }}</p>
+      <p class="text-muted">Manager access is required to edit vendor records.</p>
+      {% endif %}
+    </div>
+  </aside>
+</div>
+
+<section class="card" style="margin-top:1.5rem">
+  <div class="card-header">Typical Raw Material Costs</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Raw Material</th><th>Typical Cost</th><th>Last Cost</th><th>Updated</th></tr></thead>
+      <tbody>
+        {% for row in typical_costs %}
+        <tr><td>{{ row.raw_material.name }}</td><td>₹{{ row.typical_unit_cost|int if row.typical_unit_cost else 0 }}</td><td>₹{{ row.last_unit_cost|int if row.last_unit_cost else 0 }}</td><td>{{ row.updated_at.strftime('%d %b %Y') if row.updated_at else '—' }}</td></tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No received purchase history yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

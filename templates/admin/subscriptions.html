@@ -1,36 +1,93 @@
 {% extends 'admin/base_admin.html' %}
-{% block title %}Subscriptions — Admin{% endblock %}
+{% block title %}Subscriptions - Admin{% endblock %}
 {% block content %}
+<div class="flex justify-between items-center mb-4">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Subscriptions</h1>
+    <p class="text-muted">Recurring order demand, failed cycles, and existing Sweet Club memberships.</p>
+  </div>
+</div>
+
 <div class="card">
-  <div class="card-header">Recurring Subscriptions</div>
+  <div class="card-header">Recurring Order Subscriptions</div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Customer</th><th>Plan</th><th>Status</th><th>Next Billing</th></tr></thead>
+      <thead><tr><th>Customer</th><th>Items</th><th>Frequency</th><th>Status</th><th>Next Date</th><th>Payment</th></tr></thead>
       <tbody>
-        {% for subscription in subscriptions %}
+        {% for subscription in recurring_subscriptions %}
         <tr>
-          <td>{{ subscription.user.name }}</td>
-          <td>{{ subscription.plan|title }}</td>
+          <td>{{ subscription.user.name }}<br><span class="text-sm text-muted">{{ subscription.user.phone or subscription.user.email }}</span></td>
+          <td>
+            {% for item in subscription.items.all() %}
+            <div>{{ item.quantity }} x {{ item.product.name }}{% if item.variant %} / {{ item.variant.name }}{% endif %}</div>
+            {% endfor %}
+          </td>
+          <td>{{ subscription.frequency|title }}{% if subscription.days_of_week %}<br><span class="text-sm text-muted">{{ subscription.days_of_week }}</span>{% endif %}</td>
           <td>{{ subscription.status|title }}</td>
-          <td>{{ subscription.next_billing_at or '—' }}</td>
+          <td>{{ subscription.next_scheduled_date.strftime('%d %b %Y') }}</td>
+          <td>{{ subscription.payment_method_reference|replace('_', ' ')|title }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No subscriptions yet.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted" style="padding:1rem">No recurring order subscriptions yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
 <div class="card mt-3">
-  <div class="card-header">Schedule Health</div>
+  <div class="card-header">Failed Subscription Cycles</div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Subscription</th><th>Next Run</th><th>Status</th><th>Last Generated</th></tr></thead>
+      <thead><tr><th>Attempted</th><th>Subscription</th><th>Customer</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for log in failed_logs %}
+        <tr>
+          <td>{{ log.attempted_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td>#{{ log.subscription_id }}</td>
+          <td>{{ log.subscription.user.name if log.subscription and log.subscription.user else '-' }}</td>
+          <td>{{ log.status|replace('_', ' ')|title }}</td>
+          <td>{{ log.notes or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted" style="padding:1rem">No failed cycles.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header">Sweet Club Memberships</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Customer</th><th>Plan</th><th>Status</th><th>Next Billing</th></tr></thead>
+      <tbody>
+        {% for subscription in memberships %}
+        <tr>
+          <td>{{ subscription.user.name }}</td>
+          <td>{{ subscription.plan|title }}</td>
+          <td>{{ subscription.status|title }}</td>
+          <td>{{ subscription.next_billing_at or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No memberships yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header">Legacy Membership Schedule Health</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Membership</th><th>Next Run</th><th>Status</th><th>Last Generated</th></tr></thead>
       <tbody>
         {% for schedule in schedules %}
-        <tr><td>#{{ schedule.subscription_id }}</td><td>{{ schedule.next_run_at }}</td><td>{{ schedule.status|title }}</td><td>{{ schedule.last_generated_at or '—' }}</td></tr>
+        <tr><td>#{{ schedule.subscription_id }}</td><td>{{ schedule.next_run_at }}</td><td>{{ schedule.status|title }}</td><td>{{ schedule.last_generated_at or '-' }}</td></tr>
         {% else %}
-        <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No schedules yet.</td></tr>
+        <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No legacy schedules.</td></tr>
         {% endfor %}
       </tbody>
     </table>

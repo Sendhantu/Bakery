@@ -119,6 +119,8 @@
     <div class="card">
       <div class="card-header">💳 Payment Summary</div>
       <div class="card-body">
+        {% set earned_entry = order.loyalty_entries.filter_by(reason='order_earned').first() %}
+        {% set redeemed_entry = order.loyalty_entries.filter_by(reason='redeemed').first() %}
         <div class="flex justify-between mb-1"><span class="text-muted">Subtotal</span><span>₹{{ order.subtotal|int }}</span></div>
         {% if order.discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Discount</span><span>−₹{{ order.discount|int }}</span></div>{% endif %}
         {% if order.loyalty_discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Loyalty Discount</span><span>−₹{{ order.loyalty_discount|int }}</span></div>{% endif %}
@@ -132,6 +134,14 @@
         <span class="text-sm text-muted ml-1">· {{ order.payment.method.replace('COD_', 'Collected via ') }}</span>
         {% endif %}
       </div>
+      {% if earned_entry or redeemed_entry %}
+      <div style="margin-top:1rem;padding:0.75rem;background:var(--cream);border-radius:var(--radius-lg);font-size:0.9rem">
+        {% if earned_entry %}<div class="flex justify-between"><span>⭐ Points earned</span><strong>+{{ earned_entry.points }}</strong></div>{% endif %}
+        {% if redeemed_entry %}<div class="flex justify-between"><span>Points redeemed</span><strong>{{ redeemed_entry.points }}</strong></div>{% endif %}
+      </div>
+      {% elif order.status == 'DELIVERED' and order.payment_status == 'PAID' %}
+      <p class="text-sm text-muted mt-2">Loyalty points will appear shortly after completion.</p>
+      {% endif %}
       {% if pending_payment_link %}
       <a href="{{ url_for('customer.payment_link_page', token=pending_payment_link.token) }}" class="btn btn-outline btn-block mt-3">Continue to Payment Page</a>
       <p class="text-sm text-muted mt-1">This order payment stays pending until your gateway integration is connected.</p>

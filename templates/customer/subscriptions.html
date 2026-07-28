@@ -1,0 +1,188 @@
+{% extends 'base.html' %}
+{% block title %}Recurring Orders - {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="container" style="max-width:1100px">
+    <h1 class="section-title text-center mb-1">Recurring Orders</h1>
+    <p class="section-subtitle text-center">Schedule repeat bakery orders. Each cycle creates a real order with stock checked from the same inventory pool.</p>
+
+    <div class="alert alert-info mb-4">
+      Auto-charge is not enabled yet. Recurring cycles are created as payment-pending orders with a payment link, so you can complete each cycle manually.
+    </div>
+
+    <div class="page-grid page-grid-sidebar">
+      <section>
+        <div class="card mb-3">
+          <div class="card-header">Your Recurring Orders</div>
+          <div class="card-body">
+            {% for subscription in subscriptions %}
+            {% set item = subscription.items.first() %}
+            <div class="card mb-3">
+              <div class="card-body">
+                <div class="flex justify-between items-start gap-3 flex-wrap">
+                  <div>
+                    <h3 style="margin:0 0 0.35rem">{{ item.product.name if item and item.product else 'Subscription' }}</h3>
+                    <p class="text-muted text-sm" style="margin:0">
+                      Qty {{ item.quantity if item else 0 }} · {{ subscription.frequency|title }}
+                      {% if subscription.frequency == 'custom' and subscription.days_of_week %}({{ subscription.days_of_week }}){% endif %}
+                      · Next {{ subscription.next_scheduled_date.strftime('%d %b %Y') }}
+                    </p>
+                    <p class="text-sm mt-1" style="margin-bottom:0">Status: <strong>{{ subscription.status|title }}</strong></p>
+                  </div>
+                  <div class="flex gap-2 flex-wrap">
+                    {% if subscription.status == 'active' %}
+                    <form method="POST" action="{{ url_for('customer.change_recurring_subscription_status', subscription_id=subscription.id, action='pause') }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-outline btn-sm" type="submit">Pause</button>
+                    </form>
+                    {% elif subscription.status == 'paused' %}
+                    <form method="POST" action="{{ url_for('customer.change_recurring_subscription_status', subscription_id=subscription.id, action='resume') }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-primary btn-sm" type="submit">Resume</button>
+                    </form>
+                    {% endif %}
+                    {% if subscription.status != 'cancelled' %}
+                    <form method="POST" action="{{ url_for('customer.change_recurring_subscription_status', subscription_id=subscription.id, action='cancel') }}" data-confirm="Cancel this recurring order?">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-outline btn-sm" type="submit">Cancel</button>
+                    </form>
+                    {% endif %}
+                  </div>
+                </div>
+                {% if subscription.status != 'cancelled' %}
+                <details class="mt-3">
+                  <summary>Edit recurring order</summary>
+                  <form method="POST" action="{{ url_for('customer.update_recurring_subscription', subscription_id=subscription.id) }}" class="mt-3">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label">Product</label>
+                        <select class="form-control" name="variant_id">
+                          {% for variant in variants %}
+                          <option value="{{ variant.id }}" {% if item and item.variant_id == variant.id %}selected{% endif %}>{{ variant.product.name }} - {{ variant.name }} - ₹{{ '%.2f'|format(variant.price or 0) }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Quantity</label>
+                        <input class="form-control" type="number" name="quantity" min="1" value="{{ item.quantity if item else 1 }}">
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label">Frequency</label>
+                        <select class="form-control" name="frequency">
+                          {% for value in ['daily','weekly','monthly','custom'] %}
+                          <option value="{{ value }}" {% if subscription.frequency == value %}selected{% endif %}>{{ value|title }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Next Date</label>
+                        <input class="form-control" type="date" name="next_scheduled_date" value="{{ subscription.next_scheduled_date.isoformat() }}">
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Custom Days</label>
+                      <div class="flex gap-2 flex-wrap">
+                        {% for value, label in [('0','Mon'),('1','Tue'),('2','Wed'),('3','Thu'),('4','Fri'),('5','Sat'),('6','Sun')] %}
+                        <label class="text-sm"><input type="checkbox" name="days_of_week" value="{{ value }}" {% if value in (subscription.days_of_week or '').split(',') %}checked{% endif %}> {{ label }}</label>
+                        {% endfor %}
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Delivery Window</label>
+                      <input class="form-control" name="delivery_window" value="{{ subscription.delivery_window or '' }}">
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Notes</label>
+                      <input class="form-control" name="notes" value="{{ subscription.notes or '' }}">
+                    </div>
+                    <button class="btn btn-primary" type="submit">Save Changes</button>
+                  </form>
+                </details>
+                {% endif %}
+              </div>
+            </div>
+            {% else %}
+            <p class="text-muted">No recurring orders yet.</p>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">Recent Cycle History</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Status</th><th>Order</th><th>Notes</th></tr></thead>
+              <tbody>
+                {% for log in logs %}
+                <tr>
+                  <td>{{ log.attempted_at.strftime('%d %b %Y %H:%M') }}</td>
+                  <td>{{ log.status|replace('_', ' ')|title }}</td>
+                  <td>{% if log.order_id %}<a href="{{ url_for('customer.order_detail', order_id=log.order_id) }}">#{{ log.order.order_number }}</a>{% else %}-{% endif %}</td>
+                  <td>{{ log.notes or '-' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No cycle history yet.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <aside class="card">
+        <div class="card-header">Create Recurring Order</div>
+        <div class="card-body">
+          <form method="POST" action="{{ url_for('customer.create_recurring_subscription') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+              <label class="form-label">Product</label>
+              <select class="form-control" name="variant_id">
+                {% for variant in variants %}
+                <option value="{{ variant.id }}">{{ variant.product.name }} - {{ variant.name }} - ₹{{ '%.2f'|format(variant.price or 0) }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Quantity</label>
+              <input class="form-control" type="number" name="quantity" min="1" value="1">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Frequency</label>
+              <select class="form-control" name="frequency">
+                <option value="weekly">Weekly</option>
+                <option value="daily">Daily</option>
+                <option value="monthly">Monthly</option>
+                <option value="custom">Custom days</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Custom Days</label>
+              <div class="flex gap-2 flex-wrap">
+                {% for value, label in [('0','Mon'),('1','Tue'),('2','Wed'),('3','Thu'),('4','Fri'),('5','Sat'),('6','Sun')] %}
+                <label class="text-sm"><input type="checkbox" name="days_of_week" value="{{ value }}"> {{ label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">First Date</label>
+              <input class="form-control" type="date" name="next_scheduled_date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Delivery Window</label>
+              <input class="form-control" name="delivery_window" placeholder="Morning, evening, etc.">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Notes</label>
+              <input class="form-control" name="notes" placeholder="Optional">
+            </div>
+            <button class="btn btn-primary btn-block" type="submit">Create</button>
+          </form>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -3,8 +3,8 @@
 {% block content %}
 <div class="flex justify-between items-center mb-4">
   <div>
-    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">👥 Staff & Shifts</h1>
-    <p class="text-muted">Staff accounts, attendance, shift scheduling, and salary tracking.</p>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">👥 Admin Staff</h1>
+    <p class="text-muted">Owner-only admin account tiers, attendance, shift scheduling, and salary tracking.</p>
   </div>
 </div>
 <div class="page-grid page-grid-sidebar">
@@ -13,15 +13,32 @@
       <div class="card-header">Current Staff</div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Role</th><th>Branch</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Tier</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {% for staff_user in staff_users %}
             <tr>
               <td>{{ staff_user.name }}<br><span class="text-muted text-sm">{{ staff_user.email }}</span></td>
-              <td>{{ staff_user.role.replace('_', ' ')|title }}</td>
+              <td>
+                <form method="POST" action="{{ url_for('admin.update_staff_tier', user_id=staff_user.id) }}" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+                  <select class="form-control" name="admin_tier" style="min-width:120px">
+                    {% for tier in edit_tier_options %}
+                    <option value="{{ tier }}" {% if staff_user.effective_admin_tier == tier %}selected{% endif %}>{{ tier|title }}</option>
+                    {% endfor %}
+                  </select>
+                  <button class="btn btn-outline btn-sm" type="submit">Save</button>
+                </form>
+                <span class="text-muted text-sm">{{ staff_user.role.replace('_', ' ')|title }}</span>
+              </td>
               <td>{{ staff_user.branch.name if staff_user.branch else 'Main' }}</td>
               <td><span class="badge {% if staff_user.is_active %}badge-green{% else %}badge-red{% endif %}">{{ 'Active' if staff_user.is_active else 'Inactive' }}</span></td>
+              <td>
+                <form method="POST" action="{{ url_for('admin.toggle_staff_access', user_id=staff_user.id) }}" data-confirm="{% if staff_user.is_active %}Deactivate this admin account?{% else %}Reactivate this admin account?{% endif %}">
+                  <button class="btn btn-ghost btn-sm" type="submit">{{ 'Deactivate' if staff_user.is_active else 'Reactivate' }}</button>
+                </form>
+              </td>
             </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-center text-muted" style="padding:1rem">No admin staff accounts found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -45,16 +62,16 @@
   </section>
   <aside style="display:flex;flex-direction:column;gap:1rem">
     <div class="card">
-      <div class="card-header">Add Staff Member</div>
+      <div class="card-header">Create Admin Account</div>
       <div class="card-body">
         <form method="POST" action="{{ url_for('admin.add_staff_member') }}">
           <div class="form-group"><label class="form-label">Name</label><input class="form-control" name="name"></div>
           <div class="form-group"><label class="form-label">Email</label><input class="form-control" name="email" type="email"></div>
           <div class="form-group"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
-          <div class="form-group"><label class="form-label">Role</label><select class="form-control" name="role">{% for role in role_options %}<option value="{{ role }}">{{ role.replace('_', ' ')|title }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label class="form-label">Admin tier</label><select class="form-control" name="admin_tier">{% for tier in tier_options %}<option value="{{ tier }}">{{ tier|title }}</option>{% endfor %}</select></div>
           <div class="form-group"><label class="form-label">Branch</label><select class="form-control" name="branch_id"><option value="">Main</option>{% for branch in branches %}<option value="{{ branch.id }}">{{ branch.name }}</option>{% endfor %}</select></div>
           <div class="form-group"><label class="form-label">Password</label><input class="form-control" name="password" type="password"></div>
-          <button class="btn btn-primary btn-block" type="submit">Create Staff Account</button>
+          <button class="btn btn-primary btn-block" type="submit">Create Admin Account</button>
         </form>
       </div>
     </div>
@@ -62,7 +79,7 @@
       <div class="card-header">Schedule Shift</div>
       <div class="card-body">
         <form method="POST" action="{{ url_for('admin.add_staff_shift') }}">
-          <div class="form-group"><label class="form-label">Staff</label><select class="form-control" name="user_id">{% for staff_user in staff_users %}<option value="{{ staff_user.id }}">{{ staff_user.name }} · {{ staff_user.role.replace('_', ' ')|title }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label class="form-label">Staff</label><select class="form-control" name="user_id">{% for staff_user in staff_users %}<option value="{{ staff_user.id }}">{{ staff_user.name }} · {{ staff_user.effective_admin_tier|title }}</option>{% endfor %}</select></div>
           <div class="form-group"><label class="form-label">Date</label><input class="form-control" name="shift_date" type="date"></div>
           <div class="form-row">
             <div class="form-group"><label class="form-label">Start</label><input class="form-control" name="start_time" type="time"></div>

@@ -25,6 +25,8 @@
       {% for item in order.preview_items %}
       <span class="badge badge-brown">{{ item.product_name }} ×{{ item.quantity }}</span>
       {% endfor %}
+      {% set earned_entry = order.loyalty_entries.filter_by(reason='order_earned').first() %}
+      {% if earned_entry %}<span class="badge badge-green">+{{ earned_entry.points }} points</span>{% endif %}
       {% if order.preview_remaining > 0 %}<span class="text-sm text-muted">+{{ order.preview_remaining }} more</span>{% endif %}
     </div>
   </div>

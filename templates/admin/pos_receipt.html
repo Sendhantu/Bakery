@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Receipt {{ order.order_number }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; color: #2c2418; background: #fdf6ec; }
+    main { max-width: 420px; margin: 0 auto; padding: 24px; background: #fff; min-height: 100vh; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    .muted { color: #766858; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; margin: 18px 0; }
+    th, td { border-bottom: 1px solid #eadfce; padding: 8px 0; text-align: left; font-size: 13px; }
+    td:last-child, th:last-child { text-align: right; }
+    .total { display: flex; justify-content: space-between; font-size: 18px; font-weight: 700; margin-top: 12px; }
+    .actions { margin-top: 20px; display: flex; gap: 8px; }
+    button, a { border: 1px solid #6f4e37; border-radius: 8px; background: #6f4e37; color: #fff; padding: 9px 12px; text-decoration: none; font-size: 14px; }
+    a { background: #fff; color: #6f4e37; }
+    @media print {
+      body, main { background: #fff; }
+      main { max-width: none; padding: 0; }
+      .actions { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>SweetCrumbs Receipt</h1>
+    <div class="muted">Order {{ order.order_number }}</div>
+    <div class="muted">{{ order.placed_at.strftime('%d-%m-%Y %H:%M') if order.placed_at else '' }}</div>
+    <div class="muted">Customer: {{ order.customer.name if order.customer else 'Walk-in Customer' }}</div>
+    <div class="muted">Payment: {{ order.payment_method }} · {{ order.payment_status }}</div>
+
+    <table>
+      <thead>
+        <tr><th>Item</th><th>Qty</th><th>Total</th></tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td>{{ item.product_name }}{% if item.variant_name %}<br><span class="muted">{{ item.variant_name }}</span>{% endif %}</td>
+          <td>{{ item.quantity }}</td>
+          <td>₹{{ '%.2f'|format(item.subtotal or 0) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="total">
+      <span>Total</span>
+      <span>₹{{ '%.2f'|format(order.total or 0) }}</span>
+    </div>
+
+    <p class="muted">GST invoice requirements can vary by registration and sale details; confirm final compliance wording with your accountant.</p>
+
+    <div class="actions">
+      <button type="button" onclick="window.print()">Print</button>
+      <a href="{{ url_for('admin.pos') }}">Back to POS</a>
+    </div>
+  </main>
+</body>
+</html>

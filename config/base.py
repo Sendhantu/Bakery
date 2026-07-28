@@ -71,7 +71,7 @@ class BaseConfig:
         },
         "subscription-order-generator": {
             "task": "tasks.operations.generate_subscription_orders",
-            "schedule": 60 * 15,
+            "schedule": 60 * 60 * 24,
         },
         "offline-sync-retry": {
             "task": "tasks.operations.retry_offline_sync_actions",
@@ -88,6 +88,10 @@ class BaseConfig:
         "analytics-aggregate": {
             "task": "tasks.operations.aggregate_analytics_snapshot",
             "schedule": 60 * 30,
+        },
+        "weather-forecast-refresh": {
+            "task": "tasks.operations.refresh_weather_forecast",
+            "schedule": 60 * 60 * 6,
         },
         "birthday-loyalty-rewards": {
             "task": "tasks.operations.process_birthday_rewards",
@@ -108,9 +112,7 @@ class BaseConfig:
     REDIS_CLIENT_OPTIONS = build_redis_client_options()
 
     SOCKETIO_ASYNC_MODE = os.environ.get("SOCKETIO_ASYNC_MODE", "threading")
-    SOCKETIO_CORS_ALLOWED_ORIGINS = os.environ.get(
-        "SOCKETIO_CORS_ALLOWED_ORIGINS", "*"
-    )
+    SOCKETIO_CORS_ALLOWED_ORIGINS = os.environ.get("SOCKETIO_CORS_ALLOWED_ORIGINS", "*")
 
     MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
     MAIL_PORT = int(os.environ.get("MAIL_PORT", 587))
@@ -134,13 +136,35 @@ class BaseConfig:
     CLOUDINARY_CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "")
     CLOUDINARY_API_KEY = os.environ.get("CLOUDINARY_API_KEY", "")
     CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET", "")
-    PRODUCT_IMAGE_FOLDER = os.environ.get("PRODUCT_IMAGE_FOLDER", "sweetcrumbs/products")
+    PRODUCT_IMAGE_FOLDER = os.environ.get(
+        "PRODUCT_IMAGE_FOLDER", "sweetcrumbs/products"
+    )
 
     SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
     SLOW_QUERY_THRESHOLD_MS = int(os.environ.get("SLOW_QUERY_THRESHOLD_MS", 250))
 
     GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
     ROUTE_CACHE_TTL_SECONDS = int(os.environ.get("ROUTE_CACHE_TTL_SECONDS", 900))
+    OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY", "")
+    WEATHER_API_URL = os.environ.get(
+        "WEATHER_API_URL",
+        "https://api.openweathermap.org/data/2.5/forecast",
+    )
+    WEATHER_FORECAST_TTL_SECONDS = int(
+        os.environ.get("WEATHER_FORECAST_TTL_SECONDS", 60 * 60 * 6)
+    )
+    WEATHER_REQUEST_TIMEOUT_SECONDS = int(
+        os.environ.get("WEATHER_REQUEST_TIMEOUT_SECONDS", 5)
+    )
+    STORE_LATITUDE = os.environ.get("STORE_LATITUDE", "").strip()
+    STORE_LONGITUDE = os.environ.get("STORE_LONGITUDE", "").strip()
+    STORE_COUNTRY_CODE = os.environ.get("STORE_COUNTRY_CODE", "IN").strip() or "IN"
+    HOT_DAY_THRESHOLD_C = float(os.environ.get("HOT_DAY_THRESHOLD_C", "35"))
+    DEMAND_MIN_HISTORY_DAYS = int(os.environ.get("DEMAND_MIN_HISTORY_DAYS", 21))
+    DEMAND_MIN_MATCHING_DAYS = int(os.environ.get("DEMAND_MIN_MATCHING_DAYS", 3))
+    OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1")
+    DEMAND_USE_OLLAMA = env_flag("DEMAND_USE_OLLAMA", default=False)
 
     FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "")
     FIREBASE_CLIENT_EMAIL = os.environ.get("FIREBASE_CLIENT_EMAIL", "")
@@ -166,9 +190,7 @@ class BaseConfig:
     OFFLINE_CACHE_MAX_AGE_SECONDS = int(
         os.environ.get("OFFLINE_CACHE_MAX_AGE_SECONDS", 86400)
     )
-    SYNC_RETRY_INTERVAL_SECONDS = int(
-        os.environ.get("SYNC_RETRY_INTERVAL_SECONDS", 30)
-    )
+    SYNC_RETRY_INTERVAL_SECONDS = int(os.environ.get("SYNC_RETRY_INTERVAL_SECONDS", 30))
     SYNC_BATCH_SIZE = int(os.environ.get("SYNC_BATCH_SIZE", 50))
     ENABLE_LOCAL_SYNC_WORKER = env_flag("ENABLE_LOCAL_SYNC_WORKER", default=True)
     ENABLE_PORTAL_SIDECARS = env_flag("ENABLE_PORTAL_SIDECARS", default=True)

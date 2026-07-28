@@ -1,0 +1,59 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Purchase Order #{{ purchase_order.id }} — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Purchase Order #{{ purchase_order.id }}</h1>
+    <p class="text-muted">{{ purchase_order.vendor.name }} · {{ purchase_order.order_date.strftime('%d %b %Y') }}</p>
+  </div>
+  <span class="badge badge-brown">{{ purchase_order.status }}</span>
+</div>
+
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card brown"><div class="stat-value">₹{{ purchase_order.subtotal|int }}</div><div class="stat-label">Subtotal</div></div>
+  <div class="stat-card green"><div class="stat-value">{{ purchase_order.gst_rate_percent|int }}%</div><div class="stat-label">GST Rate</div></div>
+  <div class="stat-card {% if purchase_order.input_tax_credit_eligible %}green{% else %}rose{% endif %}"><div class="stat-value">{{ 'Yes' if purchase_order.input_tax_credit_eligible else 'No' }}</div><div class="stat-label">ITC Eligible</div></div>
+  <div class="stat-card orange"><div class="stat-value">{{ purchase_order.items.count() }}</div><div class="stat-label">Items</div></div>
+</div>
+
+{% if not purchase_order.input_tax_credit_eligible %}
+<div class="flash-msg flash-warning" style="margin-bottom:1rem">
+  <span>This vendor has no GSTIN on file, so input tax credit likely does not apply.</span>
+</div>
+{% endif %}
+
+<div class="page-grid page-grid-sidebar">
+  <section class="card">
+    <div class="card-header">Items</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Raw Material</th><th>Quantity</th><th>Unit Cost</th><th>Total</th></tr></thead>
+        <tbody>
+          {% for item in purchase_order.items.all() %}
+          <tr><td>{{ item.raw_material.name }}</td><td>{{ item.quantity }} {{ item.raw_material.unit }}</td><td>₹{{ item.unit_cost|int }}</td><td>₹{{ item.line_total|int }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="card">
+    <div class="card-header">Actions</div>
+    <div class="card-body">
+      <p class="text-sm text-muted">Receiving creates stock movements and a linked raw-material purchase expense.</p>
+      {% if transaction %}
+      <p><strong>Finance transaction:</strong> #{{ transaction.id }} · ₹{{ transaction.amount|int }}</p>
+      {% endif %}
+      {% if can_admin_manager and purchase_order.status != 'received' %}
+      <form method="POST" action="{{ url_for('admin.update_purchase_order_status', order_id=purchase_order.id) }}" class="flex gap-2 flex-wrap">
+        <button class="btn btn-outline btn-sm" name="action" value="ordered" type="submit">Mark Ordered</button>
+        <button class="btn btn-primary btn-sm" name="action" value="received" type="submit">Mark Received</button>
+        <button class="btn btn-ghost btn-sm" name="action" value="cancelled" type="submit">Cancel</button>
+      </form>
+      {% elif not can_admin_manager %}
+      <p class="text-muted">Manager access is required to update purchase orders.</p>
+      {% endif %}
+    </div>
+  </aside>
+</div>
+{% endblock %}

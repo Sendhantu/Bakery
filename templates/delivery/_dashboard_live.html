@@ -6,7 +6,7 @@
     <p class="text-muted">Ask the admin to assign your delivery agent profile.</p>
   </div>
   {% elif assigned %}
-  <div class="delivery-assigned-list">
+  <div class="delivery-assigned-list" data-delivery-assignment-list="active">
     {% for delivery in assigned %}
     <article class="ops-order-card" data-order-id="{{ delivery.order_id }}">
       <div class="ops-order-card-head">

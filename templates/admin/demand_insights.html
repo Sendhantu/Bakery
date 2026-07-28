@@ -1,0 +1,195 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Demand Insights - Admin{% endblock %}
+
+{% block content %}
+<div class="page-wrap demand-insights-page">
+  <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+    <div>
+      <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">Demand Insights</h1>
+      <p class="text-muted text-sm">Advisory prep signals from paid sales history, cached weather context, and logged local events.</p>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <form method="POST" action="{{ url_for('admin.refresh_demand_weather') }}">
+        <button type="submit" class="btn btn-outline btn-sm">Refresh Weather</button>
+      </form>
+      <a href="{{ url_for('admin.triage') }}" class="btn btn-ghost btn-sm">Open Smart Triage</a>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-header" style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap">
+      <div>
+        <div>Advisory Summary</div>
+        <div class="text-sm text-muted">Generated {{ generated_at.strftime('%d %b %Y, %H:%M') }}</div>
+      </div>
+      <span class="badge {% if narrative.available %}badge-green{% else %}badge-brown{% endif %}">
+        {{ 'Ollama phrasing' if narrative.available else 'Deterministic phrasing' }}
+      </span>
+    </div>
+    <div class="card-body">
+      <p style="margin:0;color:var(--brown);font-weight:600">{{ narrative.text }}</p>
+      <div class="text-sm text-muted" style="margin-top:0.75rem">{{ history.message }}</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,0.85fr);gap:1rem;align-items:start;margin-bottom:1rem">
+    <div class="card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+        Prep Advisories
+        <span class="badge badge-orange" data-demand-count>{{ advisories|length }}</span>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:0.85rem" data-demand-advisory-list>
+        {% for advisory in advisories %}
+        <div class="card demand-advisory-card" style="padding:1rem;background:var(--cream-soft)" data-demand-advisory data-advisory-id="{{ advisory.id }}">
+          <div style="display:flex;justify-content:space-between;gap:0.75rem;align-items:flex-start">
+            <div>
+              <div style="font-weight:700;color:var(--brown)">{{ advisory.title }}</div>
+              <div class="text-sm text-muted">{{ advisory.summary }}</div>
+            </div>
+            <span class="badge {% if advisory.confidence == 'medium' %}badge-green{% else %}badge-orange{% endif %}">{{ advisory.confidence|title }} confidence</span>
+          </div>
+          <ul style="margin:0.75rem 0 0 1rem">
+            {% for action in advisory.actions %}
+            <li>{{ action }}</li>
+            {% endfor %}
+          </ul>
+          {% if advisory.stock_risks %}
+          <div style="margin-top:0.75rem">
+            <div class="text-sm" style="font-weight:700;color:var(--brown)">Stock checks before prep</div>
+            <ul style="margin:0.35rem 0 0 1rem">
+              {% for risk in advisory.stock_risks %}
+              <li>{{ risk.material_name }}: {{ '{:,.2f}'.format(risk.current_stock) }} {{ risk.unit }} in stock, {{ '{:,.2f}'.format(risk.required_for_suggestion) }} {{ risk.unit }} needed for this suggestion.</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:0.75rem" data-demand-ack>Acknowledge</button>
+        </div>
+        {% endfor %}
+        <div class="text-center text-muted hidden" style="padding:1.25rem" data-demand-empty>All visible advisories are acknowledged.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Reliability</div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:0.75rem">
+        <div>
+          <div class="text-sm text-muted">Paid sales days in 180-day window</div>
+          <div style="font-size:1.45rem;font-weight:700;color:var(--brown)">{{ history.sales_days }}</div>
+        </div>
+        <div>
+          <div class="text-sm text-muted">Past weather snapshot days</div>
+          <div style="font-size:1.45rem;font-weight:700;color:var(--brown)">{{ history.weather_snapshot_days }}</div>
+        </div>
+        <div>
+          <div class="text-sm text-muted">Past local event days</div>
+          <div style="font-size:1.45rem;font-weight:700;color:var(--brown)">{{ history.local_event_days }}</div>
+        </div>
+        <div class="badge badge-brown">Hot day threshold: {{ config.hot_day_threshold_c }} C</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,0.85fr);gap:1rem;align-items:start">
+    <div class="card">
+      <div class="card-header">Weather Forecast</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Condition</th><th>High</th><th>Rain probability</th></tr></thead>
+          <tbody>
+            {% for day in forecast.daily %}
+            <tr>
+              <td>{{ day.date }}</td>
+              <td>{{ day.description or day.condition }}</td>
+              <td>{{ '{:,.1f}'.format(day.temp_max_c) if day.temp_max_c is not none else 'N/A' }} C</td>
+              <td>{{ '{:,.0f}'.format((day.precipitation_probability or 0) * 100) }}%</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-center text-muted" style="padding:1.25rem">{{ forecast.message or 'No cached weather forecast available yet.' }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-body text-sm text-muted">
+        Source: {{ forecast.source or 'OpenWeatherMap forecast API' }} · {{ forecast.location_label }} · {{ forecast.status|replace('_', ' ')|title }}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Add Local Event</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin.save_local_event') }}" style="display:flex;flex-direction:column;gap:0.75rem">
+          <div>
+            <label class="form-label">Event name</label>
+            <input class="form-control" name="name" required>
+          </div>
+          <div>
+            <label class="form-label">Date</label>
+            <input class="form-control" type="date" name="event_date" required>
+          </div>
+          <div>
+            <label class="form-label">Expected impact</label>
+            <select class="form-control" name="expected_impact">
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Notes</label>
+            <textarea class="form-control" name="notes" rows="3"></textarea>
+          </div>
+          <button class="btn btn-primary" type="submit">Save Event</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1rem">
+    <div class="card-header">Upcoming And Recent Local Events</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Name</th><th>Impact</th><th>Notes</th><th></th></tr></thead>
+        <tbody>
+          {% for event in upcoming_events + recent_events %}
+          <tr>
+            <td>{{ event.event_date.strftime('%d %b %Y') }}</td>
+            <td style="font-weight:600">{{ event.name }}</td>
+            <td><span class="badge {% if event.expected_impact == 'high' %}badge-orange{% elif event.expected_impact == 'low' %}badge-blue{% else %}badge-brown{% endif %}">{{ event.expected_impact|title }}</span></td>
+            <td>{{ event.notes or '-' }}</td>
+            <td style="white-space:nowrap;text-align:right">
+              <button type="button" class="btn btn-ghost btn-sm" data-toggle-target="#event-edit-{{ event.id }}">Edit</button>
+              <form method="POST" action="{{ url_for('admin.delete_local_event', event_id=event.id) }}" style="display:inline" data-confirm="Delete this local event?">
+                <button type="submit" class="btn btn-outline btn-sm">Delete</button>
+              </form>
+            </td>
+          </tr>
+          <tr id="event-edit-{{ event.id }}" class="hidden">
+            <td colspan="5">
+              <form method="POST" action="{{ url_for('admin.save_local_event') }}" style="display:grid;grid-template-columns:1.3fr 150px 140px minmax(180px,1fr) auto;gap:0.5rem;align-items:end">
+                <input type="hidden" name="event_id" value="{{ event.id }}">
+                <input class="form-control" name="name" value="{{ event.name }}" required>
+                <input class="form-control" type="date" name="event_date" value="{{ event.event_date.isoformat() }}" required>
+                <select class="form-control" name="expected_impact">
+                  {% for impact in ['medium', 'high', 'low'] %}
+                  <option value="{{ impact }}" {% if impact == event.expected_impact %}selected{% endif %}>{{ impact|title }}</option>
+                  {% endfor %}
+                </select>
+                <input class="form-control" name="notes" value="{{ event.notes or '' }}">
+                <button type="submit" class="btn btn-primary btn-sm">Update</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted" style="padding:1.25rem">No local events logged yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/demand_insights.js') }}"></script>
+{% endblock %}

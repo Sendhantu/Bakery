@@ -1,0 +1,99 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Gift Cards - Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Gift Cards</h1>
+    <p class="text-muted">Track outstanding liability, issue cards, and record manager-approved corrections.</p>
+  </div>
+  <div class="stat-card" style="min-width:220px">
+    <div class="stat-label">Outstanding Liability</div>
+    <div class="stat-value">₹{{ '%.2f'|format(liability or 0) }}</div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">Issue Gift Card</div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('admin.issue_gift_card') }}" class="form-grid">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label class="form-label">Amount</label>
+        <input class="form-control" name="amount" type="number" min="50" step="0.01" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Recipient Email</label>
+        <input class="form-control" name="recipient_email" type="email" placeholder="Optional">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Message</label>
+        <input class="form-control" name="message" placeholder="Optional">
+      </div>
+      <div class="form-group" style="align-self:end">
+        <button class="btn btn-primary btn-block" type="submit">Issue</button>
+      </div>
+    </form>
+    <p class="text-sm text-muted mt-2">Issuance records a gift-card-liability transaction, not sales revenue. Revenue is recognized when the card is redeemed against an order.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Issued Cards</div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Recipient</th>
+            <th>Initial</th>
+            <th>Balance</th>
+            <th>Status</th>
+            <th>History</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for card in cards %}
+          <tr>
+            <td><strong>{{ card.code }}</strong></td>
+            <td>{{ card.recipient_email or 'Counter sale' }}</td>
+            <td>₹{{ '%.2f'|format(card.initial_value or 0) }}</td>
+            <td>₹{{ '%.2f'|format(card.current_balance or 0) }}</td>
+            <td><span class="badge badge-brown">{{ card.status|title }}</span></td>
+            <td>
+              {% for txn in card.recent_transactions %}
+              <div class="text-sm">{{ txn.transaction_type|replace('_',' ')|title }}: {{ '%+.2f'|format(txn.amount_change or 0) }}</div>
+              {% else %}
+              <span class="text-muted text-sm">No transactions</span>
+              {% endfor %}
+            </td>
+            <td style="min-width:280px">
+              <form method="POST" action="{{ url_for('admin.adjust_gift_card', card_id=card.id) }}" class="mb-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-row">
+                  <input class="form-control" name="amount_change" type="number" step="0.01" placeholder="+/- amount" required>
+                  <input class="form-control" name="reason" placeholder="Reason" required>
+                </div>
+                <button class="btn btn-outline btn-sm mt-1" type="submit">Adjust</button>
+              </form>
+              {% if card.status != 'cancelled' %}
+              <form method="POST" action="{{ url_for('admin.cancel_gift_card', card_id=card.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-row">
+                  <input class="form-control" name="reason" placeholder="Cancellation reason" required>
+                  <button class="btn btn-danger btn-sm" type="submit">Cancel</button>
+                </div>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-center text-muted">No gift cards issued yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

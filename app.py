@@ -97,6 +97,12 @@ def handle_socket_connect():
         join_room(f"customer_{current_user.id}")
     if portal == "admin":
         join_room("kds")
+    if portal == "delivery" and current_user.is_authenticated:
+        from models import DeliveryAgent
+
+        agent = DeliveryAgent.query.filter_by(user_id=current_user.id).first()
+        if agent:
+            join_room(f"delivery_{agent.id}")
     join_room("global")
 
 
@@ -591,6 +597,7 @@ def register_core_routes(app):
         )
 
     @app.route("/internal/trigger_offline_sync", methods=["POST"])
+    @csrf.exempt
     def trigger_offline_sync():
         from flask_login import current_user
 
@@ -695,13 +702,34 @@ def register_context_processors(app):
             map_link_url=map_link_url,
             map_embed_url=map_embed_url,
         )
+
+
+def is_sqlite_database(app):
+    database_uri = str(app.config.get("SQLALCHEMY_DATABASE_URI") or "").lower()
+    return database_uri.startswith("sqlite:")
+
+
+def should_prepare_local_sqlite_database(app):
+    if app.testing or app.config.get("ENV") == "production":
+        return False
+    if os.environ.get("PORTAL_LAUNCHER_CHILD") == "1":
+        return False
+    return is_sqlite_database(app)
+
+
 def initialize_database(app, seed=False):
     with app.app_context():
         if app.config.get("ENV") == "production" and seed:
             raise RuntimeError("BOOTSTRAP_SEED_DATA is disabled in production")
-        from flask_migrate import upgrade
 
-        upgrade()
+        if app.config.get("ENV") != "production" and is_sqlite_database(app):
+            from models import safe_create_all
+
+            safe_create_all(app)
+        else:
+            from flask_migrate import upgrade
+
+            upgrade()
         if seed:
             seed_data(app)
 
@@ -806,6 +834,8 @@ def create_app(config_name="default", portal_role=None):
         register_sqlalchemy_observers(app)
     if app.config.get("AUTO_INIT_DB"):
         initialize_database(app, seed=app.config.get("SHOW_DEMO_ACCOUNTS", False))
+    elif should_prepare_local_sqlite_database(app):
+        initialize_database(app, seed=app.config.get("SHOW_DEMO_ACCOUNTS", False))
     start_local_sync_worker(app)
     print_development_startup_banner(app)
 
@@ -840,6 +870,7 @@ def seed_data(app):
             db.session.add(admin)
         admin.name = "Baker Admin"
         admin.role = "admin"
+        admin.admin_tier = "owner"
         admin.phone = "9999999999"
         admin.is_active = True
         admin.set_password(DEMO_PORTAL_CREDENTIALS["admin"]["password"])

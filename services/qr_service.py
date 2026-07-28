@@ -41,5 +41,11 @@ class QRService:
         if order.status in {"PACKED", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY"}:
             order.status = "DELIVERED"
             order.mark_status_change()
+            try:
+                from bootstrap import get_container
+
+                get_container().loyalty_service.award_order_points(order)
+            except Exception:
+                pass
         db.session.commit()
         return order

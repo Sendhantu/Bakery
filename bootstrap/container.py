@@ -3,23 +3,28 @@ from repositories import OrderRepository, ProductRepository, UserRepository
 from services import (
     AuditService,
     AuthService,
+    DemandService,
     DeliveryService,
     FinanceExportService,
     FinanceService,
     ForecastService,
+    GiftCardService,
     InventoryService,
     InvoiceService,
     LoyaltyService,
     OfflineSyncService,
+    OrderReversalService,
     OrderService,
     PaymentService,
     PricingService,
+    PurchaseOrderService,
     PushService,
     QRService,
     RoutePlanningService,
     SlotService,
     StorageService,
     SubscriptionService,
+    WeatherService,
 )
 
 from .feature_flags import FeatureFlagService
@@ -39,10 +44,12 @@ class ServiceContainer:
         self.auth_service = AuthService(self.user_repository)
         self.payment_service = PaymentService()
         self.inventory_service = InventoryService()
+        self.loyalty_service = LoyaltyService()
         self.order_service = OrderService(
             self.order_repository,
             self.event_bus,
             self.audit_service,
+            self.loyalty_service,
         )
         self.slot_service = SlotService(
             time_slots=app.config.get("TIME_SLOTS", []),
@@ -61,8 +68,21 @@ class ServiceContainer:
         self.push_service = PushService(app.config)
         self.invoice_service = InvoiceService(self.storage_service)
         self.finance_service = FinanceService()
+        self.gift_card_service = GiftCardService()
         self.finance_export_service = FinanceExportService()
-        self.loyalty_service = LoyaltyService()
+        self.purchase_order_service = PurchaseOrderService(
+            inventory_service=self.inventory_service,
+            finance_service=self.finance_service,
+            audit_service=self.audit_service,
+        )
+        self.order_reversal_service = OrderReversalService(
+            inventory_service=self.inventory_service,
+            finance_service=self.finance_service,
+            audit_service=self.audit_service,
+            push_service=self.push_service,
+        )
+        self.weather_service = WeatherService(app.config)
+        self.demand_service = DemandService(app.config, self.weather_service)
         self.offline_sync_service = OfflineSyncService(app, self.audit_service)
         self._register_default_handlers()
 

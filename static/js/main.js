@@ -172,6 +172,117 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   };
 
+  const initPos = (root = document) => {
+    const form = root.querySelector?.('[data-pos-form]');
+    if (!form || form.dataset.posBound === 'true') return;
+    form.dataset.posBound = 'true';
+
+    const cartInput = form.querySelector('[data-pos-cart-input]');
+    const linesContainer = form.querySelector('[data-pos-cart-lines]');
+    const emptyState = form.querySelector('[data-pos-empty]');
+    const totalNode = form.querySelector('[data-pos-total]');
+    const submitButton = form.querySelector('[data-pos-submit]');
+    const searchInput = form.querySelector('[data-pos-search]');
+    const productGrid = form.querySelector('[data-pos-product-grid]');
+    const cart = new Map();
+
+    const renderCart = () => {
+      const items = Array.from(cart.values());
+      if (cartInput) {
+        cartInput.value = JSON.stringify(items.map((item) => ({
+          variant_id: item.variantId,
+          quantity: item.quantity,
+        })));
+      }
+      if (emptyState) emptyState.style.display = items.length ? 'none' : '';
+      if (submitButton) submitButton.disabled = items.length === 0;
+      if (!linesContainer) return;
+
+      linesContainer.querySelectorAll('[data-pos-line]').forEach((line) => line.remove());
+      let total = 0;
+      items.forEach((item) => {
+        total += item.price * item.quantity;
+        const row = document.createElement('div');
+        row.className = 'pos-cart-line';
+        row.dataset.posLine = item.variantId;
+        row.innerHTML = `
+          <div class="pos-cart-line-main">
+            <strong></strong>
+            <span>${formatCurrency(item.price)} each</span>
+          </div>
+          <div class="pos-stepper">
+            <button type="button" data-pos-decrease="${item.variantId}" aria-label="Decrease quantity">-</button>
+            <span>${item.quantity}</span>
+            <button type="button" data-pos-increase="${item.variantId}" aria-label="Increase quantity">+</button>
+          </div>
+          <strong>${formatCurrency(item.price * item.quantity)}</strong>
+          <button type="button" class="pos-remove" data-pos-remove="${item.variantId}" aria-label="Remove item">x</button>
+        `;
+        row.querySelector('strong').textContent = item.name;
+        linesContainer.appendChild(row);
+      });
+      if (totalNode) totalNode.textContent = formatCurrency(total);
+    };
+
+    const updateQuantity = (variantId, delta) => {
+      const item = cart.get(String(variantId));
+      if (!item) return;
+      item.quantity = Math.max(0, Math.min(item.stock, item.quantity + delta));
+      if (item.quantity <= 0) cart.delete(String(variantId));
+      renderCart();
+    };
+
+    productGrid?.addEventListener('click', (event) => {
+      const tile = event.target.closest('[data-pos-add]');
+      if (!tile) return;
+      const variantId = String(tile.dataset.variantId || '');
+      const stock = Number(tile.dataset.stock || 0);
+      if (!variantId || stock <= 0) return;
+      const existing = cart.get(variantId);
+      if (existing) {
+        existing.quantity = Math.min(stock, existing.quantity + 1);
+      } else {
+        cart.set(variantId, {
+          variantId,
+          name: tile.dataset.name || 'Product',
+          price: Number(tile.dataset.price || 0),
+          stock,
+          quantity: 1,
+        });
+      }
+      tile.classList.add('rt-highlight');
+      window.setTimeout(() => tile.classList.remove('rt-highlight'), 900);
+      renderCart();
+    });
+
+    linesContainer?.addEventListener('click', (event) => {
+      const increase = event.target.closest('[data-pos-increase]')?.dataset.posIncrease;
+      const decrease = event.target.closest('[data-pos-decrease]')?.dataset.posDecrease;
+      const remove = event.target.closest('[data-pos-remove]')?.dataset.posRemove;
+      if (increase) updateQuantity(increase, 1);
+      if (decrease) updateQuantity(decrease, -1);
+      if (remove) {
+        cart.delete(String(remove));
+        renderCart();
+      }
+    });
+
+    searchInput?.addEventListener('input', () => {
+      const query = searchInput.value.trim().toLowerCase();
+      productGrid?.querySelectorAll('[data-pos-add]').forEach((tile) => {
+        const haystack = (tile.dataset.search || '').toLowerCase();
+        tile.hidden = Boolean(query) && !haystack.includes(query);
+      });
+    });
+
+    form.addEventListener('submit', (event) => {
+      renderCart();
+      if (!cart.size) event.preventDefault();
+    });
+
+    renderCart();
+  };
+
   const initializeUiBindings = (root = document) => {
     applyCsrfToForms(root);
     initImageFallbacks(root);
@@ -179,6 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initToggleTargets(root);
     initMapToggles(root);
     initCancelTimers(root);
+    initPos(root);
     if (root === document) {
       initPaymentOptions();
     }
@@ -1246,6 +1358,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll(`[data-rt-counter="${name}"]`).forEach((counter) => {
       const current = Number((counter.textContent || '').replace(/[^\d.-]/g, '')) || 0;
       counter.textContent = String(current + 1);
+      pulseRealtimeElement(counter);
     });
   };
 
@@ -1253,6 +1366,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const cell = document.createElement('td');
     cell.textContent = text;
     return cell;
+  };
+
+  const pulseRealtimeElement = (element) => {
+    if (!element) return;
+    element.classList.remove('rt-highlight');
+    void element.offsetWidth;
+    element.classList.add('rt-highlight');
+    window.setTimeout(() => element.classList.remove('rt-highlight'), 1800);
+  };
+
+  const makeTextElement = (tagName, text, className = '') => {
+    const element = document.createElement(tagName);
+    if (className) element.className = className;
+    element.textContent = text || '';
+    return element;
+  };
+
+  const makeLink = (href, text, className = '') => {
+    const link = document.createElement('a');
+    link.href = href || '#';
+    link.textContent = text;
+    if (className) link.className = className;
+    return link;
   };
 
   const prependAdminOrder = (payload) => {
@@ -1309,11 +1445,80 @@ document.addEventListener('DOMContentLoaded', () => {
       row.appendChild(actionCell);
 
       tbody.prepend(row);
+      pulseRealtimeElement(row);
     });
 
     incrementRealtimeCounter('total-orders');
     incrementRealtimeCounter('pending-orders');
     incrementRealtimeCounter('today-orders');
+  };
+
+  const prependDeliveryAssignment = (payload) => {
+    if (!payload?.order_id) return;
+
+    const liveRegion = document.querySelector('#delivery-dashboard-live');
+    if (!liveRegion) return;
+
+    liveRegion.querySelectorAll('.empty-state').forEach((state) => state.remove());
+
+    let list = liveRegion.querySelector('[data-delivery-assignment-list]');
+    if (!list) {
+      list = document.createElement('div');
+      list.className = 'delivery-assigned-list';
+      list.dataset.deliveryAssignmentList = 'active';
+      liveRegion.prepend(list);
+    }
+
+    if (list.querySelector(`[data-order-id="${payload.order_id}"]`)) return;
+
+    const card = document.createElement('article');
+    card.className = 'ops-order-card';
+    card.dataset.orderId = payload.order_id;
+
+    const head = document.createElement('div');
+    head.className = 'ops-order-card-head';
+
+    const titleWrap = document.createElement('div');
+    titleWrap.appendChild(makeTextElement('div', `Order #${payload.order_number || payload.order_id}`, 'ops-order-kicker'));
+    titleWrap.appendChild(makeTextElement('h3', payload.customer_name || 'Customer'));
+    head.appendChild(titleWrap);
+
+    const meta = document.createElement('div');
+    meta.className = 'ops-order-head-meta';
+    const badge = makeTextElement('span', (payload.status || 'PLACED').replace(/_/g, ' '), `badge ${badgeClassForOrderStatus(payload.status || 'PLACED')}`);
+    badge.dataset.orderStatus = payload.order_id;
+    meta.appendChild(badge);
+    meta.appendChild(makeTextElement('strong', formatCurrency(payload.total || 0)));
+    head.appendChild(meta);
+    card.appendChild(head);
+
+    const metaRow = document.createElement('div');
+    metaRow.className = 'ops-order-meta-row';
+    const phoneLink = makeLink(`tel:${payload.phone || ''}`, payload.phone || 'No phone');
+    const phoneWrap = document.createElement('span');
+    phoneWrap.textContent = 'Phone: ';
+    phoneWrap.appendChild(phoneLink);
+    metaRow.appendChild(phoneWrap);
+    metaRow.appendChild(makeTextElement('span', payload.items_summary || payload.item_summary || 'New assignment'));
+    card.appendChild(metaRow);
+
+    if (payload.delivery_address) {
+      card.appendChild(makeTextElement('p', payload.delivery_address, 'ops-order-address'));
+    }
+
+    if (payload.special_instructions) {
+      card.appendChild(makeTextElement('p', payload.special_instructions, 'ops-order-note'));
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'ops-order-actions';
+    actions.appendChild(makeLink(`tel:${payload.phone || ''}`, 'Call Customer', 'btn btn-outline btn-sm'));
+    actions.appendChild(makeLink(payload.detail_url || `/delivery/order/${payload.order_id}`, 'View Details', 'btn btn-ghost btn-sm'));
+    card.appendChild(actions);
+
+    list.prepend(card);
+    incrementRealtimeCounter('assigned-deliveries');
+    pulseRealtimeElement(card);
   };
 
   const updateStockIndicators = (payload) => {
@@ -1439,6 +1644,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
+    socket.on('delivery_assignment', (payload) => {
+      if (portal === 'delivery') {
+        prependDeliveryAssignment(payload);
+      }
+    });
+
     socket.on('order_status_updated', (payload) => {
       updateVisibleOrderStatus(payload?.order_id, payload?.new_status);
       if (document.querySelector('[data-socket-room="kds"]')) {
@@ -1449,7 +1660,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('stock_updated', updateStockIndicators);
-    socket.on('delivery_updated', () => refreshLiveSections({respectEditors: true}));
     socket.on('kds_refresh', () => {
       if (document.querySelector('[data-socket-room="kds"]')) window.location.reload();
     });

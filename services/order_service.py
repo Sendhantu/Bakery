@@ -1,24 +1,262 @@
+from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
+import random
 
 from domains.orders import OrderStatusUpdated
 from exceptions import ValidationError
-from models import db
+from models import Order, OrderItem, Payment, ProductVariant, db
 from repositories import OrderRepository
 from validators import ensure_order_status_transition
 from clock import utcnow
 
 
+@dataclass
+class OrderCreationResult:
+    order: Order
+    payment: Payment
+    stock_update_variant_ids: list[int]
+    stock_update_material_ids: list[int]
+
+
+@dataclass
+class OrderLineInput:
+    product_id: int
+    variant_id: int | None
+    product_name: str
+    variant_name: str
+    quantity: int
+    unit_price: Decimal
+    recipe_product: object | None = None
+
+    @property
+    def product(self):
+        return self.recipe_product
+
+
 class OrderService:
-    def __init__(self, order_repository=None, event_bus=None, audit_service=None):
+    def __init__(
+        self,
+        order_repository=None,
+        event_bus=None,
+        audit_service=None,
+        loyalty_service=None,
+    ):
         self.order_repository = order_repository or OrderRepository()
         self.event_bus = event_bus
         self.audit_service = audit_service
+        self.loyalty_service = loyalty_service
 
-    def update_order_status(self, order_id, new_status, actor="admin", actor_id=None, expected_version=None):
+    def create_order(
+        self,
+        *,
+        user_id,
+        lines,
+        subtotal,
+        total,
+        payment_method="COD",
+        payment_status="PENDING",
+        status="PLACED",
+        channel="online",
+        source=None,
+        branch_id=None,
+        discount=0,
+        loyalty_discount=0,
+        gift_card_redemption_amount=0,
+        gift_card_code=None,
+        delivery_charge=0,
+        gst_rate=5,
+        gst_amount=0,
+        fulfillment_type="DELIVERY",
+        address_line1="",
+        address_line2="",
+        city="",
+        pincode="",
+        phone="",
+        delivery_latitude=None,
+        delivery_longitude=None,
+        delivery_slot="",
+        delivery_date=None,
+        special_note=None,
+        occasion=None,
+        coupon_code=None,
+        actor_id=None,
+        payment_reason="order_created",
+        transaction_id=None,
+        expected_versions=None,
+    ):
+        """Create an order through the shared stock/payment/ledger pipeline.
+
+        The caller owns the surrounding transaction and commit. Socket emits
+        should happen only after that commit succeeds.
+        """
+        normalized_lines = self._normalize_lines(lines)
+        if not normalized_lines:
+            raise ValidationError("Add at least one item to the order.")
+
+        expected_versions = expected_versions or {}
+        stock_update_variant_ids = []
+        stock_update_material_ids = []
+
+        order = Order(
+            order_number=Order.generate_order_number(),
+            user_id=user_id,
+            branch_id=branch_id,
+            source=source or ("POS" if channel == "counter" else "WEB"),
+            channel=channel,
+            status=(status or "PLACED").upper(),
+            subtotal=Decimal(str(subtotal or 0)),
+            discount=Decimal(str(discount or 0)),
+            loyalty_discount=Decimal(str(loyalty_discount or 0)),
+            gift_card_redemption_amount=Decimal(str(gift_card_redemption_amount or 0)),
+            gift_card_code=(gift_card_code or "").strip().upper() or None,
+            delivery_charge=Decimal(str(delivery_charge or 0)),
+            gst_rate=Decimal(str(gst_rate or 5)),
+            gst_amount=Decimal(str(gst_amount or 0)),
+            total=Decimal(str(total or 0)),
+            fulfillment_type=(fulfillment_type or "DELIVERY").upper(),
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            pincode=pincode,
+            phone=phone,
+            delivery_latitude=delivery_latitude,
+            delivery_longitude=delivery_longitude,
+            delivery_slot=delivery_slot,
+            delivery_date=delivery_date,
+            special_note=special_note,
+            occasion=occasion,
+            payment_method=(payment_method or "COD").upper(),
+            payment_status="PENDING",
+            coupon_code=coupon_code,
+        )
+        db.session.add(order)
+        db.session.flush()
+
+        for line in normalized_lines:
+            db.session.add(
+                OrderItem(
+                    order_id=order.id,
+                    product_id=line.product_id,
+                    variant_id=line.variant_id,
+                    product_name=line.product_name,
+                    variant_name=line.variant_name,
+                    quantity=line.quantity,
+                    unit_price=line.unit_price,
+                    subtotal=line.unit_price * line.quantity,
+                )
+            )
+            if line.variant_id:
+                variant = db.session.get(
+                    ProductVariant,
+                    line.variant_id,
+                    with_for_update=True,
+                )
+                if variant is None:
+                    raise ValidationError("Product variant is no longer available.")
+                expected_version = expected_versions.get(str(line.variant_id))
+                if expected_version is None:
+                    expected_version = expected_versions.get(line.variant_id)
+                if expected_version not in {None, ""}:
+                    from exceptions import ConflictError
+                    from utils.optimistic import assert_version
+
+                    try:
+                        assert_version(
+                            variant,
+                            expected_version,
+                            entity_name="ProductVariant",
+                        )
+                    except ConflictError as exc:
+                        raise ValidationError(
+                            "Version conflict: variant stock changed by another user."
+                        ) from exc
+                if int(variant.stock or 0) < line.quantity:
+                    raise ValidationError(
+                        f"Sorry, {line.product_name} is out of stock."
+                    )
+                variant.stock = int(variant.stock or 0) - line.quantity
+                variant.version = int(variant.version or 0) + 1
+                stock_update_variant_ids.append(variant.id)
+
+        stock_update_material_ids = (
+            self._inventory_service().deduct_order_raw_materials(
+                normalized_lines,
+                order,
+                created_by=actor_id,
+            )
+        )
+
+        payment = Payment(
+            order_id=order.id,
+            amount=Decimal(str(total or 0)),
+            status="PENDING",
+            method=order.payment_method,
+            transaction_id=transaction_id or f"TXN{random.randint(100000,999999)}",
+        )
+        db.session.add(payment)
+        db.session.flush()
+
+        if (payment_status or "").upper() == "PAID":
+            payment.transition_to("PAID", actor_id=actor_id, reason=payment_reason)
+            if order.status == "DELIVERED":
+                self._award_loyalty_points(order)
+        else:
+            order.payment_status = (payment_status or "PENDING").upper()
+
+        return OrderCreationResult(
+            order=order,
+            payment=payment,
+            stock_update_variant_ids=stock_update_variant_ids,
+            stock_update_material_ids=stock_update_material_ids,
+        )
+
+    def build_line_from_cart_item(self, cart_item, unit_price=None):
+        variant = cart_item.variant
+        product = cart_item.product
+        if product is None:
+            raise ValidationError("A cart item references an unavailable product.")
+        resolved_price = (
+            Decimal(str(unit_price))
+            if unit_price is not None
+            else self._resolve_price(product, variant)
+        )
+        return OrderLineInput(
+            product_id=cart_item.product_id,
+            variant_id=cart_item.variant_id,
+            product_name=product.name,
+            variant_name=variant.name if variant else "",
+            quantity=max(1, int(cart_item.quantity or 1)),
+            unit_price=resolved_price,
+            recipe_product=product,
+        )
+
+    def build_line_from_variant(self, variant, quantity, unit_price=None):
+        if variant is None or variant.product is None:
+            raise ValidationError("Product variant is no longer available.")
+        resolved_price = (
+            Decimal(str(unit_price))
+            if unit_price is not None
+            else self._resolve_price(variant.product, variant)
+        )
+        return OrderLineInput(
+            product_id=variant.product_id,
+            variant_id=variant.id,
+            product_name=variant.product.name,
+            variant_name=variant.name,
+            quantity=max(1, int(quantity or 1)),
+            unit_price=resolved_price,
+            recipe_product=variant.product,
+        )
+
+    def update_order_status(
+        self, order_id, new_status, actor="admin", actor_id=None, expected_version=None
+    ):
         order = self.order_repository.get_or_404(order_id)
         # optimistic check if caller provided expected_version
         from utils.optimistic import assert_version
-        assert_version(order, expected_version, entity_name='Order')
+
+        assert_version(order, expected_version, entity_name="Order")
         status = ensure_order_status_transition(order.status, new_status, actor=actor)
         old_status = order.status
 
@@ -37,6 +275,8 @@ class OrderService:
                     branch_id=order.branch_id,
                     change_summary=f"Order status changed from {old_status} to {status}",
                 )
+            if status == "DELIVERED":
+                self._award_loyalty_points(order)
         db.session.commit()
 
         if self.event_bus is not None:
@@ -48,6 +288,22 @@ class OrderService:
                 )
             )
         return order
+
+    def _award_loyalty_points(self, order):
+        service = self.loyalty_service
+        if service is None:
+            try:
+                from bootstrap import get_container
+
+                service = get_container().loyalty_service
+            except Exception:
+                service = None
+        if service is None:
+            return 0
+        try:
+            return service.award_order_points(order)
+        except Exception:
+            return 0
 
     def _sync_delivery_status(self, order, new_status):
         delivery = order.delivery
@@ -89,3 +345,52 @@ class OrderService:
             delivery.version = int(delivery.version or 0) + 1
             if agent:
                 agent.availability = False
+
+    def _normalize_lines(self, lines):
+        normalized = []
+        for line in lines or []:
+            if isinstance(line, OrderLineInput):
+                normalized.append(line)
+            elif hasattr(line, "product_id") and hasattr(line, "quantity"):
+                product = getattr(line, "product", None)
+                variant = getattr(line, "variant", None)
+                normalized.append(
+                    OrderLineInput(
+                        product_id=line.product_id,
+                        variant_id=getattr(line, "variant_id", None),
+                        product_name=getattr(product, "name", "") or "",
+                        variant_name=getattr(variant, "name", "") if variant else "",
+                        quantity=max(1, int(line.quantity or 1)),
+                        unit_price=Decimal(str(getattr(line, "unit_price", 0) or 0)),
+                        recipe_product=product,
+                    )
+                )
+            else:
+                raise ValidationError("Invalid order line item.")
+        return normalized
+
+    def _resolve_price(self, product, variant=None):
+        try:
+            from bootstrap import get_container
+
+            return Decimal(
+                str(
+                    get_container().pricing_service.resolve_product_price(
+                        product, variant
+                    )["price"]
+                )
+            )
+        except Exception:
+            if variant is not None:
+                return Decimal(str(variant.price or 0))
+            return Decimal(str(product.base_price or 0))
+
+    def _inventory_service(self):
+        try:
+            from bootstrap import get_container
+
+            return get_container().inventory_service
+        except Exception:
+            from services.inventory_service import InventoryService
+
+            return InventoryService()

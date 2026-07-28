@@ -21,10 +21,14 @@ from sqlalchemy.orm import selectinload
 from realtime.events import (
     DELIVERY_RELEVANT_STATUSES,
     customer_room,
+    delivery_agent_room,
+    emit_new_order,
+    emit_order_cancelled,
+    emit_order_refunded,
     emit_order_status_updated,
     emit_stock_updated,
 )
-from utils.permissions import role_meets_minimum, roles_required, has_role
+from utils.permissions import admin_tier_meets, effective_admin_tier, has_role
 from models import (
     db,
     User,
@@ -49,6 +53,10 @@ from models import (
     StockMovement,
     TaxRate,
     TaxRecord,
+    Vendor,
+    VendorProduct,
+    PurchaseOrder,
+    PurchaseOrderItem,
     RawMaterial,
     ProductMaterial,
     Supplier,
@@ -56,12 +64,17 @@ from models import (
     ProductionPlan,
     ProductionBatch,
     PaymentLink,
+    GiftCard,
+    GiftCardTransaction,
+    RecurringSubscription,
+    SubscriptionOrderLog,
     LoyaltyLedger,
     AuditLog,
     ApiUsageLog,
     AttendanceRecord,
     FraudAlert,
     InventoryForecast,
+    LocalEvent,
     OperationalAlert,
     PricingRule,
     QueueMetric,
@@ -74,8 +87,15 @@ from models import (
     can_transition_order_status,
     get_allowed_order_statuses,
 )
-from services import enrich_orders, generate_smart_triage_report, summarize_triage_report
-from services.review_reply_service import generate_review_reply_draft, review_needs_attention
+from services import (
+    enrich_orders,
+    generate_smart_triage_report,
+    summarize_triage_report,
+)
+from services.review_reply_service import (
+    generate_review_reply_draft,
+    review_needs_attention,
+)
 from services.analytics_service import (
     PERIOD_LABELS,
     analytics_payload,
@@ -102,7 +122,9 @@ admin_bp = Blueprint("admin", __name__)
 @admin_bp.before_request
 def ensure_admin_portal():
     if current_app.config.get("PORTAL_ROLE") != "admin":
-        if current_user.is_authenticated and has_role(current_user, *ADMIN_PORTAL_ROLES):
+        if current_user.is_authenticated and has_role(
+            current_user, *ADMIN_PORTAL_ROLES
+        ):
             from routes.auth import portal_url_for_role
 
             return redirect(portal_url_for_role("admin", url_for("admin.dashboard")))
@@ -123,18 +145,66 @@ def admin_required(f):
     return decorated
 
 
-def finance_required(f):
-    """Finance module — restricted to admin and super_admin only."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not current_user.is_authenticated or not has_role(
-            current_user, "admin", "super_admin"
-        ):
-            flash("Finance access requires admin privileges.", "danger")
-            return redirect(url_for("admin.dashboard"))
-        return f(*args, **kwargs)
+def require_admin_tier(*allowed_tiers):
+    """Restrict admin-portal routes by the user's effective admin tier."""
+    normalized_tiers = tuple(
+        (tier or "").strip().lower() for tier in allowed_tiers if tier
+    )
 
-    return decorated
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if not current_user.is_authenticated or not admin_tier_meets(
+                current_user,
+                *normalized_tiers,
+            ):
+                try:
+                    get_container().audit_service.log(
+                        current_user if current_user.is_authenticated else None,
+                        "admin_permission_denied",
+                        "AdminRoute",
+                        request.endpoint or request.path,
+                        after={
+                            "path": request.path,
+                            "method": request.method,
+                            "required_tiers": list(normalized_tiers),
+                            "user_tier": (
+                                effective_admin_tier(current_user)
+                                if current_user.is_authenticated
+                                else None
+                            ),
+                        },
+                        change_summary="Admin tier check denied route access.",
+                    )
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                return (
+                    "You do not have permission to access this admin section.",
+                    403,
+                )
+            return f(*args, **kwargs)
+
+        return decorated
+
+    return decorator
+
+
+def finance_required(f):
+    """Finance module — restricted to owner-tier admins only."""
+    return require_admin_tier("owner")(f)
+
+
+def owner_required(f):
+    return require_admin_tier("owner")(f)
+
+
+def operations_required(f):
+    return require_admin_tier("staff", "manager", "owner")(f)
+
+
+def manager_required(f):
+    return require_admin_tier("manager", "owner")(f)
 
 
 def wants_live_fragment_response():
@@ -182,18 +252,33 @@ def inject_admin_nav():
     """Sidebar Chat badge — must be available on every admin page (base_admin.html)."""
     from flask_login import current_user as cu
 
-    if not cu.is_authenticated or cu.role != "admin":
-        return {"pending_msgs": 0}
+    if not cu.is_authenticated or not has_role(cu, *ADMIN_PORTAL_ROLES):
+        return {
+            "pending_msgs": 0,
+            "admin_tier": None,
+            "can_admin_owner": False,
+            "can_admin_manager": False,
+            "can_admin_operations": False,
+        }
     count = Message.query.filter_by(receiver_id=cu.id, is_read=False).count()
-    return {"pending_msgs": count}
+    return {
+        "pending_msgs": count,
+        "admin_tier": effective_admin_tier(cu),
+        "can_admin_owner": admin_tier_meets(cu, "owner"),
+        "can_admin_manager": admin_tier_meets(cu, "manager", "owner"),
+        "can_admin_operations": admin_tier_meets(cu, "staff", "manager", "owner"),
+    }
 
 
-@admin_bp.route('/sync_conflicts')
+@admin_bp.route("/sync_conflicts")
 @admin_required
+@manager_required
 def list_sync_conflicts():
     page, per_page = 1, 100
-    conflicts = SyncConflict.query.order_by(SyncConflict.created_at.desc()).limit(500).all()
-    return render_template('admin/sync_conflicts.html', conflicts=conflicts)
+    conflicts = (
+        SyncConflict.query.order_by(SyncConflict.created_at.desc()).limit(500).all()
+    )
+    return render_template("admin/sync_conflicts.html", conflicts=conflicts)
 
 
 # ── Image helper ─────────────────────────────────────────────
@@ -207,7 +292,10 @@ def apply_product_image(product):
         f = request.files["image"]
         uploaded_url = get_container().storage_service.upload_product_image(
             f,
-            filename_prefix=(product.name or "product").strip().lower().replace(" ", "-"),
+            filename_prefix=(product.name or "product")
+            .strip()
+            .lower()
+            .replace(" ", "-"),
         )
         product.image = uploaded_url
         product.image_url = uploaded_url
@@ -270,17 +358,21 @@ def build_order_payment_link(order):
 @admin_required
 def dashboard():
     today = utcnow().date()
+    realized_order_total = Order.total + func.coalesce(
+        Order.gift_card_redemption_amount,
+        0,
+    )
 
     total_orders = Order.query.count()
     today_orders = Order.query.filter(func.date(Order.placed_at) == today).count()
     total_revenue = (
-        db.session.query(func.sum(Order.total))
+        db.session.query(func.sum(realized_order_total))
         .filter(Order.status != "CANCELLED")
         .scalar()
         or 0
     )
     today_revenue = (
-        db.session.query(func.sum(Order.total))
+        db.session.query(func.sum(realized_order_total))
         .filter(func.date(Order.placed_at) == today, Order.status != "CANCELLED")
         .scalar()
         or 0
@@ -324,7 +416,7 @@ def dashboard():
     ).count()
 
     current_week_revenue = (
-        db.session.query(func.sum(Order.total))
+        db.session.query(func.sum(realized_order_total))
         .filter(
             func.date(Order.placed_at) >= window_start,
             func.date(Order.placed_at) <= today,
@@ -334,7 +426,7 @@ def dashboard():
         or 0
     )
     prev_week_revenue = (
-        db.session.query(func.sum(Order.total))
+        db.session.query(func.sum(realized_order_total))
         .filter(
             func.date(Order.placed_at) >= prev_window_start,
             func.date(Order.placed_at) <= prev_window_end,
@@ -378,7 +470,7 @@ def dashboard():
         d = today - timedelta(days=i)
         labels.append(d.strftime("%b %d"))
         rev = (
-            db.session.query(func.sum(Order.total))
+            db.session.query(func.sum(realized_order_total))
             .filter(func.date(Order.placed_at) == d, Order.status != "CANCELLED")
             .scalar()
             or 0
@@ -448,6 +540,7 @@ def dashboard():
 
 @admin_bp.route("/triage")
 @admin_required
+@manager_required
 def triage():
     pending_orders = (
         Order.query.filter(Order.status.in_(["PLACED", "PREPARING"]))
@@ -486,23 +579,96 @@ def triage():
     return render_template("admin/triage.html", **context)
 
 
+@admin_bp.route("/demand-insights")
+@admin_required
+@manager_required
+def demand_insights():
+    payload = get_container().demand_service.dashboard_payload()
+    return render_template("admin/demand_insights.html", **payload)
+
+
+@admin_bp.route("/demand-insights/events", methods=["POST"])
+@admin_required
+@manager_required
+def save_local_event():
+    event_id = request.form.get("event_id", type=int)
+    name = (request.form.get("name") or "").strip()
+    event_date_raw = (request.form.get("event_date") or "").strip()
+    expected_impact = (request.form.get("expected_impact") or "medium").strip().lower()
+    notes = (request.form.get("notes") or "").strip() or None
+
+    if expected_impact not in {"low", "medium", "high"}:
+        expected_impact = "medium"
+    if not name or not event_date_raw:
+        flash("Event name and date are required.", "danger")
+        return redirect(url_for("admin.demand_insights"))
+
+    try:
+        event_date = datetime.strptime(event_date_raw, "%Y-%m-%d").date()
+    except ValueError:
+        flash("Use a valid YYYY-MM-DD event date.", "danger")
+        return redirect(url_for("admin.demand_insights"))
+
+    event = db.session.get(LocalEvent, event_id) if event_id else None
+    if event is None:
+        event = LocalEvent(created_by=current_user.id)
+        db.session.add(event)
+
+    event.name = name
+    event.event_date = event_date
+    event.expected_impact = expected_impact
+    event.notes = notes
+    db.session.commit()
+    flash("Local event saved for demand insights.", "success")
+    return redirect(url_for("admin.demand_insights"))
+
+
+@admin_bp.route("/demand-insights/events/<int:event_id>/delete", methods=["POST"])
+@admin_required
+@manager_required
+def delete_local_event(event_id):
+    event = db.session.get(LocalEvent, event_id)
+    if event is None:
+        flash("Local event was not found.", "warning")
+        return redirect(url_for("admin.demand_insights"))
+    db.session.delete(event)
+    db.session.commit()
+    flash("Local event removed.", "success")
+    return redirect(url_for("admin.demand_insights"))
+
+
+@admin_bp.route("/demand-insights/weather/refresh", methods=["POST"])
+@admin_required
+@manager_required
+def refresh_demand_weather():
+    forecast = get_container().weather_service.refresh_forecast()
+    if forecast.get("status") == "ok":
+        flash("Weather forecast refreshed.", "success")
+    else:
+        flash(
+            forecast.get("message") or "Weather forecast could not be refreshed.",
+            "warning",
+        )
+    return redirect(url_for("admin.demand_insights"))
+
+
 # ── PRODUCT MANAGEMENT ───────────────────────────────────────
 @admin_bp.route("/products")
 @admin_required
+@manager_required
 def products():
     search = (request.args.get("q") or "").strip()
     get_container().inventory_service.backfill_missing_product_variants()
     query = Product.query
     if search:
         query = query.filter(Product.name.ilike(f"%{search}%"))
-    products = query.order_by(
-        Product.is_active.desc(), Product.created_at.desc()
-    ).all()
+    products = query.order_by(Product.is_active.desc(), Product.created_at.desc()).all()
     return render_template("admin/products.html", products=products, search=search)
 
 
 @admin_bp.route("/products/add", methods=["GET", "POST"])
 @admin_required
+@manager_required
 def add_product():
     categories = Category.query.all()
     raw_materials = (
@@ -520,7 +686,9 @@ def add_product():
                 is_eggless=bool(request.form.get("is_eggless")),
                 is_featured=bool(request.form.get("is_featured")),
                 preorder_required=bool(request.form.get("preorder_required")),
-                minimum_notice_hours=max(1, request.form.get("minimum_notice_hours", type=int) or 24),
+                minimum_notice_hours=max(
+                    1, request.form.get("minimum_notice_hours", type=int) or 24
+                ),
                 occasion_tags=request.form.get("occasion_tags", ""),
             )
             apply_product_image(p)
@@ -568,6 +736,7 @@ def add_product():
 
 @admin_bp.route("/products/<int:product_id>/edit", methods=["GET", "POST"])
 @admin_required
+@manager_required
 def edit_product(product_id):
     p = db.get_or_404(Product, product_id)
     categories = Category.query.all()
@@ -575,7 +744,9 @@ def edit_product(product_id):
         RawMaterial.query.filter_by(is_active=True).order_by(RawMaterial.name).all()
     )
     if request.method == "POST":
-        previous_variant_stock = {variant.id: variant.stock for variant in p.variants.all()}
+        previous_variant_stock = {
+            variant.id: variant.stock for variant in p.variants.all()
+        }
         before_snapshot = {
             "base_price": str(p.base_price),
             "name": p.name,
@@ -592,7 +763,9 @@ def edit_product(product_id):
             p.is_featured = bool(request.form.get("is_featured"))
             p.is_active = bool(request.form.get("is_active"))
             p.preorder_required = bool(request.form.get("preorder_required"))
-            p.minimum_notice_hours = max(1, request.form.get("minimum_notice_hours", type=int) or 24)
+            p.minimum_notice_hours = max(
+                1, request.form.get("minimum_notice_hours", type=int) or 24
+            )
             p.occasion_tags = request.form.get("occasion_tags", "")
             apply_product_image(p)
             variant_rows = [
@@ -657,6 +830,7 @@ def edit_product(product_id):
 
 @admin_bp.route("/products/<int:product_id>/delete", methods=["POST"])
 @admin_required
+@manager_required
 def delete_product(product_id):
     p = db.get_or_404(Product, product_id)
     if p.is_active:
@@ -679,6 +853,7 @@ def delete_product(product_id):
 # ── ORDER MANAGEMENT ─────────────────────────────────────────
 @admin_bp.route("/orders")
 @admin_required
+@operations_required
 def orders():
     status = request.args.get("status", "")
     scope = request.args.get("scope", "")
@@ -724,6 +899,7 @@ def orders():
 
 @admin_bp.route("/orders/<int:order_id>")
 @admin_required
+@operations_required
 def order_detail(order_id):
     order = db.get_or_404(Order, order_id)
     items = order.items.all()
@@ -761,6 +937,7 @@ def order_detail(order_id):
 
 @admin_bp.route("/orders/<int:order_id>/update-status", methods=["POST"])
 @admin_required
+@operations_required
 def update_order_status(order_id):
     status = (request.form.get("status") or "").strip().upper()
     offline_sync = get_container().offline_sync_service
@@ -779,7 +956,7 @@ def update_order_status(order_id):
         )
         return redirect(url_for("admin.order_detail", order_id=order_id))
     try:
-        expected_version = request.form.get('expected_version')
+        expected_version = request.form.get("expected_version")
         order = get_container().order_service.update_order_status(
             order_id,
             status,
@@ -813,8 +990,8 @@ def update_order_status(order_id):
 
     get_container().offline_sync_service.cache_order(order)
     rooms = [customer_room(order.user_id)]
-    if order.status in DELIVERY_RELEVANT_STATUSES:
-        rooms.append("delivery")
+    if order.status in DELIVERY_RELEVANT_STATUSES and order.delivery:
+        rooms.append(delivery_agent_room(order.delivery.agent_id))
     emit_order_status_updated(order, rooms)
 
     flash(f"Order status updated to {status}.", "success")
@@ -823,14 +1000,16 @@ def update_order_status(order_id):
 
 @admin_bp.route("/orders/<int:order_id>/assign-delivery", methods=["POST"])
 @admin_required
+@operations_required
 def assign_delivery(order_id):
     order = db.get_or_404(Order, order_id)
     agent_id = request.form.get("agent_id", type=int)
     agent = db.get_or_404(DeliveryAgent, agent_id)
 
-    expected_version = request.form.get('expected_version')
+    expected_version = request.form.get("expected_version")
     from utils.optimistic import assert_version
-    assert_version(order, expected_version, entity_name='Order')
+
+    assert_version(order, expected_version, entity_name="Order")
 
     # Wrap assignment in a transaction to atomically create/update delivery and agent state
     with db.session.begin():
@@ -840,9 +1019,7 @@ def assign_delivery(order_id):
             existing.assigned_time = utcnow()
         else:
             db.session.add(
-                Delivery(
-                    order_id=order_id, agent_id=agent_id, assigned_time=utcnow()
-                )
+                Delivery(order_id=order_id, agent_id=agent_id, assigned_time=utcnow())
             )
         agent.availability = False
     deliveries = Delivery.query.filter_by(agent_id=agent_id, status="ASSIGNED").all()
@@ -862,6 +1039,7 @@ def assign_delivery(order_id):
 
 @admin_bp.route("/orders/<int:order_id>/payment-link")
 @admin_required
+@operations_required
 def order_payment_link(order_id):
     order = db.get_or_404(Order, order_id)
     link = build_order_payment_link(order)
@@ -870,9 +1048,103 @@ def order_payment_link(order_id):
     return redirect(url_for("customer.payment_link_page", token=link.token))
 
 
+def _emit_reversal_side_effects(result):
+    order = result["order"]
+    reason = result.get("reason", "")
+    if result["action"] == "order_refunded":
+        emit_order_refunded(order, reason=reason)
+    else:
+        emit_order_cancelled(order, reason=reason)
+
+    for variant_id in set(result.get("restored_variant_ids", [])):
+        variant = db.session.get(ProductVariant, variant_id)
+        if variant:
+            emit_stock_updated(variant, include_customer=True)
+    for movement in result.get("stock_movements", []):
+        if movement and movement.raw_material:
+            emit_stock_updated(movement.raw_material)
+
+
+@admin_bp.route("/orders/<int:order_id>/cancel-refund", methods=["POST"])
+@admin_required
+@manager_required
+def cancel_or_refund_order(order_id):
+    order = db.get_or_404(Order, order_id)
+    action = (request.form.get("action") or "cancel").strip().lower()
+    reason = (request.form.get("reason") or "").strip()
+    reverse_stock = (request.form.get("stock_handling") or "").strip() == "reverse"
+    confirmed = request.form.get("confirm_reversal") == "yes"
+
+    if not confirmed:
+        flash("Please confirm the cancellation/refund before finalizing.", "warning")
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+    if not reason:
+        flash("A cancellation/refund reason is required.", "danger")
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+    if action not in {"cancel", "refund"}:
+        flash("Choose cancel or refund.", "danger")
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+
+    is_paid = (order.payment_status or "").upper() == "PAID" or (
+        order.payment and (order.payment.status or "").upper() == "PAID"
+    )
+    if is_paid and action != "refund":
+        flash("Paid orders must use the refund action.", "warning")
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+    if not is_paid and action == "refund":
+        flash("This order is not paid yet; use cancel instead.", "warning")
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+
+    try:
+        result = get_container().order_reversal_service.cancel_or_refund_order(
+            order,
+            reason=reason,
+            actor_id=current_user.id,
+            reverse_stock=reverse_stock,
+            allow_paid_refund=(action == "refund"),
+            initiated_by="admin",
+        )
+        notify(
+            order.user_id,
+            (
+                "Order Refunded"
+                if result["action"] == "order_refunded"
+                else "Order Cancelled"
+            ),
+            f"Order #{order.order_number} has been {order.status.lower()}.",
+            "payment" if result["action"] == "order_refunded" else "order",
+            url_for("customer.order_detail", order_id=order.id),
+        )
+        get_container().push_service.send_to_user(
+            order.user_id,
+            (
+                "Order Refunded"
+                if result["action"] == "order_refunded"
+                else "Order Cancelled"
+            ),
+            f"Order #{order.order_number} has been {order.status.lower()}.",
+            data={"order_id": order.id, "status": order.status},
+        )
+        db.session.commit()
+        _emit_reversal_side_effects(result)
+        flash(
+            f"Order #{order.order_number} {order.status.lower()} successfully.",
+            "success",
+        )
+    except ValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("order_reversal_failed order_id=%s", order_id)
+        flash("Unable to complete cancellation/refund right now.", "danger")
+    return redirect(url_for("admin.order_detail", order_id=order_id))
+
+
 # ── MODIFICATION REQUESTS ────────────────────────────────────
 @admin_bp.route("/modifications")
 @admin_required
+@operations_required
 def modifications():
     reqs = (
         ModificationRequest.query.filter_by(status="PENDING")
@@ -884,6 +1156,7 @@ def modifications():
 
 @admin_bp.route("/modifications/<int:req_id>/resolve", methods=["POST"])
 @admin_required
+@operations_required
 def resolve_modification(req_id):
     req = db.get_or_404(ModificationRequest, req_id)
     action = request.form.get("action")
@@ -933,6 +1206,7 @@ def resolve_modification(req_id):
 # ── REVIEWS ──────────────────────────────────────────────────
 @admin_bp.route("/reviews")
 @admin_required
+@manager_required
 def reviews():
     review_rows = (
         Review.query.options(
@@ -954,6 +1228,7 @@ def reviews():
 
 @admin_bp.route("/reviews/<int:review_id>/generate-draft", methods=["POST"])
 @admin_required
+@manager_required
 def generate_review_draft(review_id):
     review = (
         Review.query.options(
@@ -974,6 +1249,7 @@ def generate_review_draft(review_id):
 
 @admin_bp.route("/reviews/<int:review_id>/reply", methods=["POST"])
 @admin_required
+@manager_required
 def post_review_reply(review_id):
     review = db.get_or_404(Review, review_id)
     reply_text = (request.form.get("admin_reply") or "").strip()
@@ -991,6 +1267,7 @@ def post_review_reply(review_id):
 # ── CUSTOMERS ────────────────────────────────────────────────
 @admin_bp.route("/customers")
 @admin_required
+@manager_required
 def customers():
     users = User.query.filter_by(role="customer").order_by(User.created_at.desc()).all()
     return render_template("admin/customers.html", users=users)
@@ -998,6 +1275,7 @@ def customers():
 
 @admin_bp.route("/customers/<int:user_id>")
 @admin_required
+@manager_required
 def customer_detail(user_id):
     user = db.get_or_404(User, user_id)
     orders = (
@@ -1017,6 +1295,7 @@ def customer_detail(user_id):
 # ── CHAT ─────────────────────────────────────────────────────
 @admin_bp.route("/chat")
 @admin_required
+@manager_required
 def chat():
     customers = (
         db.session.query(User)
@@ -1030,6 +1309,7 @@ def chat():
 
 @admin_bp.route("/chat/<int:customer_id>")
 @admin_required
+@manager_required
 def chat_thread(customer_id):
     customer = db.get_or_404(User, customer_id)
     messages = (
@@ -1067,6 +1347,7 @@ def chat_thread(customer_id):
 
 @admin_bp.route("/chat/send/<int:receiver_id>", methods=["POST"])
 @admin_required
+@manager_required
 def admin_send_message(receiver_id):
     content = request.form.get("content", "").strip()
     if content:
@@ -1087,6 +1368,7 @@ def admin_send_message(receiver_id):
 # ── INVENTORY ────────────────────────────────────────────────
 @admin_bp.route("/inventory")
 @admin_required
+@operations_required
 def inventory():
     get_container().inventory_service.backfill_missing_product_variants()
     variants = (
@@ -1120,6 +1402,7 @@ def inventory():
 
 @admin_bp.route("/inventory/update", methods=["POST"])
 @admin_required
+@operations_required
 def update_stock():
     variant_id = request.form.get("variant_id", type=int)
     try:
@@ -1145,9 +1428,10 @@ def update_stock():
     try:
         if v is None:
             raise SQLAlchemyError("Database unavailable")
-        expected_version = request.form.get('expected_version')
+        expected_version = request.form.get("expected_version")
         from utils.optimistic import assert_version
-        assert_version(v, expected_version, entity_name='ProductVariant')
+
+        assert_version(v, expected_version, entity_name="ProductVariant")
         previous_stock = v.stock
         v.stock = new_stock
         v.version = int(v.version or 0) + 1
@@ -1188,6 +1472,7 @@ def update_stock():
 
 @admin_bp.route("/inventory/raw-material/update", methods=["POST"])
 @admin_required
+@operations_required
 def update_raw_material_stock():
     material_id = request.form.get("material_id", type=int)
     try:
@@ -1217,9 +1502,10 @@ def update_raw_material_stock():
     try:
         if mat is None:
             raise SQLAlchemyError("Database unavailable")
-        expected_version = request.form.get('expected_version')
+        expected_version = request.form.get("expected_version")
         from utils.optimistic import assert_version
-        assert_version(mat, expected_version, entity_name='RawMaterial')
+
+        assert_version(mat, expected_version, entity_name="RawMaterial")
         previous_stock = Decimal(str(mat.stock or 0))
         inventory_service = get_container().inventory_service
         if new_stock > previous_stock:
@@ -1244,9 +1530,17 @@ def update_raw_material_stock():
             check_and_send_inventory_alerts()
         except Exception:
             pass
-        if movement and Decimal(str(movement.change_amount or 0)) > 0 and movement.reason == "manual_restock":
-            flash("Raw material restocked. Log the purchase expense when ready.", "info")
-            return redirect(url_for("admin.finance_log_restock", movement_id=movement.id))
+        if (
+            movement
+            and Decimal(str(movement.change_amount or 0)) > 0
+            and movement.reason == "manual_restock"
+        ):
+            flash(
+                "Raw material restocked. Log the purchase expense when ready.", "info"
+            )
+            return redirect(
+                url_for("admin.finance_log_restock", movement_id=movement.id)
+            )
         flash("Raw material stock updated!", "success")
     except SQLAlchemyError:
         db.session.rollback()
@@ -1268,6 +1562,7 @@ def update_raw_material_stock():
 
 @admin_bp.route("/suppliers")
 @admin_required
+@manager_required
 def suppliers():
     search = (request.args.get("q") or "").strip()
     query = Supplier.query
@@ -1279,6 +1574,7 @@ def suppliers():
 
 @admin_bp.route("/suppliers/add", methods=["POST"])
 @admin_required
+@manager_required
 def add_supplier():
     name = (request.form.get("name") or "").strip()
     if not name:
@@ -1304,6 +1600,7 @@ def add_supplier():
 
 @admin_bp.route("/suppliers/<int:supplier_id>/toggle", methods=["POST"])
 @admin_required
+@manager_required
 def toggle_supplier_status(supplier_id):
     supplier = db.get_or_404(Supplier, supplier_id)
     supplier.is_active = not supplier.is_active
@@ -1315,8 +1612,259 @@ def toggle_supplier_status(supplier_id):
     return redirect(url_for("admin.suppliers"))
 
 
+@admin_bp.route("/vendors")
+@admin_required
+@operations_required
+def vendors():
+    search = (request.args.get("q") or "").strip()
+    query = Vendor.query
+    if search:
+        query = query.filter(
+            or_(
+                Vendor.name.ilike(f"%{search}%"),
+                Vendor.contact_person.ilike(f"%{search}%"),
+                Vendor.phone.ilike(f"%{search}%"),
+                Vendor.email.ilike(f"%{search}%"),
+                Vendor.gstin.ilike(f"%{search}%"),
+            )
+        )
+    vendors = query.order_by(Vendor.is_active.desc(), Vendor.name.asc()).all()
+    return render_template("admin/vendors.html", vendors=vendors, search=search)
+
+
+@admin_bp.route("/vendors/add", methods=["POST"])
+@admin_required
+@manager_required
+def add_vendor():
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Vendor name is required.", "danger")
+        return redirect(url_for("admin.vendors"))
+    if Vendor.query.filter(func.lower(Vendor.name) == name.lower()).first():
+        flash("Vendor already exists.", "warning")
+        return redirect(url_for("admin.vendors"))
+    vendor = Vendor(
+        name=name,
+        contact_person=(request.form.get("contact_person") or "").strip() or None,
+        phone=(request.form.get("phone") or "").strip() or None,
+        email=(request.form.get("email") or "").strip() or None,
+        address=(request.form.get("address") or "").strip() or None,
+        payment_terms=(request.form.get("payment_terms") or "").strip() or None,
+        gstin=(request.form.get("gstin") or "").strip().upper() or None,
+        is_active=True,
+    )
+    db.session.add(vendor)
+    db.session.commit()
+    flash("Vendor added successfully.", "success")
+    return redirect(url_for("admin.vendor_detail", vendor_id=vendor.id))
+
+
+@admin_bp.route("/vendors/<int:vendor_id>")
+@admin_required
+@operations_required
+def vendor_detail(vendor_id):
+    vendor = db.get_or_404(Vendor, vendor_id)
+    purchase_orders = (
+        PurchaseOrder.query.filter_by(vendor_id=vendor.id)
+        .order_by(PurchaseOrder.order_date.desc(), PurchaseOrder.id.desc())
+        .all()
+    )
+    spend_rows = get_container().finance_service.vendor_spend_report(
+        start_date=date(2000, 1, 1),
+        end_date=utcnow().date(),
+    )
+    spend = next((row for row in spend_rows if row["vendor_id"] == vendor.id), None)
+    typical_costs = (
+        VendorProduct.query.filter_by(vendor_id=vendor.id)
+        .join(RawMaterial)
+        .order_by(RawMaterial.name.asc())
+        .all()
+    )
+    return render_template(
+        "admin/vendor_detail.html",
+        vendor=vendor,
+        purchase_orders=purchase_orders,
+        spend=spend,
+        typical_costs=typical_costs,
+    )
+
+
+@admin_bp.route("/vendors/<int:vendor_id>/edit", methods=["POST"])
+@admin_required
+@manager_required
+def edit_vendor(vendor_id):
+    vendor = db.get_or_404(Vendor, vendor_id)
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Vendor name is required.", "danger")
+        return redirect(url_for("admin.vendor_detail", vendor_id=vendor.id))
+    duplicate = Vendor.query.filter(
+        func.lower(Vendor.name) == name.lower(),
+        Vendor.id != vendor.id,
+    ).first()
+    if duplicate:
+        flash("Another vendor already uses that name.", "warning")
+        return redirect(url_for("admin.vendor_detail", vendor_id=vendor.id))
+    vendor.name = name
+    vendor.contact_person = (request.form.get("contact_person") or "").strip() or None
+    vendor.phone = (request.form.get("phone") or "").strip() or None
+    vendor.email = (request.form.get("email") or "").strip() or None
+    vendor.address = (request.form.get("address") or "").strip() or None
+    vendor.payment_terms = (request.form.get("payment_terms") or "").strip() or None
+    vendor.gstin = (request.form.get("gstin") or "").strip().upper() or None
+    vendor.is_active = bool(request.form.get("is_active"))
+    db.session.commit()
+    flash("Vendor updated.", "success")
+    return redirect(url_for("admin.vendor_detail", vendor_id=vendor.id))
+
+
+@admin_bp.route("/purchase-orders")
+@admin_required
+@operations_required
+def purchase_orders():
+    status = (request.args.get("status") or "").strip().lower()
+    query = PurchaseOrder.query.join(Vendor)
+    if status:
+        query = query.filter(PurchaseOrder.status == status)
+    orders = query.order_by(
+        PurchaseOrder.order_date.desc(), PurchaseOrder.id.desc()
+    ).all()
+    return render_template(
+        "admin/purchase_orders.html", purchase_orders=orders, status=status
+    )
+
+
+@admin_bp.route("/purchase-orders/new", methods=["GET", "POST"])
+@admin_required
+@manager_required
+def new_purchase_order():
+    vendors = Vendor.query.filter_by(is_active=True).order_by(Vendor.name.asc()).all()
+    materials = (
+        RawMaterial.query.filter_by(is_active=True)
+        .order_by(RawMaterial.name.asc())
+        .all()
+    )
+    if request.method == "POST":
+        vendor_id = request.form.get("vendor_id", type=int)
+        vendor = db.session.get(Vendor, vendor_id)
+        if vendor is None or not vendor.is_active:
+            flash("Choose an active vendor.", "danger")
+            return redirect(url_for("admin.new_purchase_order"))
+        order_date_raw = request.form.get("order_date") or utcnow().date().isoformat()
+        expected_raw = (request.form.get("expected_delivery_date") or "").strip()
+        try:
+            gst_rate = parse_decimal(
+                request.form.get("gst_rate_percent") or "0", "GST rate"
+            )
+            order = PurchaseOrder(
+                vendor_id=vendor.id,
+                status="draft",
+                order_date=date.fromisoformat(order_date_raw),
+                expected_delivery_date=(
+                    date.fromisoformat(expected_raw) if expected_raw else None
+                ),
+                notes=(request.form.get("notes") or "").strip() or None,
+                created_by=current_user.id,
+                gst_rate_percent=gst_rate,
+            )
+            db.session.add(order)
+            db.session.flush()
+            material_ids = request.form.getlist("raw_material_id[]")
+            quantities = request.form.getlist("quantity[]")
+            unit_costs = request.form.getlist("unit_cost[]")
+            item_count = 0
+            for raw_id, qty_raw, cost_raw in zip(material_ids, quantities, unit_costs):
+                if not raw_id:
+                    continue
+                material = db.session.get(RawMaterial, int(raw_id))
+                if material is None:
+                    continue
+                quantity = parse_decimal(qty_raw, f"{material.name} quantity")
+                unit_cost = parse_decimal(cost_raw, f"{material.name} unit cost")
+                if quantity <= 0 or unit_cost < 0:
+                    continue
+                db.session.add(
+                    PurchaseOrderItem(
+                        purchase_order_id=order.id,
+                        raw_material_id=material.id,
+                        quantity=quantity,
+                        unit_cost=unit_cost,
+                    )
+                )
+                item_count += 1
+            if item_count == 0:
+                db.session.rollback()
+                flash("Add at least one raw material line.", "danger")
+                return redirect(url_for("admin.new_purchase_order"))
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return redirect(url_for("admin.new_purchase_order"))
+        db.session.commit()
+        flash("Purchase order created.", "success")
+        return redirect(url_for("admin.purchase_order_detail", order_id=order.id))
+    return render_template(
+        "admin/purchase_order_form.html",
+        vendors=vendors,
+        materials=materials,
+        today=utcnow().date().isoformat(),
+        selected_vendor_id=request.args.get("vendor_id", type=int),
+    )
+
+
+@admin_bp.route("/purchase-orders/<int:order_id>")
+@admin_required
+@operations_required
+def purchase_order_detail(order_id):
+    purchase_order = db.get_or_404(PurchaseOrder, order_id)
+    transaction = FinancialTransaction.query.filter_by(
+        reference_purchase_order_id=purchase_order.id
+    ).first()
+    return render_template(
+        "admin/purchase_order_detail.html",
+        purchase_order=purchase_order,
+        transaction=transaction,
+    )
+
+
+@admin_bp.route("/purchase-orders/<int:order_id>/status", methods=["POST"])
+@admin_required
+@manager_required
+def update_purchase_order_status(order_id):
+    purchase_order = db.get_or_404(PurchaseOrder, order_id)
+    action = (request.form.get("action") or "").strip().lower()
+    if action not in {"ordered", "received", "cancelled"}:
+        flash("Choose a valid purchase order action.", "danger")
+        return redirect(
+            url_for("admin.purchase_order_detail", order_id=purchase_order.id)
+        )
+    try:
+        if action == "received":
+            get_container().purchase_order_service.receive_purchase_order(
+                purchase_order,
+                actor_id=current_user.id,
+            )
+        else:
+            if purchase_order.status == "received":
+                flash("Received purchase orders cannot be changed.", "warning")
+                return redirect(
+                    url_for("admin.purchase_order_detail", order_id=purchase_order.id)
+                )
+            purchase_order.status = action
+        db.session.commit()
+    except ValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(
+            url_for("admin.purchase_order_detail", order_id=purchase_order.id)
+        )
+    flash(f"Purchase order marked {action}.", "success")
+    return redirect(url_for("admin.purchase_order_detail", order_id=purchase_order.id))
+
+
 @admin_bp.route("/branches")
 @admin_required
+@manager_required
 def branches():
     branches = Branch.query.order_by(Branch.is_active.desc(), Branch.name).all()
     return render_template("admin/branches.html", branches=branches)
@@ -1324,6 +1872,7 @@ def branches():
 
 @admin_bp.route("/branches/add", methods=["POST"])
 @admin_required
+@manager_required
 def add_branch():
     name = (request.form.get("name") or "").strip()
     if not name:
@@ -1346,6 +1895,7 @@ def add_branch():
 
 @admin_bp.route("/branches/<int:branch_id>/toggle", methods=["POST"])
 @admin_required
+@manager_required
 def toggle_branch_status(branch_id):
     branch = db.get_or_404(Branch, branch_id)
     branch.is_active = not branch.is_active
@@ -1359,9 +1909,14 @@ def toggle_branch_status(branch_id):
 
 @admin_bp.route("/production")
 @admin_required
+@manager_required
 def production():
     plans = ProductionPlan.query.order_by(ProductionPlan.planned_date.desc()).all()
-    batches = ProductionBatch.query.order_by(ProductionBatch.produced_at.desc()).limit(25).all()
+    batches = (
+        ProductionBatch.query.order_by(ProductionBatch.produced_at.desc())
+        .limit(25)
+        .all()
+    )
     products = Product.query.order_by(Product.name).all()
     branches = Branch.query.order_by(Branch.name).all()
     return render_template(
@@ -1375,6 +1930,7 @@ def production():
 
 @admin_bp.route("/production/add", methods=["POST"])
 @admin_required
+@manager_required
 def add_production_plan():
     product_id = request.form.get("product_id", type=int)
     planned_date = request.form.get("planned_date")
@@ -1404,15 +1960,19 @@ def add_production_plan():
 
 @admin_bp.route("/batches")
 @admin_required
+@manager_required
 def batches():
     batches = ProductionBatch.query.order_by(ProductionBatch.produced_at.desc()).all()
     products = Product.query.order_by(Product.name).all()
     branches = Branch.query.order_by(Branch.name).all()
-    return render_template("admin/batches.html", batches=batches, products=products, branches=branches)
+    return render_template(
+        "admin/batches.html", batches=batches, products=products, branches=branches
+    )
 
 
 @admin_bp.route("/batches/add", methods=["POST"])
 @admin_required
+@manager_required
 def add_batch():
     product_id = request.form.get("product_id", type=int)
     branch_id = request.form.get("branch_id", type=int)
@@ -1453,12 +2013,15 @@ def add_batch():
 
 @admin_bp.route("/batches/<int:batch_id>/update", methods=["POST"])
 @admin_required
+@manager_required
 def update_batch(batch_id):
     batch = db.get_or_404(ProductionBatch, batch_id)
     batch.status = request.form.get("status", batch.status)
     batch.notes = (request.form.get("notes") or "").strip()
     try:
-        batch.waste_percentage = float(request.form.get("waste_percentage", batch.waste_percentage) or 0)
+        batch.waste_percentage = float(
+            request.form.get("waste_percentage", batch.waste_percentage) or 0
+        )
     except ValueError:
         flash("Invalid waste percentage.", "danger")
         return redirect(url_for("admin.batches"))
@@ -1469,6 +2032,7 @@ def update_batch(batch_id):
 
 @admin_bp.route("/raw-materials")
 @admin_required
+@operations_required
 def raw_materials():
     search = (request.args.get("q") or "").strip()
     page = request.args.get("page", 1, type=int) or 1
@@ -1503,6 +2067,7 @@ def raw_materials():
 
 @admin_bp.route("/raw-materials/add", methods=["POST"])
 @admin_required
+@operations_required
 def add_raw_material():
     name = request.form.get("name", "").strip()
     if not name:
@@ -1536,6 +2101,7 @@ def add_raw_material():
 
 @admin_bp.route("/raw-materials/<int:material_id>/update", methods=["POST"])
 @admin_required
+@operations_required
 def update_raw_material(material_id):
     mat = db.get_or_404(RawMaterial, material_id)
     name = request.form.get("name", "").strip()
@@ -1574,6 +2140,7 @@ def update_raw_material(material_id):
 
 @admin_bp.route("/raw-materials/<int:material_id>/toggle", methods=["POST"])
 @admin_required
+@operations_required
 def toggle_raw_material_status(material_id):
     mat = db.get_or_404(RawMaterial, material_id)
     mat.is_active = not mat.is_active
@@ -1588,6 +2155,7 @@ def toggle_raw_material_status(material_id):
 # ── COUPONS ──────────────────────────────────────────────────
 @admin_bp.route("/coupons")
 @admin_required
+@manager_required
 def coupons():
     search = (request.args.get("q") or "").strip()
     query = Coupon.query
@@ -1601,6 +2169,7 @@ def coupons():
 
 @admin_bp.route("/coupons/add", methods=["POST"])
 @admin_required
+@manager_required
 def add_coupon():
     code = request.form.get("code", "").strip().upper()
     if not code:
@@ -1643,6 +2212,7 @@ def add_coupon():
 
 @admin_bp.route("/coupons/<int:coupon_id>/toggle", methods=["POST"])
 @admin_required
+@manager_required
 def toggle_coupon(coupon_id):
     coupon = db.get_or_404(Coupon, coupon_id)
     coupon.is_active = not coupon.is_active
@@ -1652,12 +2222,15 @@ def toggle_coupon(coupon_id):
         "success" if coupon.is_active else "info",
     )
     search = (request.args.get("q") or "").strip()
-    return redirect(url_for("admin.coupons", q=search) if search else url_for("admin.coupons"))
+    return redirect(
+        url_for("admin.coupons", q=search) if search else url_for("admin.coupons")
+    )
 
 
 # ── DELIVERY AGENTS ──────────────────────────────────────────
 @admin_bp.route("/agents")
 @admin_required
+@manager_required
 def agents():
     agents = (
         DeliveryAgent.query.outerjoin(User, DeliveryAgent.user_id == User.id)
@@ -1701,6 +2274,7 @@ def agents():
 
 @admin_bp.route("/agents/add", methods=["POST"])
 @admin_required
+@owner_required
 def add_agent():
     name = (request.form.get("name") or "").strip()
     phone = (request.form.get("phone") or "").strip()
@@ -1763,6 +2337,7 @@ def add_agent():
 
 @admin_bp.route("/agents/<int:agent_id>/reset-password", methods=["POST"])
 @admin_required
+@owner_required
 def reset_agent_password(agent_id):
     agent = db.get_or_404(DeliveryAgent, agent_id)
     if agent.user is None:
@@ -1805,6 +2380,7 @@ def reset_agent_password(agent_id):
 
 @admin_bp.route("/agents/<int:agent_id>/toggle-access", methods=["POST"])
 @admin_required
+@owner_required
 def toggle_agent_access(agent_id):
     agent = db.get_or_404(DeliveryAgent, agent_id)
     if agent.user is None:
@@ -1839,12 +2415,17 @@ def toggle_agent_access(agent_id):
 # ── ANALYTICS ────────────────────────────────────────────────
 @admin_bp.route("/analytics")
 @admin_required
+@manager_required
 def analytics():
     selected_period = (request.args.get("period") or "month").strip().lower()
     if selected_period not in PERIOD_LABELS:
         selected_period = "month"
-    selected_granularity = request.args.get("granularity") or default_granularity(selected_period)
-    selected_payload = analytics_payload(selected_period, granularity=selected_granularity)
+    selected_granularity = request.args.get("granularity") or default_granularity(
+        selected_period
+    )
+    selected_payload = analytics_payload(
+        selected_period, granularity=selected_granularity
+    )
     period_keys = ["today", "week", "month", "year"]
 
     return render_template(
@@ -1857,10 +2438,7 @@ def analytics():
             }
             for period in period_keys
         ],
-        best_sellers={
-            period: top_selling_product(period)
-            for period in period_keys
-        },
+        best_sellers={period: top_selling_product(period) for period in period_keys},
         selected_period=selected_period,
         selected_payload=selected_payload,
         period_labels=PERIOD_LABELS,
@@ -1869,6 +2447,7 @@ def analytics():
 
 @admin_bp.route("/api/analytics/revenue")
 @admin_required
+@manager_required
 def analytics_revenue_api():
     period = (request.args.get("period") or "month").strip().lower()
     start_date = request.args.get("start_date")
@@ -1892,6 +2471,7 @@ def analytics_revenue_api():
 # ── CATEGORIES ───────────────────────────────────────────────
 @admin_bp.route("/categories")
 @admin_required
+@manager_required
 def categories():
     cats = Category.query.all()
     return render_template("admin/categories.html", cats=cats)
@@ -1899,6 +2479,7 @@ def categories():
 
 @admin_bp.route("/categories/add", methods=["POST"])
 @admin_required
+@manager_required
 def add_category():
     name = request.form.get("name", "").strip()
     icon = request.form.get("icon", "🎂")
@@ -1912,6 +2493,7 @@ def add_category():
 # ── LOYALTY ADMIN ────────────────────────────────────────────
 @admin_bp.route("/loyalty")
 @admin_required
+@manager_required
 def loyalty():
     """Loyalty points leaderboard + adjustment panel."""
     top_users = (
@@ -1947,39 +2529,183 @@ def loyalty():
 
 @admin_bp.route("/loyalty/adjust", methods=["POST"])
 @admin_required
+@manager_required
 def loyalty_adjust():
     user_id = request.form.get("user_id", type=int)
     points = request.form.get("points", type=int)
-    reason = request.form.get("reason", "admin_adj").strip() or "admin_adj"
+    reason = (request.form.get("reason") or "").strip()
     if not user_id or points is None:
         flash("User and points are required.", "danger")
         return redirect(url_for("admin.loyalty"))
+    if not reason:
+        flash("A reason is required for loyalty adjustments.", "danger")
+        return redirect(url_for("admin.loyalty"))
     user = db.get_or_404(User, user_id)
-    before_points = user.loyalty_balance
-    LoyaltyLedger.admin_adjust(user_id, points, reason)
+    before_points = user.loyalty_points
+    try:
+        get_container().loyalty_service.adjust_points(user_id, points, reason)
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("admin.loyalty"))
     notify(
         user_id,
         "Loyalty Points Updated",
         f"Your points have been adjusted by {points:+d} by the bakery.",
         "loyalty",
     )
-    db.session.commit()
     get_container().audit_service.log(
         current_user,
         "loyalty_points_adjusted",
         "User",
         user_id,
         before={"loyalty_balance": before_points},
-        after={"loyalty_balance": user.loyalty_balance, "delta": points, "reason": reason},
+        after={
+            "loyalty_balance": user.loyalty_points,
+            "delta": points,
+            "reason": reason,
+        },
         change_summary=f"Loyalty adjusted by {points:+d} for {user.name}",
     )
+    db.session.commit()
     flash(f"Adjusted {points:+d} pts for {user.name}.", "success")
     return redirect(url_for("admin.loyalty"))
+
+
+# ── GIFT CARDS ───────────────────────────────────────────────
+@admin_bp.route("/gift-cards")
+@admin_required
+@manager_required
+def gift_cards():
+    cards = (
+        GiftCard.query.order_by(GiftCard.issued_at.desc(), GiftCard.id.desc())
+        .limit(250)
+        .all()
+    )
+    for card in cards:
+        card.recent_transactions = (
+            card.transactions.order_by(GiftCardTransaction.created_at.desc())
+            .limit(4)
+            .all()
+        )
+    liability = get_container().gift_card_service.outstanding_liability()
+    return render_template(
+        "admin/gift_cards.html",
+        cards=cards,
+        liability=liability,
+    )
+
+
+@admin_bp.route("/gift-cards/issue", methods=["POST"])
+@admin_required
+@manager_required
+def issue_gift_card():
+    amount = request.form.get("amount", "0")
+    recipient_email = (request.form.get("recipient_email") or "").strip()
+    message = (request.form.get("message") or "").strip()
+    try:
+        with db.session.begin_nested():
+            card = get_container().gift_card_service.issue(
+                amount=amount,
+                recipient_email=recipient_email,
+                message=message,
+                actor_id=current_user.id,
+                reason="counter_gift_card_issue",
+            )
+            get_container().audit_service.log(
+                current_user.id,
+                "gift_card_issued",
+                "GiftCard",
+                card.id,
+                before=None,
+                after={
+                    "code": card.code,
+                    "initial_value": str(card.initial_value),
+                    "recipient_email": card.recipient_email,
+                },
+                change_summary=f"Gift card {card.code} issued.",
+            )
+        db.session.commit()
+        flash(f"Gift card {card.code} issued.", "success")
+    except ValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(request.referrer or url_for("admin.gift_cards"))
+
+
+@admin_bp.route("/gift-cards/<int:card_id>/adjust", methods=["POST"])
+@admin_required
+@manager_required
+def adjust_gift_card(card_id):
+    card = db.get_or_404(GiftCard, card_id)
+    reason = (request.form.get("reason") or "").strip()
+    before = {"balance": str(card.current_balance), "status": card.status}
+    try:
+        with db.session.begin_nested():
+            get_container().gift_card_service.manual_adjust(
+                card,
+                request.form.get("amount_change", "0"),
+                reason=reason,
+                actor_id=current_user.id,
+            )
+            get_container().audit_service.log(
+                current_user.id,
+                "gift_card_adjusted",
+                "GiftCard",
+                card.id,
+                before=before,
+                after={"balance": str(card.current_balance), "status": card.status},
+                change_summary=f"Gift card {card.code} adjusted: {reason}",
+            )
+        db.session.commit()
+        flash("Gift card balance adjusted.", "success")
+    except ValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("admin.gift_cards"))
+
+
+@admin_bp.route("/gift-cards/<int:card_id>/cancel", methods=["POST"])
+@admin_required
+@manager_required
+def cancel_gift_card(card_id):
+    card = db.get_or_404(GiftCard, card_id)
+    reason = (request.form.get("reason") or "").strip()
+    before = {"balance": str(card.current_balance), "status": card.status}
+    try:
+        with db.session.begin_nested():
+            get_container().gift_card_service.cancel(
+                card,
+                reason=reason,
+                actor_id=current_user.id,
+            )
+            get_container().audit_service.log(
+                current_user.id,
+                "gift_card_cancelled",
+                "GiftCard",
+                card.id,
+                before=before,
+                after={"balance": str(card.current_balance), "status": card.status},
+                change_summary=f"Gift card {card.code} cancelled: {reason}",
+            )
+        db.session.commit()
+        flash("Gift card cancelled.", "success")
+    except ValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("admin.gift_cards"))
+
+
+@admin_bp.route("/pos/gift-card", methods=["POST"])
+@admin_required
+@manager_required
+def pos_gift_card():
+    return issue_gift_card()
 
 
 # ── INVENTORY ALERT TRIGGER (manual) ─────────────────────────
 @admin_bp.route("/inventory/send-alerts", methods=["POST"])
 @admin_required
+@operations_required
 def send_inventory_alerts():
     try:
         check_and_send_inventory_alerts()
@@ -1991,6 +2717,7 @@ def send_inventory_alerts():
 
 @admin_bp.route("/forecasts")
 @admin_required
+@manager_required
 def forecasts():
     target_date = utcnow().date() + timedelta(days=1)
     forecasts = get_container().forecast_service.weekly_summary()
@@ -1998,14 +2725,19 @@ def forecasts():
         forecasts = get_container().forecast_service.build_daily_forecasts(
             target_date=target_date
         )
-    return render_template("admin/forecasts.html", forecasts=forecasts, target_date=target_date)
+    return render_template(
+        "admin/forecasts.html", forecasts=forecasts, target_date=target_date
+    )
 
 
 @admin_bp.route("/kds")
 @admin_required
+@operations_required
 def kitchen_display():
     orders = (
-        Order.query.filter(Order.status.in_(["PLACED", "PREPARING", "PACKED", "READY_FOR_PICKUP"]))
+        Order.query.filter(
+            Order.status.in_(["PLACED", "PREPARING", "PACKED", "READY_FOR_PICKUP"])
+        )
         .order_by(Order.placed_at.asc())
         .all()
     )
@@ -2014,15 +2746,26 @@ def kitchen_display():
 
 @admin_bp.route("/staff")
 @admin_required
+@owner_required
 def staff():
     staff_users = (
-        User.query.filter(User.role != "customer")
-        .order_by(User.role.asc(), User.name.asc())
+        User.query.filter(
+            User.role.in_(
+                ("admin", "super_admin", "branch_manager", "cashier", "kitchen_staff")
+            )
+        )
+        .order_by(User.is_active.desc(), User.admin_tier.desc(), User.name.asc())
         .all()
     )
     shifts = StaffShift.query.order_by(StaffShift.shift_date.desc()).limit(20).all()
-    attendance = AttendanceRecord.query.order_by(AttendanceRecord.created_at.desc()).limit(20).all()
-    salaries = SalaryRecord.query.order_by(SalaryRecord.period_end.desc()).limit(20).all()
+    attendance = (
+        AttendanceRecord.query.order_by(AttendanceRecord.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    salaries = (
+        SalaryRecord.query.order_by(SalaryRecord.period_end.desc()).limit(20).all()
+    )
     branches = Branch.query.order_by(Branch.name.asc()).all()
     return render_template(
         "admin/staff.html",
@@ -2031,19 +2774,23 @@ def staff():
         attendance=attendance,
         salaries=salaries,
         branches=branches,
-        role_options=["admin", "branch_manager", "cashier", "kitchen_staff", "delivery"],
+        tier_options=["manager", "staff"],
+        edit_tier_options=["owner", "manager", "staff"],
     )
 
 
 @admin_bp.route("/staff/add", methods=["POST"])
 @admin_required
+@owner_required
 def add_staff_member():
     name = (request.form.get("name") or "").strip()
     email = (request.form.get("email") or "").strip().lower()
     phone = (request.form.get("phone") or "").strip()
     password = (request.form.get("password") or "").strip()
-    role = (request.form.get("role") or "cashier").strip().lower()
+    admin_tier = (request.form.get("admin_tier") or "staff").strip().lower()
     branch_id = request.form.get("branch_id", type=int)
+    if admin_tier not in {"manager", "staff"}:
+        admin_tier = "staff"
     if not name or not email or not password:
         flash("Name, email, and password are required.", "danger")
         return redirect(url_for("admin.staff"))
@@ -2059,19 +2806,141 @@ def add_staff_member():
         name=name,
         email=email,
         phone=phone,
-        role=role,
+        role="admin",
+        admin_tier=admin_tier,
         branch_id=branch_id,
         is_active=True,
     )
     user.set_password(password)
     db.session.add(user)
+    db.session.flush()
+    get_container().audit_service.log(
+        current_user,
+        "admin_staff_created",
+        "User",
+        user.id,
+        after={
+            "email": user.email,
+            "role": user.role,
+            "admin_tier": user.admin_tier,
+            "is_active": user.is_active,
+        },
+        change_summary=f"Admin portal account created for {name}.",
+    )
     db.session.commit()
-    flash(f"{name} added to staff.", "success")
+    flash(f"{name} added as {admin_tier} admin staff.", "success")
+    return redirect(url_for("admin.staff"))
+
+
+def _active_owner_count(excluding_user_id=None):
+    query = User.query.filter(
+        User.is_active == True,
+        User.role.in_(("admin", "super_admin")),
+    )
+    owners = [
+        user
+        for user in query.all()
+        if user.effective_admin_tier == "owner"
+        and (excluding_user_id is None or user.id != excluding_user_id)
+    ]
+    return len(owners)
+
+
+@admin_bp.route("/staff/<int:user_id>/tier", methods=["POST"])
+@admin_required
+@owner_required
+def update_staff_tier(user_id):
+    user = db.get_or_404(User, user_id)
+    if not has_role(user, *ADMIN_PORTAL_ROLES):
+        flash("Only admin-portal accounts can receive admin tiers.", "danger")
+        return redirect(url_for("admin.staff"))
+    new_tier = (request.form.get("admin_tier") or "staff").strip().lower()
+    if new_tier not in {"owner", "manager", "staff"}:
+        flash("Choose a valid admin tier.", "danger")
+        return redirect(url_for("admin.staff"))
+    previous = {
+        "role": user.role,
+        "admin_tier": user.effective_admin_tier,
+        "is_active": user.is_active,
+    }
+    if user.id == current_user.id and new_tier != "owner":
+        flash("You cannot remove owner access from your own account.", "warning")
+        return redirect(url_for("admin.staff"))
+    if (
+        user.effective_admin_tier == "owner"
+        and new_tier != "owner"
+        and _active_owner_count(user.id) == 0
+    ):
+        flash("At least one active owner account is required.", "warning")
+        return redirect(url_for("admin.staff"))
+    user.role = "admin"
+    user.admin_tier = new_tier
+    get_container().audit_service.log(
+        current_user,
+        "admin_tier_changed",
+        "User",
+        user.id,
+        before=previous,
+        after={
+            "role": user.role,
+            "admin_tier": user.admin_tier,
+            "is_active": user.is_active,
+        },
+        change_summary=f"Admin tier changed for {user.email}.",
+    )
+    db.session.commit()
+    flash(f"{user.name}'s admin tier is now {new_tier}.", "success")
+    return redirect(url_for("admin.staff"))
+
+
+@admin_bp.route("/staff/<int:user_id>/toggle", methods=["POST"])
+@admin_required
+@owner_required
+def toggle_staff_access(user_id):
+    user = db.get_or_404(User, user_id)
+    if not has_role(user, *ADMIN_PORTAL_ROLES):
+        flash("Only admin-portal accounts can be managed here.", "danger")
+        return redirect(url_for("admin.staff"))
+    if user.id == current_user.id:
+        flash("You cannot deactivate your own account.", "warning")
+        return redirect(url_for("admin.staff"))
+    if (
+        user.is_active
+        and user.effective_admin_tier == "owner"
+        and _active_owner_count(user.id) == 0
+    ):
+        flash("At least one active owner account is required.", "warning")
+        return redirect(url_for("admin.staff"))
+    previous = {
+        "is_active": user.is_active,
+        "admin_tier": user.effective_admin_tier,
+        "role": user.role,
+    }
+    user.is_active = not user.is_active
+    get_container().audit_service.log(
+        current_user,
+        "admin_staff_access_changed",
+        "User",
+        user.id,
+        before=previous,
+        after={
+            "is_active": user.is_active,
+            "admin_tier": user.effective_admin_tier,
+            "role": user.role,
+        },
+        change_summary=f"Admin portal access toggled for {user.email}.",
+    )
+    db.session.commit()
+    flash(
+        f"{user.name} {'reactivated' if user.is_active else 'deactivated'}.",
+        "success" if user.is_active else "warning",
+    )
     return redirect(url_for("admin.staff"))
 
 
 @admin_bp.route("/staff/shifts/add", methods=["POST"])
 @admin_required
+@owner_required
 def add_staff_shift():
     user_id = request.form.get("user_id", type=int)
     shift_date_raw = request.form.get("shift_date", "").strip()
@@ -2102,6 +2971,7 @@ def add_staff_shift():
 
 @admin_bp.route("/staff/attendance/clock", methods=["POST"])
 @admin_required
+@owner_required
 def clock_staff_attendance():
     user_id = request.form.get("user_id", type=int)
     action = (request.form.get("action") or "in").strip().lower()
@@ -2122,7 +2992,11 @@ def clock_staff_attendance():
         )
         flash("Clock-in recorded.", "success")
     else:
-        if record is None or record.clock_in_at is None or record.clock_out_at is not None:
+        if (
+            record is None
+            or record.clock_in_at is None
+            or record.clock_out_at is not None
+        ):
             flash("No open attendance record found.", "warning")
             return redirect(url_for("admin.staff"))
         record.clock_out_at = utcnow()
@@ -2136,95 +3010,198 @@ def clock_staff_attendance():
 
 @admin_bp.route("/pos", methods=["GET", "POST"])
 @admin_required
+@operations_required
 def pos():
-    variants = ProductVariant.query.join(Product).filter(Product.is_active.is_(True)).order_by(Product.name.asc()).all()
+    variants = (
+        ProductVariant.query.join(Product)
+        .filter(Product.is_active.is_(True))
+        .order_by(Product.name.asc())
+        .all()
+    )
     if request.method == "POST":
-        variant_id = request.form.get("variant_id", type=int)
-        quantity = max(1, request.form.get("quantity", type=int) or 1)
-        payment_mode = (request.form.get("payment_mode") or "CASH").upper()
-        customer_phone = request.form.get("customer_phone", "")
+        import json
+        import uuid
+
+        raw_items = request.form.get("cart_items") or ""
+        sale_items = []
+        if raw_items:
+            try:
+                decoded_items = json.loads(raw_items)
+            except (TypeError, ValueError):
+                decoded_items = []
+            for item in decoded_items if isinstance(decoded_items, list) else []:
+                try:
+                    variant_id = int(item.get("variant_id"))
+                    quantity = max(1, int(item.get("quantity") or 1))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                sale_items.append({"variant_id": variant_id, "quantity": quantity})
+        if not sale_items:
+            variant_id = request.form.get("variant_id", type=int)
+            quantity = max(1, request.form.get("quantity", type=int) or 1)
+            if variant_id:
+                sale_items.append({"variant_id": variant_id, "quantity": quantity})
+
+        payment_mode = (request.form.get("payment_mode") or "CASH").strip().upper()
+        if payment_mode not in {"CASH", "CARD", "UPI"}:
+            payment_mode = "CASH"
+        sale_status = (request.form.get("sale_status") or "DELIVERED").strip().upper()
+        if sale_status not in {"DELIVERED", "PREPARING", "READY_FOR_PICKUP"}:
+            sale_status = "DELIVERED"
+        customer_name = (request.form.get("customer_name") or "").strip()
+        customer_phone = (request.form.get("customer_phone") or "").strip()
+        expected_versions = {}
+        for variant in variants:
+            expected_versions[str(variant.id)] = request.form.get(
+                f"expected_version_{variant.id}"
+            )
+        order = None
+        stock_update_variant_ids = []
+        stock_update_material_ids = []
         try:
-            variant = db.get_or_404(ProductVariant, variant_id)
-            unit_price = variant.price
-            subtotal = unit_price * quantity
-            walkin_email = "walkin@sweetcrumbs.local"
-            customer = User.query.filter_by(email=walkin_email).first()
-            # Atomic POS sale: create customer, order, items, payment, and adjust stock
-            with db.session.begin():
+            customer = None
+            if customer_phone:
+                customer = User.query.filter_by(
+                    phone=customer_phone,
+                    role="customer",
+                    is_active=True,
+                ).first()
+            with db.session.begin_nested():
                 if customer is None:
+                    guest_token = uuid.uuid4().hex[:10]
                     customer = User(
-                        name="Walk-in Customer",
-                        email=walkin_email,
+                        name=customer_name or "Walk-in Customer",
+                        email=f"walkin-{guest_token}@sweetcrumbs.local",
                         role="customer",
                         is_active=True,
                         phone=customer_phone or None,
                     )
                     db.session.add(customer)
                     db.session.flush()
-                order = Order(
-                    order_number=Order.generate_order_number(),
+
+                order_service = get_container().order_service
+                lines = []
+                subtotal = Decimal("0")
+                for item in sale_items:
+                    variant = db.session.get(ProductVariant, item["variant_id"])
+                    line = order_service.build_line_from_variant(
+                        variant,
+                        item["quantity"],
+                    )
+                    lines.append(line)
+                    subtotal += line.unit_price * line.quantity
+
+                store_details = current_app.config["STORE_DETAILS"]
+                creation = order_service.create_order(
                     user_id=customer.id,
-                    source="POS",
-                    status="DELIVERED",
-                    fulfillment_type="PICKUP",
-                    payment_method=payment_mode,
-                    payment_status="PAID",
+                    branch_id=current_app.config.get("DEFAULT_BRANCH_ID"),
+                    lines=lines,
                     subtotal=subtotal,
                     total=subtotal,
-                    gst_amount=0,
-                    address_line1=current_app.config["STORE_DETAILS"].get("address_line1", ""),
-                    city=current_app.config["STORE_DETAILS"].get("city", ""),
-                    pincode=current_app.config["STORE_DETAILS"].get("pincode", ""),
-                    phone=customer_phone or current_app.config["STORE_DETAILS"].get("phone_tel", ""),
+                    payment_method=payment_mode,
+                    payment_status="PAID",
+                    status=sale_status,
+                    channel="counter",
+                    source="POS",
+                    fulfillment_type="PICKUP",
+                    address_line1=store_details.get("address_line1", ""),
+                    address_line2=store_details.get("address_line2", ""),
+                    city=store_details.get("city", ""),
+                    pincode=store_details.get("pincode", ""),
+                    phone=customer_phone or store_details.get("phone_tel", ""),
                     delivery_slot="Walk-in",
                     delivery_date=utcnow().date(),
+                    special_note=(request.form.get("special_note") or "").strip()
+                    or None,
+                    actor_id=current_user.id,
+                    payment_reason="pos_sale",
+                    expected_versions=expected_versions,
                 )
-                db.session.add(order)
-                db.session.flush()
-                db.session.add(
-                    OrderItem(
-                        order_id=order.id,
-                        product_id=variant.product_id,
-                        variant_id=variant.id,
-                        product_name=variant.product.name,
-                        variant_name=variant.name,
-                        quantity=quantity,
-                        unit_price=unit_price,
-                        subtotal=subtotal,
-                    )
+                order = creation.order
+                stock_update_variant_ids = creation.stock_update_variant_ids
+                stock_update_material_ids = creation.stock_update_material_ids
+                get_container().audit_service.log(
+                    current_user.id,
+                    "pos_sale_created",
+                    "Order",
+                    order.id,
+                    before=None,
+                    after={
+                        "order_number": order.order_number,
+                        "channel": order.channel,
+                        "line_count": len(lines),
+                        "payment_mode": payment_mode,
+                        "total": str(subtotal),
+                    },
+                    branch_id=order.branch_id,
+                    change_summary=f"Counter sale for order #{order.order_number}",
                 )
-                expected_version = request.form.get('expected_version')
-                from utils.optimistic import assert_version
-                try:
-                    assert_version(variant, expected_version, entity_name='ProductVariant')
-                except Exception:
-                    raise ValidationError("Version conflict: variant stock changed by another user.")
-                variant.stock = max(0, int(variant.stock or 0) - quantity)
-                payment = Payment(order_id=order.id, amount=subtotal, method=order.payment_method)
-                db.session.add(payment)
-                db.session.flush()
-                payment.transition_to("PAID", actor_id=current_user.id, reason="pos_sale")
-            # commit occurs automatically at end of block
+            db.session.commit()
+            emit_new_order(order)
+            for variant_id in set(stock_update_variant_ids):
+                variant = db.session.get(ProductVariant, variant_id)
+                if variant:
+                    emit_stock_updated(variant, include_customer=True)
+            for material_id in set(stock_update_material_ids):
+                material = db.session.get(RawMaterial, material_id)
+                if material:
+                    emit_stock_updated(material)
             flash(f"POS sale created for order #{order.order_number}.", "success")
+            return redirect(url_for("admin.pos_receipt", order_id=order.id))
+        except ValidationError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
         except SQLAlchemyError:
             db.session.rollback()
-            request_id = get_container().offline_sync_service.queue_pos_sale(
-                variant_id=variant_id,
-                quantity=quantity,
-                payment_mode=payment_mode,
-                customer_phone=customer_phone,
-                actor_id=current_user.id,
-            )
-            flash(
-                f"Connection lost. POS sale queued locally for sync ({request_id[:8]}).",
-                "warning",
-            )
+            if len(sale_items) == 1:
+                request_id = get_container().offline_sync_service.queue_pos_sale(
+                    variant_id=sale_items[0]["variant_id"],
+                    quantity=sale_items[0]["quantity"],
+                    payment_mode=payment_mode,
+                    customer_phone=customer_phone,
+                    actor_id=current_user.id,
+                )
+                flash(
+                    f"Connection lost. POS sale queued locally for sync ({request_id[:8]}).",
+                    "warning",
+                )
+            else:
+                flash("Connection lost. Please retry this counter sale.", "danger")
         return redirect(url_for("admin.pos"))
     return render_template("admin/pos.html", variants=variants)
 
 
+@admin_bp.route("/pos/orders/<int:order_id>/receipt")
+@admin_required
+@operations_required
+def pos_receipt(order_id):
+    import io
+
+    from services.invoice_service import InvoiceService
+
+    order = db.get_or_404(Order, order_id)
+    if (order.channel or "").lower() != "counter":
+        abort(404)
+    try:
+        pdf_bytes = InvoiceService(storage_service=None).generate_pdf_bytes(order)
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=False,
+            download_name=f"receipt-{order.order_number}.pdf",
+        )
+    except ModuleNotFoundError:
+        current_app.logger.warning(
+            "receipt_pdf_dependency_missing order_id=%s", order.id
+        )
+    return render_template(
+        "admin/pos_receipt.html", order=order, items=order.items.all()
+    )
+
+
 @admin_bp.route("/pricing", methods=["GET", "POST"])
 @admin_required
+@manager_required
 def pricing():
     if request.method == "POST":
         percent_discount = request.form.get("percent_discount", type=float) or 0
@@ -2258,20 +3235,44 @@ def pricing():
     rules = PricingRule.query.order_by(PricingRule.created_at.desc()).all()
     categories = Category.query.order_by(Category.name.asc()).all()
     branches = Branch.query.order_by(Branch.name.asc()).all()
-    return render_template("admin/pricing.html", rules=rules, categories=categories, branches=branches)
+    return render_template(
+        "admin/pricing.html", rules=rules, categories=categories, branches=branches
+    )
 
 
 @admin_bp.route("/subscriptions")
 @admin_required
+@manager_required
 def subscriptions_admin():
-    subscriptions = Subscription.query.order_by(Subscription.start_date.desc()).all()
-    schedules = SubscriptionSchedule.query.order_by(SubscriptionSchedule.next_run_at.asc()).all()
-    return render_template("admin/subscriptions.html", subscriptions=subscriptions, schedules=schedules)
+    memberships = Subscription.query.order_by(Subscription.start_date.desc()).all()
+    recurring_subscriptions = RecurringSubscription.query.order_by(
+        RecurringSubscription.next_scheduled_date.asc(),
+        RecurringSubscription.created_at.desc(),
+    ).all()
+    failed_logs = (
+        SubscriptionOrderLog.query.filter(
+            SubscriptionOrderLog.status != "success",
+        )
+        .order_by(SubscriptionOrderLog.attempted_at.desc())
+        .limit(50)
+        .all()
+    )
+    schedules = SubscriptionSchedule.query.order_by(
+        SubscriptionSchedule.next_run_at.asc()
+    ).all()
+    return render_template(
+        "admin/subscriptions.html",
+        memberships=memberships,
+        recurring_subscriptions=recurring_subscriptions,
+        failed_logs=failed_logs,
+        schedules=schedules,
+    )
 
 
 @admin_bp.route("/audit")
 @admin_bp.route("/audit-log")
 @admin_required
+@owner_required
 def audit():
     audit_service = get_container().audit_service
     actor_id = request.args.get("actor_id", type=int)
@@ -2286,13 +3287,30 @@ def audit():
         limit=250,
     )
     actors = (
-        User.query.filter(User.role.in_(("admin", "super_admin", "branch_manager", "cashier", "kitchen_staff", "delivery")))
+        User.query.filter(
+            User.role.in_(
+                (
+                    "admin",
+                    "super_admin",
+                    "branch_manager",
+                    "cashier",
+                    "kitchen_staff",
+                    "delivery",
+                )
+            )
+        )
         .order_by(User.name.asc())
         .all()
     )
     actions = audit_service.distinct_actions()
-    alerts = OperationalAlert.query.order_by(OperationalAlert.created_at.desc()).limit(20).all()
-    fraud_alerts = FraudAlert.query.order_by(FraudAlert.created_at.desc()).limit(20).all()
+    alerts = (
+        OperationalAlert.query.order_by(OperationalAlert.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    fraud_alerts = (
+        FraudAlert.query.order_by(FraudAlert.created_at.desc()).limit(20).all()
+    )
     return render_template(
         "admin/audit_log.html",
         logs=logs,
@@ -2309,20 +3327,29 @@ def audit():
 
 @admin_bp.route("/queue-monitor")
 @admin_required
+@manager_required
 def queue_monitor():
     offline_sync = get_container().offline_sync_service
-    pending_actions = offline_sync.pending_actions(limit=100) if offline_sync.enabled else []
+    pending_actions = (
+        offline_sync.pending_actions(limit=100) if offline_sync.enabled else []
+    )
     db.session.add(
         QueueMetric(
             queue_name="offline_sync",
             backlog=len(pending_actions),
             failed_count=0,
-            retry_count=len([item for item in pending_actions if item.get("status") == "retry"]),
+            retry_count=len(
+                [item for item in pending_actions if item.get("status") == "retry"]
+            ),
         )
     )
     db.session.commit()
-    recent_metrics = QueueMetric.query.order_by(QueueMetric.recorded_at.desc()).limit(20).all()
-    api_usage = ApiUsageLog.query.order_by(ApiUsageLog.created_at.desc()).limit(20).all()
+    recent_metrics = (
+        QueueMetric.query.order_by(QueueMetric.recorded_at.desc()).limit(20).all()
+    )
+    api_usage = (
+        ApiUsageLog.query.order_by(ApiUsageLog.created_at.desc()).limit(20).all()
+    )
     celery_summary = {"registered_tasks": 0, "active_workers": 0}
     try:
         from models import celery as celery_app
@@ -2348,12 +3375,18 @@ def queue_monitor():
 
 @admin_bp.route("/offline")
 @admin_required
+@manager_required
 def offline_admin():
     offline_sync = get_container().offline_sync_service
-    conflicts = SyncConflict.query.filter(SyncConflict.resolved_at.is_(None)).order_by(
-        SyncConflict.created_at.desc()
-    ).limit(50).all()
-    pending_actions = offline_sync.pending_actions(limit=50) if offline_sync.enabled else []
+    conflicts = (
+        SyncConflict.query.filter(SyncConflict.resolved_at.is_(None))
+        .order_by(SyncConflict.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    pending_actions = (
+        offline_sync.pending_actions(limit=50) if offline_sync.enabled else []
+    )
     return render_template(
         "admin/offline.html",
         conflicts=conflicts,
@@ -2363,7 +3396,8 @@ def offline_admin():
 
 
 @admin_bp.route("/offline/conflicts/<int:conflict_id>/resolve", methods=["POST"])
-@roles_required("admin", "super_admin", "branch_manager")
+@admin_required
+@manager_required
 def resolve_sync_conflict(conflict_id):
     resolution = (request.form.get("resolution") or "accept_local").strip().lower()
     try:
@@ -2379,13 +3413,16 @@ def resolve_sync_conflict(conflict_id):
 
 
 @admin_bp.route("/delivery/routes/plan", methods=["POST"])
-@roles_required("admin", "super_admin", "branch_manager")
+@admin_required
+@manager_required
 def plan_delivery_routes():
     agent_id = request.form.get("agent_id", type=int)
     agent = db.get_or_404(DeliveryAgent, agent_id)
-    deliveries = Delivery.query.filter_by(agent_id=agent_id).filter(
-        Delivery.status.in_(["ASSIGNED", "OUT_FOR_DELIVERY"])
-    ).all()
+    deliveries = (
+        Delivery.query.filter_by(agent_id=agent_id)
+        .filter(Delivery.status.in_(["ASSIGNED", "OUT_FOR_DELIVERY"]))
+        .all()
+    )
     plan = get_container().route_planning_service.plan_for_agent(agent, deliveries)
     flash(
         f"Route planned with {plan.stop_count} stops (~{plan.estimated_duration_minutes} min).",
@@ -2396,15 +3433,45 @@ def plan_delivery_routes():
 
 @admin_bp.route("/qr-scanner")
 @admin_required
+@operations_required
 def qr_scanner():
     return render_template("admin/qr_scanner.html")
 
 
-def _finance_date_range():
+def _finance_request_period():
+    period = (
+        request.args.get("period")
+        or request.form.get("period")
+        or (
+            "custom"
+            if (request.args.get("start_date") or request.form.get("start_date"))
+            else "month"
+        )
+    )
     today = utcnow().date()
     default_start = today.replace(day=1)
-    start_date = request.args.get("start_date") or request.form.get("start_date") or default_start.isoformat()
-    end_date = request.args.get("end_date") or request.form.get("end_date") or today.isoformat()
+    start_date = (
+        request.args.get("start_date")
+        or request.form.get("start_date")
+        or default_start.isoformat()
+    )
+    end_date = (
+        request.args.get("end_date")
+        or request.form.get("end_date")
+        or today.isoformat()
+    )
+    return period, start_date, end_date
+
+
+def _finance_date_range():
+    period, start_date, end_date = _finance_request_period()
+    selected = get_container().finance_service.resolve_period_range(
+        period,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    start_date = selected["start_date"]
+    end_date = selected["end_date"]
     return start_date, end_date
 
 
@@ -2414,17 +3481,62 @@ def _finance_date_range():
 def finance_dashboard():
     finance = get_container().finance_service
     finance.ensure_default_categories()
-    start_date, end_date = _finance_date_range()
-    pnl = finance.profit_and_loss(start_date=start_date, end_date=end_date)
-    gst = finance.gst_summary(start_date=start_date, end_date=end_date)
-    transactions = finance.recent_transactions(limit=25)
-    return render_template(
-        "admin/finance/dashboard.html",
-        pnl=pnl,
-        gst=gst,
-        transactions=transactions,
+    period, start_date, end_date = _finance_request_period()
+    payload = finance.dashboard_payload(
+        period,
         start_date=start_date,
         end_date=end_date,
+    )
+    selected = payload["selected_period"]
+    transactions = finance._transactions_in_period(selected["start"], selected["end"])[
+        :25
+    ]
+    return render_template(
+        "admin/finance/dashboard.html",
+        dashboard=payload,
+        selected_period=selected,
+        pnl=payload["pnl"],
+        gst=payload["gst"],
+        transactions=transactions,
+        start_date=selected["start_date"],
+        end_date=selected["end_date"],
+        period=selected["period"],
+    )
+
+
+@admin_bp.route("/finance/consistency-check", methods=["POST"])
+@finance_required
+def finance_consistency_check():
+    finance = get_container().finance_service
+    period, start_date, end_date = _finance_request_period()
+    selected = finance.resolve_period_range(
+        period, start_date=start_date, end_date=end_date
+    )
+    check = finance.revenue_consistency_check(
+        start_date=selected["start_date"],
+        end_date=selected["end_date"],
+    )
+    if check["matches"]:
+        flash(
+            "Revenue consistency check passed: order sales and finance ledger sales agree.",
+            "success",
+        )
+    else:
+        flash(
+            (
+                "Revenue consistency warning: orders show "
+                f"₹{int(check['order_revenue'])}, ledger shows ₹{int(check['ledger_revenue'])}, "
+                f"difference ₹{int(check['difference'])}; missing ledger orders: {check['missing_count']}."
+            ),
+            "warning",
+        )
+    return redirect(
+        url_for(
+            "admin.finance_dashboard",
+            period=selected["period"],
+            start_date=selected["start_date"],
+            end_date=selected["end_date"],
+        )
     )
 
 
@@ -2438,7 +3550,9 @@ def finance_add_transaction():
         try:
             amount = parse_decimal(request.form.get("amount"), "amount")
             tax_amount_raw = (request.form.get("tax_amount") or "").strip()
-            tax_amount = parse_decimal(tax_amount_raw, "tax amount") if tax_amount_raw else None
+            tax_amount = (
+                parse_decimal(tax_amount_raw, "tax amount") if tax_amount_raw else None
+            )
             tds_raw = (request.form.get("tds_withheld") or "").strip()
             tds_withheld = parse_decimal(tds_raw, "TDS withheld") if tds_raw else None
         except ValueError as exc:
@@ -2452,7 +3566,8 @@ def finance_add_transaction():
             return redirect(url_for("admin.finance_add_transaction"))
 
         finance.create_manual_transaction(
-            transaction_type=request.form.get("transaction_type") or category.transaction_type,
+            transaction_type=request.form.get("transaction_type")
+            or category.transaction_type,
             category_id=category.id,
             amount=amount,
             tax_amount=tax_amount,
@@ -2478,7 +3593,9 @@ def finance_add_transaction():
 @finance_required
 def finance_product_ledger():
     start_date, end_date = _finance_date_range()
-    rows = get_container().finance_service.product_ledger(start_date=start_date, end_date=end_date)
+    rows = get_container().finance_service.product_ledger(
+        start_date=start_date, end_date=end_date
+    )
     return render_template(
         "admin/finance/product_ledger.html",
         rows=rows,
@@ -2491,7 +3608,9 @@ def finance_product_ledger():
 @finance_required
 def finance_store_ledger():
     start_date, end_date = _finance_date_range()
-    rows = get_container().finance_service.store_ledger(start_date=start_date, end_date=end_date)
+    rows = get_container().finance_service.store_ledger(
+        start_date=start_date, end_date=end_date
+    )
     return render_template(
         "admin/finance/store_ledger.html",
         rows=rows,
@@ -2529,15 +3648,21 @@ def finance_gst_snapshot():
         admin_notes=notes,
     )
     db.session.commit()
-    flash("GST snapshot saved for review. Figures are not filed automatically.", "success")
-    return redirect(url_for("admin.finance_gst_summary", start_date=start_date, end_date=end_date))
+    flash(
+        "GST snapshot saved for review. Figures are not filed automatically.", "success"
+    )
+    return redirect(
+        url_for("admin.finance_gst_summary", start_date=start_date, end_date=end_date)
+    )
 
 
 @admin_bp.route("/finance/tds")
 @finance_required
 def finance_tds_summary():
     start_date, end_date = _finance_date_range()
-    summary = get_container().finance_service.tds_summary(start_date=start_date, end_date=end_date)
+    summary = get_container().finance_service.tds_summary(
+        start_date=start_date, end_date=end_date
+    )
     return render_template(
         "admin/finance/tds_summary.html",
         summary=summary,
@@ -2559,7 +3684,9 @@ def finance_log_restock(movement_id):
             tax_amount = parse_decimal(tax_raw, "tax amount") if tax_raw else None
         except ValueError as exc:
             flash(str(exc), "danger")
-            return redirect(url_for("admin.finance_log_restock", movement_id=movement_id))
+            return redirect(
+                url_for("admin.finance_log_restock", movement_id=movement_id)
+            )
 
         finance.log_restock_expense(
             movement,
@@ -2622,12 +3749,64 @@ def finance_add_tax_rate():
 def finance_export(report, file_format):
     import io
 
-    start_date, end_date = _finance_date_range()
+    period, requested_start, requested_end = _finance_request_period()
     finance = get_container().finance_service
     export = get_container().finance_export_service
+    selected = finance.resolve_period_range(
+        period,
+        start_date=requested_start,
+        end_date=requested_end,
+    )
+    start_date = selected["start_date"]
+    end_date = selected["end_date"]
     file_format = (file_format or "csv").lower()
     report = (report or "pnl").lower()
 
+    def send_export(content, mimetype, filename):
+        return send_file(
+            io.BytesIO(content),
+            mimetype=mimetype,
+            as_attachment=True,
+            download_name=filename,
+        )
+
+    if report in {"dashboard", "summary"}:
+        payload = finance.dashboard_payload(
+            selected["period"], start_date=start_date, end_date=end_date
+        )
+        rows = [
+            ["Period", payload["selected_period"]["label"]],
+            ["Start", start_date],
+            ["End", end_date],
+            ["Sales Revenue", payload["pnl"]["sales_revenue"]],
+            ["Other Income", payload["pnl"]["other_income"]],
+            ["Total Income", payload["pnl"]["income"]],
+            ["Expenses", payload["pnl"]["expenses"]],
+            ["Net Profit", payload["pnl"]["net_profit"]],
+            ["GST Collected", payload["gst"]["gst_collected"]],
+            ["GST Paid", payload["gst"]["gst_paid"]],
+            ["Net GST Liability", payload["gst"]["net_gst_liability"]],
+            [
+                "Units Sold",
+                sum(row["units_sold"] for row in payload["sales"]["units_sold"]),
+            ],
+            ["Revenue Consistency Difference", payload["consistency"]["difference"]],
+        ]
+        if file_format == "pdf":
+            content = export.simple_pdf(
+                "Unified Finance Dashboard",
+                [f"{label}: {value}" for label, value in rows],
+            )
+            return send_export(
+                content,
+                "application/pdf",
+                f"finance_dashboard_{start_date}_{end_date}.pdf",
+            )
+        return send_export(
+            export.rows_csv(["Metric", "Value"], rows),
+            "text/csv",
+            f"finance_dashboard_{start_date}_{end_date}.csv",
+        )
     if report == "pnl":
         payload = finance.profit_and_loss(start_date=start_date, end_date=end_date)
         if file_format == "pdf":
@@ -2641,10 +3820,68 @@ def finance_export(report, file_format):
             )
             mimetype = "text/csv"
             filename = f"pnl_{start_date}_{end_date}.csv"
+    elif report == "sales":
+        payload = finance.dashboard_payload(
+            selected["period"], start_date=start_date, end_date=end_date
+        )["sales"]
+        rows = [
+            [
+                row["product_name"],
+                row["units_sold"],
+                row["revenue"],
+            ]
+            for row in payload["units_sold"]
+        ]
+        if file_format == "pdf":
+            lines = [
+                f"Period: {start_date} to {end_date}",
+                f"Revenue: INR {payload['revenue']}",
+                f"Best by units: {(payload['top_sellers']['by_units'] or {}).get('product_name', 'None')}",
+                "",
+            ] + [
+                f"{name}: units={units}, revenue={revenue}"
+                for name, units, revenue in rows
+            ]
+            content = export.simple_pdf("Sales Performance", lines)
+            mimetype = "application/pdf"
+            filename = f"sales_{start_date}_{end_date}.pdf"
+        else:
+            content = export.rows_csv(["Product", "Units Sold", "Revenue"], rows)
+            mimetype = "text/csv"
+            filename = f"sales_{start_date}_{end_date}.csv"
+    elif report == "categories":
+        breakdown = finance.category_breakdown(start_date=start_date, end_date=end_date)
+        rows = [
+            [row["transaction_type"], row["category"], row["amount"]]
+            for section in ("income", "expenses")
+            for row in breakdown[section]
+        ]
+        if file_format == "pdf":
+            content = export.simple_pdf(
+                "Income and Expense Breakdown",
+                [f"Period: {start_date} to {end_date}", ""]
+                + [
+                    f"{txn_type}: {category} INR {amount}"
+                    for txn_type, category, amount in rows
+                ],
+            )
+            mimetype = "application/pdf"
+            filename = f"category_breakdown_{start_date}_{end_date}.pdf"
+        else:
+            content = export.rows_csv(["Type", "Category", "Amount"], rows)
+            mimetype = "text/csv"
+            filename = f"category_breakdown_{start_date}_{end_date}.csv"
     elif report == "products":
         rows = finance.product_ledger(start_date=start_date, end_date=end_date)
         if file_format == "pdf":
-            start, end = finance.profit_and_loss(start_date=start_date, end_date=end_date)["start"], finance.profit_and_loss(start_date=start_date, end_date=end_date)["end"]
+            start, end = (
+                finance.profit_and_loss(start_date=start_date, end_date=end_date)[
+                    "start"
+                ],
+                finance.profit_and_loss(start_date=start_date, end_date=end_date)[
+                    "end"
+                ],
+            )
             content = export.product_ledger_pdf(rows, start, end)
             mimetype = "application/pdf"
             filename = f"product_ledger_{start_date}_{end_date}.pdf"
@@ -2652,7 +3889,13 @@ def finance_export(report, file_format):
             content = export.rows_csv(
                 ["Product", "Units Sold", "Revenue", "COGS", "Gross Profit"],
                 [
-                    [r["product_name"], r["units_sold"], r["revenue"], r["cogs"], r["gross_profit"]]
+                    [
+                        r["product_name"],
+                        r["units_sold"],
+                        r["revenue"],
+                        r["cogs"],
+                        r["gross_profit"],
+                    ]
                     for r in rows
                 ],
             )
@@ -2660,12 +3903,52 @@ def finance_export(report, file_format):
             filename = f"product_ledger_{start_date}_{end_date}.csv"
     elif report == "stores":
         rows = finance.store_ledger(start_date=start_date, end_date=end_date)
-        content = export.rows_csv(
-            ["Store", "Income", "Expenses", "Net"],
-            [[r["store"], r["income"], r["expenses"], r["net"]] for r in rows],
-        )
-        mimetype = "text/csv"
-        filename = f"store_ledger_{start_date}_{end_date}.csv"
+        csv_rows = [[r["store"], r["income"], r["expenses"], r["net"]] for r in rows]
+        if file_format == "pdf":
+            content = export.simple_pdf(
+                "Store P&L",
+                [f"Period: {start_date} to {end_date}", ""]
+                + [
+                    f"{store}: income={income} expenses={expenses} net={net}"
+                    for store, income, expenses, net in csv_rows
+                ],
+            )
+            mimetype = "application/pdf"
+            filename = f"store_ledger_{start_date}_{end_date}.pdf"
+        else:
+            content = export.rows_csv(["Store", "Income", "Expenses", "Net"], csv_rows)
+            mimetype = "text/csv"
+            filename = f"store_ledger_{start_date}_{end_date}.csv"
+    elif report == "vendors":
+        rows = finance.vendor_spend_report(start_date=start_date, end_date=end_date)
+        csv_rows = [
+            [
+                row["vendor_name"],
+                row["transaction_count"],
+                row["total_spend"],
+                row["gst_paid"],
+                "yes" if row["input_tax_credit_eligible"] else "no",
+            ]
+            for row in rows
+        ]
+        if file_format == "pdf":
+            content = export.simple_pdf(
+                "Vendor Spend",
+                [f"Period: {start_date} to {end_date}", ""]
+                + [
+                    f"{vendor}: purchases={count} spend={spend} gst_paid={gst_paid} itc={itc}"
+                    for vendor, count, spend, gst_paid, itc in csv_rows
+                ],
+            )
+            mimetype = "application/pdf"
+            filename = f"vendor_spend_{start_date}_{end_date}.pdf"
+        else:
+            content = export.rows_csv(
+                ["Vendor", "Purchases", "Total Spend", "GST Paid", "ITC Eligible"],
+                csv_rows,
+            )
+            mimetype = "text/csv"
+            filename = f"vendor_spend_{start_date}_{end_date}.csv"
     elif report == "gst":
         payload = finance.gst_summary(start_date=start_date, end_date=end_date)
         if file_format == "pdf":
@@ -2675,24 +3958,62 @@ def finance_export(report, file_format):
         else:
             content = export.rows_csv(
                 ["GST Collected", "GST Paid", "Net GST Liability"],
-                [[payload["gst_collected"], payload["gst_paid"], payload["net_gst_liability"]]],
+                [
+                    [
+                        payload["gst_collected"],
+                        payload["gst_paid"],
+                        payload["net_gst_liability"],
+                    ]
+                ],
             )
             mimetype = "text/csv"
             filename = f"gst_summary_{start_date}_{end_date}.csv"
-    elif report == "transactions":
-        txns = finance._transactions_in_period(
-            finance.profit_and_loss(start_date=start_date, end_date=end_date)["start"],
-            finance.profit_and_loss(start_date=start_date, end_date=end_date)["end"],
+    elif report == "itr":
+        payload = finance.finance_health_for_current_year()
+        rows = [
+            ["Financial Year", payload["label"]],
+            ["Start", payload["start_date"]],
+            ["End", payload["end_date"]],
+            ["Total Income", payload["total_income"]],
+            ["Total Expenses", payload["total_expenses"]],
+            ["Net Income", payload["net_income"]],
+            ["Tax Collected", payload["tax_collected"]],
+            ["Tax Paid", payload["tax_paid"]],
+            ["Net Tax Liability", payload["net_tax_liability"]],
+        ]
+        rows.extend(
+            [
+                ["Expense Category", row["category"], row["amount"]]
+                for row in payload["expense_categories"]
+            ]
         )
-        content = export.transactions_csv(txns)
-        mimetype = "text/csv"
-        filename = f"transactions_{start_date}_{end_date}.csv"
+        if file_format == "pdf":
+            content = export.simple_pdf(
+                "Financial Health at a Glance",
+                [": ".join(str(part) for part in row) for row in rows],
+            )
+            mimetype = "application/pdf"
+            filename = f"financial_year_health_{payload['start_date']}_{payload['end_date']}.pdf"
+        else:
+            content = export.rows_csv(["Metric", "Value", "Amount"], rows)
+            mimetype = "text/csv"
+            filename = f"financial_year_health_{payload['start_date']}_{payload['end_date']}.csv"
+    elif report == "transactions":
+        txns = finance._transactions_in_period(selected["start"], selected["end"])
+        if file_format == "pdf":
+            lines = [f"Period: {start_date} to {end_date}", ""]
+            lines.extend(
+                f"{txn.created_at.date()}: {txn.transaction_type} {txn.category.label if txn.category else ''} INR {txn.amount}"
+                for txn in txns
+            )
+            content = export.simple_pdf("Financial Transactions", lines)
+            mimetype = "application/pdf"
+            filename = f"transactions_{start_date}_{end_date}.pdf"
+        else:
+            content = export.transactions_csv(txns)
+            mimetype = "text/csv"
+            filename = f"transactions_{start_date}_{end_date}.csv"
     else:
         abort(404)
 
-    return send_file(
-        io.BytesIO(content),
-        mimetype=mimetype,
-        as_attachment=True,
-        download_name=filename,
-    )
+    return send_export(content, mimetype, filename)

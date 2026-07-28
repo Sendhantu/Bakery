@@ -102,6 +102,41 @@
       </div>
     </div>
 
+    {% if can_admin_manager and order.status not in ['DELIVERED', 'CANCELLED', 'REFUNDED'] %}
+    <div class="card">
+      <div class="card-header">{% if order.payment_status == 'PAID' %}Refund Order{% else %}Cancel Order{% endif %}</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin.cancel_or_refund_order', order_id=order.id) }}" data-confirm="{% if order.payment_status == 'PAID' %}Finalize this refund?{% else %}Finalize this cancellation?{% endif %}">
+          <input type="hidden" name="action" value="{% if order.payment_status == 'PAID' %}refund{% else %}cancel{% endif %}">
+          <div class="form-group">
+            <label class="form-label">Reason</label>
+            <textarea class="form-control" name="reason" rows="3" required placeholder="Customer request, item unavailable, duplicate order..."></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Stock handling</label>
+            <select class="form-control" name="stock_handling" required>
+              <option value="no_reverse">Stock not consumable, do not reverse</option>
+              <option value="reverse">Reverse to stock</option>
+            </select>
+            <div class="text-sm text-muted" style="margin-top:0.35rem">Use reversal only when ingredients/items can genuinely return to usable stock.</div>
+          </div>
+          <label class="text-sm" style="display:flex;gap:0.5rem;align-items:flex-start;margin-bottom:0.75rem">
+            <input type="checkbox" name="confirm_reversal" value="yes" required>
+            <span>I confirm this action is intentional and the stock choice is correct.</span>
+          </label>
+          <button type="submit" class="btn {% if order.payment_status == 'PAID' %}btn-danger{% else %}btn-outline{% endif %} btn-block">
+            {% if order.payment_status == 'PAID' %}Refund Order{% else %}Cancel Order{% endif %}
+          </button>
+        </form>
+      </div>
+    </div>
+    {% elif can_admin_manager and order.status == 'DELIVERED' %}
+    <div class="card">
+      <div class="card-header">Refund Controls</div>
+      <div class="card-body text-sm text-muted">Delivered orders are excluded from this workflow. Use a future post-delivery refund path so returns, quality claims, and tax handling can be reviewed separately.</div>
+    </div>
+    {% endif %}
+
     <!-- Assign Delivery -->
     {% if agents and order.fulfillment_type != 'PICKUP' %}
     <div class="card">

@@ -1,0 +1,9 @@
+<div style="font-family:Arial,sans-serif;line-height:1.5;color:#3f2a1d">
+  <h2>Your SweetCrumbs Gift Card</h2>
+  <p>Use this code at checkout:</p>
+  <p style="font-size:22px;font-weight:700;letter-spacing:1px">{{ card.code }}</p>
+  <p>Balance: ₹{{ '%.2f'|format(card.current_balance or 0) }}</p>
+  {% if card.message %}
+  <p>Message: {{ card.message }}</p>
+  {% endif %}
+</div>

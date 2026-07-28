@@ -11,6 +11,7 @@ ORDER_STATUSES = [
     "OUT_FOR_DELIVERY",
     "DELIVERED",
     "CANCELLED",
+    "REFUNDED",
     "ON_HOLD",
     "READY_FOR_PICKUP",
 ]
@@ -34,14 +35,22 @@ ORDER_STATUS_TRANSITIONS = {
     ],
     "READY_FOR_PICKUP": ["DELIVERED", "ON_HOLD", "CANCELLED"],
     "OUT_FOR_DELIVERY": ["DELIVERED", "ON_HOLD"],
-    "ON_HOLD": ["PREPARING", "PACKED", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY", "CANCELLED"],
+    "ON_HOLD": [
+        "PREPARING",
+        "PACKED",
+        "READY_FOR_PICKUP",
+        "OUT_FOR_DELIVERY",
+        "CANCELLED",
+    ],
     "DELIVERED": [],
     "CANCELLED": [],
+    "REFUNDED": [],
 }
 
-def get_allowed_order_statuses(current_status, actor='admin'):
-    current_status = (current_status or 'PLACED').strip().upper()
-    if actor == 'delivery':
+
+def get_allowed_order_statuses(current_status, actor="admin"):
+    current_status = (current_status or "PLACED").strip().upper()
+    if actor == "delivery":
         allowed = [
             status
             for status in ORDER_STATUS_TRANSITIONS.get(current_status, [])
@@ -52,8 +61,8 @@ def get_allowed_order_statuses(current_status, actor='admin'):
     return [current_status] + [status for status in allowed if status != current_status]
 
 
-def can_transition_order_status(current_status, new_status, actor='admin'):
-    new_status = (new_status or '').strip().upper()
+def can_transition_order_status(current_status, new_status, actor="admin"):
+    new_status = (new_status or "").strip().upper()
     return new_status in get_allowed_order_statuses(current_status, actor=actor)
 
 
@@ -65,9 +74,14 @@ class Order(db.Model):
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
     status = db.Column(db.String(30), default="PLACED")
     source = db.Column(db.String(20), default="WEB")
+    channel = db.Column(db.String(20), default="online", nullable=False)
     subtotal = db.Column(db.Numeric(10, 2), default=0)
     discount = db.Column(db.Numeric(10, 2), default=0)
-    loyalty_discount = db.Column(db.Numeric(10, 2), default=0)  # NEW: loyalty redemption amount
+    loyalty_discount = db.Column(
+        db.Numeric(10, 2), default=0
+    )  # NEW: loyalty redemption amount
+    gift_card_redemption_amount = db.Column(db.Numeric(10, 2), default=0)
+    gift_card_code = db.Column(db.String(40))
     delivery_charge = db.Column(db.Numeric(10, 2), default=0)
     gst_rate = db.Column(db.Numeric(5, 2), default=5)
     gst_amount = db.Column(db.Numeric(10, 2), default=0)
@@ -132,8 +146,12 @@ class Order(db.Model):
     __table_args__ = (
         db.Index("idx_order_user", "user_id"),
         db.Index("idx_order_status", "status"),
-        db.Index("idx_order_status_payment_placed", "status", "payment_status", "placed_at"),
-        db.Index("idx_order_branch_status_date", "branch_id", "status", "delivery_date"),
+        db.Index(
+            "idx_order_status_payment_placed", "status", "payment_status", "placed_at"
+        ),
+        db.Index(
+            "idx_order_branch_status_date", "branch_id", "status", "delivery_date"
+        ),
         db.Index("idx_order_user_status_placed", "user_id", "status", "placed_at"),
     )
 

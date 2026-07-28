@@ -2,13 +2,39 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches:
+      - "**"
   pull_request:
-    branches: [main, master]
+    branches:
+      - "**"
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: sweetcrumbs_test
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      ALLOW_DEV_FINANCIAL_KEY_DERIVATION: "false"
+      DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/sweetcrumbs_test
+      ENABLE_LOCAL_SYNC_WORKER: "false"
+      ENABLE_PORTAL_SIDECARS: "false"
+      FINANCIAL_DATA_ENCRYPTION_KEY: 1iJMwmRr2ZbtgwKO4GaTr7UaO1zND1ndUsH3Lp8RMqQ=
+      FLASK_APP: wsgi:app
+      FLASK_ENV: testing
+      SECRET_KEY: ci-test-secret
+
     strategy:
       matrix:
         python-version: ['3.11']
@@ -23,8 +49,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt black
-      - name: Check formatting with Black
-        run: python -m black --check .
+          python -m pip install -r requirements.txt pytest
+      - name: Check migration graph
+        run: python scripts/check_migration_heads.py
+      - name: Run migrations against MySQL
+        run: |
+          python -m flask db upgrade
+          python -m flask db current
       - name: Run tests
         run: python -m pytest -q

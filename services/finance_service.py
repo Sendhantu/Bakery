@@ -23,24 +23,48 @@ from models import (
     db,
 )
 from services.analytics_service import (
+    PERIOD_LABELS,
     REVENUE_ORDER_STATUSES,
     REVENUE_PAYMENT_STATUSES,
     _product_sales_query,
     _revenue_order_filters,
+    analytics_payload,
     period_bounds,
+    total_revenue,
 )
 from services.invoice_service import InvoiceService
 
 
 DEFAULT_CATEGORIES = [
     ("sales", "Sales", "income", 10),
+    ("gift_card_liability", "Gift Card Liability", "liability", 15),
     ("raw_material_purchase", "Raw Material Purchase", "expense", 20),
     ("rent", "Rent", "expense", 30),
     ("utilities", "Utilities", "expense", 40),
     ("salary", "Salary", "expense", 50),
     ("other_income", "Other Income", "income", 60),
+    ("refund", "Refunds", "expense", 65),
     ("other_expense", "Other Expense", "expense", 70),
 ]
+
+FINANCE_PERIODS = {"day", "week", "month", "year", "financial_year", "custom"}
+PERIOD_ALIASES = {
+    "today": "day",
+    "fy": "financial_year",
+    "financial-year": "financial_year",
+}
+
+
+def financial_year_bounds(now=None):
+    """Indian financial year: 1 April through 31 March."""
+    current = (now or utcnow()).date()
+    if current.month >= 4:
+        start = date(current.year, 4, 1)
+        end = date(current.year + 1, 3, 31)
+    else:
+        start = date(current.year - 1, 4, 1)
+        end = date(current.year, 3, 31)
+    return start, end
 
 
 class FinanceService:
@@ -91,7 +115,9 @@ class FinanceService:
             return Decimal(str(active_rate.rate_percent or 0))
         return Decimal("5")
 
-    def extract_gst_from_inclusive(self, inclusive_amount: Decimal, rate_percent: Decimal) -> Decimal:
+    def extract_gst_from_inclusive(
+        self, inclusive_amount: Decimal, rate_percent: Decimal
+    ) -> Decimal:
         """Extract GST embedded in a tax-inclusive shelf price."""
         inclusive = Decimal(str(inclusive_amount or 0))
         rate = Decimal(str(rate_percent or 0))
@@ -122,13 +148,19 @@ class FinanceService:
             if branch:
                 return branch.id, branch.name
         store = current_app.config.get("STORE_DETAILS") or {}
-        return branch_id, store.get("name") or current_app.config.get("BAKERY_NAME", "Main Store")
+        return branch_id, store.get("name") or current_app.config.get(
+            "BAKERY_NAME", "Main Store"
+        )
 
-    def record_sale_from_order(self, order: Order, actor_id: Optional[int] = None) -> Optional[FinancialTransaction]:
+    def record_sale_from_order(
+        self, order: Order, actor_id: Optional[int] = None
+    ) -> Optional[FinancialTransaction]:
         if order is None:
             return None
         idempotency_key = f"sale-order-{order.id}"
-        existing = FinancialTransaction.query.filter_by(idempotency_key=idempotency_key).first()
+        existing = FinancialTransaction.query.filter_by(
+            idempotency_key=idempotency_key
+        ).first()
         if existing:
             return existing
 
@@ -141,12 +173,63 @@ class FinanceService:
 
         branch_id, store_location = self._branch_context(order.branch_id)
         gst_amount = self.compute_order_gst_amount(order)
+        realized_amount = (
+            Decimal(str(order.total or 0))
+            + Decimal(str(getattr(order, "gift_card_redemption_amount", 0) or 0))
+        ).quantize(Decimal("0.01"))
         txn = FinancialTransaction(
             transaction_type="income",
             category_id=category.id,
-            amount=Decimal(str(order.total or 0)),
+            amount=realized_amount,
             tax_amount=gst_amount,
             description=f"Sale for order #{order.order_number}",
+            counterparty=order.customer.name if order.customer else None,
+            reference_order_id=order.id,
+            branch_id=branch_id,
+            store_location=store_location,
+            is_auto_generated=True,
+            idempotency_key=idempotency_key,
+            created_by=actor_id,
+        )
+        db.session.add(txn)
+        self._audit_transaction(txn, actor_id, created=True)
+        return txn
+
+    def record_refund_from_order(
+        self,
+        order: Order,
+        *,
+        amount: Optional[Decimal] = None,
+        reason: str = "",
+        actor_id: Optional[int] = None,
+    ) -> Optional[FinancialTransaction]:
+        if order is None:
+            return None
+        idempotency_key = f"refund-order-{order.id}"
+        existing = FinancialTransaction.query.filter_by(
+            idempotency_key=idempotency_key
+        ).first()
+        if existing:
+            return existing
+
+        category = self.get_category("refund")
+        if category is None:
+            self.ensure_default_categories()
+            category = self.get_category("refund")
+        if category is None:
+            category = self.get_category("other_expense")
+        if category is None:
+            return None
+
+        refund_amount = Decimal(str(amount if amount is not None else order.total or 0))
+        branch_id, store_location = self._branch_context(order.branch_id)
+        gst_amount = self.compute_order_gst_amount(order)
+        txn = FinancialTransaction(
+            transaction_type="expense",
+            category_id=category.id,
+            amount=refund_amount,
+            tax_amount=gst_amount,
+            description=f"Refund for order #{order.order_number}: {(reason or '').strip()}",
             counterparty=order.customer.name if order.customer else None,
             reference_order_id=order.id,
             branch_id=branch_id,
@@ -163,7 +246,11 @@ class FinanceService:
         try:
             from bootstrap import get_container
 
-            action = "financial_transaction_created" if created else "financial_transaction_updated"
+            action = (
+                "financial_transaction_created"
+                if created
+                else "financial_transaction_updated"
+            )
             get_container().audit_service.log(
                 actor_id,
                 action,
@@ -199,6 +286,8 @@ class FinanceService:
         branch_id: Optional[int] = None,
         tds_withheld: Optional[Decimal] = None,
         created_by: Optional[int] = None,
+        vendor_id: Optional[int] = None,
+        reference_purchase_order_id: Optional[int] = None,
     ) -> FinancialTransaction:
         branch_id, store_location = self._branch_context(branch_id)
         txn = FinancialTransaction(
@@ -210,8 +299,12 @@ class FinanceService:
             counterparty=(counterparty or "").strip() or None,
             branch_id=branch_id,
             store_location=store_location,
-            tds_withheld=Decimal(str(tds_withheld)) if tds_withheld is not None else None,
+            tds_withheld=(
+                Decimal(str(tds_withheld)) if tds_withheld is not None else None
+            ),
             created_by=created_by,
+            vendor_id=vendor_id,
+            reference_purchase_order_id=reference_purchase_order_id,
         )
         db.session.add(txn)
         self._audit_transaction(txn, created_by, created=True)
@@ -224,10 +317,14 @@ class FinanceService:
         amount: Decimal,
         tax_amount: Optional[Decimal] = None,
         counterparty: str = "",
+        vendor_id: Optional[int] = None,
+        reference_purchase_order_id: Optional[int] = None,
         created_by: Optional[int] = None,
     ) -> FinancialTransaction:
         idempotency_key = f"restock-movement-{movement.id}"
-        existing = FinancialTransaction.query.filter_by(idempotency_key=idempotency_key).first()
+        existing = FinancialTransaction.query.filter_by(
+            idempotency_key=idempotency_key
+        ).first()
         if existing:
             return existing
 
@@ -237,7 +334,9 @@ class FinanceService:
             category = self.get_category("raw_material_purchase")
 
         material = movement.raw_material
-        branch_id, store_location = self._branch_context(material.branch_id if material else None)
+        branch_id, store_location = self._branch_context(
+            material.branch_id if material else None
+        )
         description = (
             f"Restock {material.name} (+{movement.change_amount} {material.unit})"
             if material
@@ -249,8 +348,11 @@ class FinanceService:
             amount=Decimal(str(amount)),
             tax_amount=Decimal(str(tax_amount)) if tax_amount is not None else None,
             description=description,
-            counterparty=(counterparty or (material.supplier if material else "")) or None,
+            counterparty=(counterparty or (material.supplier if material else ""))
+            or None,
             reference_stock_movement_id=movement.id,
+            reference_purchase_order_id=reference_purchase_order_id,
+            vendor_id=vendor_id,
             branch_id=branch_id,
             store_location=store_location,
             is_auto_generated=False,
@@ -269,7 +371,49 @@ class FinanceService:
         unit_cost = Decimal(str(material.cost_per_unit or 0))
         return (qty * unit_cost).quantize(Decimal("0.01"))
 
-    def _transactions_in_period(self, start: datetime, end: datetime, transaction_type: Optional[str] = None):
+    def resolve_period_range(
+        self,
+        period: str = "month",
+        start_date=None,
+        end_date=None,
+    ) -> Dict[str, Any]:
+        period = PERIOD_ALIASES.get(
+            (period or "month").strip().lower(), (period or "month").strip().lower()
+        )
+        if period not in FINANCE_PERIODS:
+            period = "month"
+
+        if period == "custom":
+            if not start_date or not end_date:
+                today = utcnow().date()
+                start_date = today.replace(day=1).isoformat()
+                end_date = today.isoformat()
+            start, end = period_bounds(
+                "custom", start_date=start_date, end_date=end_date
+            )
+            label = "Custom Range"
+        elif period == "financial_year":
+            fy_start, fy_end = financial_year_bounds()
+            start, end = period_bounds("custom", start_date=fy_start, end_date=fy_end)
+            label = f"FY {fy_start.year}-{str(fy_end.year)[-2:]}"
+        else:
+            analytics_period = "today" if period == "day" else period
+            start, end = period_bounds(analytics_period)
+            label = PERIOD_LABELS.get(analytics_period, period.title())
+
+        inclusive_end = (end - timedelta(days=1)).date()
+        return {
+            "period": period,
+            "label": label,
+            "start": start,
+            "end": end,
+            "start_date": start.date().isoformat(),
+            "end_date": inclusive_end.isoformat(),
+        }
+
+    def _transactions_in_period(
+        self, start: datetime, end: datetime, transaction_type: Optional[str] = None
+    ):
         query = FinancialTransaction.query.filter(
             FinancialTransaction.created_at >= start,
             FinancialTransaction.created_at < end,
@@ -277,6 +421,118 @@ class FinanceService:
         if transaction_type:
             query = query.filter_by(transaction_type=transaction_type)
         return query.all()
+
+    def _sales_category(self):
+        category = self.get_category("sales")
+        if category is None:
+            self.ensure_default_categories()
+            category = self.get_category("sales")
+        return category
+
+    def _sales_transactions_for_order_period(self, start: datetime, end: datetime):
+        category = self._sales_category()
+        if category is None:
+            return []
+        return (
+            FinancialTransaction.query.join(
+                Order,
+                FinancialTransaction.reference_order_id == Order.id,
+            )
+            .filter(
+                FinancialTransaction.transaction_type == "income",
+                FinancialTransaction.category_id == category.id,
+                *_revenue_order_filters(start, end),
+            )
+            .all()
+        )
+
+    def _manual_income_transactions(self, start: datetime, end: datetime):
+        category = self._sales_category()
+        query = FinancialTransaction.query.filter(
+            FinancialTransaction.transaction_type == "income",
+            FinancialTransaction.created_at >= start,
+            FinancialTransaction.created_at < end,
+        )
+        if category:
+            query = query.filter(
+                (FinancialTransaction.category_id != category.id)
+                | (FinancialTransaction.reference_order_id.is_(None))
+            )
+        return query.all()
+
+    def sales_revenue(self, start: datetime, end: datetime) -> Decimal:
+        return Decimal(
+            str(
+                total_revenue(
+                    "custom",
+                    start_date=start.date(),
+                    end_date=(end - timedelta(days=1)).date(),
+                )
+            )
+        ).quantize(Decimal("0.01"))
+
+    def missing_sale_transaction_orders(
+        self, start: Optional[datetime] = None, end: Optional[datetime] = None
+    ):
+        query = (
+            Order.query.outerjoin(
+                FinancialTransaction,
+                FinancialTransaction.reference_order_id == Order.id,
+            )
+            .filter(
+                Order.status.in_(REVENUE_ORDER_STATUSES),
+                Order.payment_status.in_(REVENUE_PAYMENT_STATUSES),
+                FinancialTransaction.id.is_(None),
+            )
+            .order_by(Order.placed_at.asc(), Order.id.asc())
+        )
+        if start is not None:
+            query = query.filter(Order.placed_at >= start)
+        if end is not None:
+            query = query.filter(Order.placed_at < end)
+        return query.all()
+
+    def backfill_missing_sale_transactions(
+        self,
+        *,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        commit: bool = False,
+        actor_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        orders = self.missing_sale_transaction_orders(start=start, end=end)
+        created = []
+        self.ensure_default_categories()
+        for order in orders:
+            txn = self.record_sale_from_order(order, actor_id=actor_id)
+            if txn:
+                created.append(order.id)
+        if commit:
+            db.session.commit()
+        else:
+            db.session.rollback()
+        return {"checked": len(orders), "created": len(created), "order_ids": created}
+
+    def revenue_consistency_check(
+        self, start_date=None, end_date=None
+    ) -> Dict[str, Any]:
+        start, end = period_bounds("custom", start_date=start_date, end_date=end_date)
+        order_revenue = self.sales_revenue(start, end)
+        ledger_revenue = self._sum_amounts(
+            self._sales_transactions_for_order_period(start, end)
+        )
+        difference = (order_revenue - ledger_revenue).quantize(Decimal("0.01"))
+        missing_orders = self.missing_sale_transaction_orders(start, end)
+        return {
+            "start": start,
+            "end": end,
+            "order_revenue": order_revenue,
+            "ledger_revenue": ledger_revenue,
+            "difference": difference,
+            "matches": difference == Decimal("0.00") and not missing_orders,
+            "missing_count": len(missing_orders),
+            "missing_orders": missing_orders[:25],
+        }
 
     def _sum_amounts(self, transactions: List[FinancialTransaction]) -> Decimal:
         total = Decimal("0")
@@ -287,6 +543,8 @@ class FinanceService:
     def _sum_tax(self, transactions: List[FinancialTransaction]) -> Decimal:
         total = Decimal("0")
         for txn in transactions:
+            if txn.vendor_id and txn.vendor and not txn.vendor.gstin:
+                continue
             if txn.tax_amount is not None:
                 total += Decimal(str(txn.tax_amount))
         return total.quantize(Decimal("0.01"))
@@ -300,20 +558,80 @@ class FinanceService:
 
     def profit_and_loss(self, start_date=None, end_date=None) -> Dict[str, Any]:
         start, end = period_bounds("custom", start_date=start_date, end_date=end_date)
-        income_txns = self._transactions_in_period(start, end, "income")
+        sales_revenue = self.sales_revenue(start, end)
+        sales_txns = self._sales_transactions_for_order_period(start, end)
+        manual_income_txns = self._manual_income_transactions(start, end)
         expense_txns = self._transactions_in_period(start, end, "expense")
-        income = self._sum_amounts(income_txns)
+        other_income = self._sum_amounts(manual_income_txns)
+        income = (sales_revenue + other_income).quantize(Decimal("0.01"))
         expenses = self._sum_amounts(expense_txns)
         net = (income - expenses).quantize(Decimal("0.01"))
         return {
             "start": start,
             "end": end,
+            "sales_revenue": sales_revenue,
+            "other_income": other_income,
             "income": income,
             "expenses": expenses,
             "net_profit": net,
-            "income_transactions": income_txns,
+            "sales_transactions": sales_txns,
+            "income_transactions": sales_txns + manual_income_txns,
+            "manual_income_transactions": manual_income_txns,
             "expense_transactions": expense_txns,
         }
+
+    def category_breakdown(
+        self, start_date=None, end_date=None
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        start, end = period_bounds("custom", start_date=start_date, end_date=end_date)
+        sales_category = self._sales_category()
+        income_rows: Dict[str, Dict[str, Any]] = {}
+        if sales_category:
+            sales_revenue = self.sales_revenue(start, end)
+            income_rows[sales_category.label] = {
+                "category": sales_category.label,
+                "transaction_type": "income",
+                "amount": sales_revenue,
+            }
+        for txn in self._manual_income_transactions(start, end):
+            label = txn.category.label if txn.category else "Other Income"
+            bucket = income_rows.setdefault(
+                label,
+                {
+                    "category": label,
+                    "transaction_type": "income",
+                    "amount": Decimal("0"),
+                },
+            )
+            bucket["amount"] += Decimal(str(txn.amount or 0))
+
+        expense_rows: Dict[str, Dict[str, Any]] = {}
+        for txn in self._transactions_in_period(start, end, "expense"):
+            label = txn.category.label if txn.category else "Other Expense"
+            bucket = expense_rows.setdefault(
+                label,
+                {
+                    "category": label,
+                    "transaction_type": "expense",
+                    "amount": Decimal("0"),
+                },
+            )
+            bucket["amount"] += Decimal(str(txn.amount or 0))
+
+        def normalize(rows):
+            return sorted(
+                [
+                    {
+                        **row,
+                        "amount": Decimal(str(row["amount"])).quantize(Decimal("0.01")),
+                    }
+                    for row in rows.values()
+                ],
+                key=lambda item: item["amount"],
+                reverse=True,
+            )
+
+        return {"income": normalize(income_rows), "expenses": normalize(expense_rows)}
 
     def product_ledger(self, start_date=None, end_date=None) -> List[Dict[str, Any]]:
         start, end = period_bounds("custom", start_date=start_date, end_date=end_date)
@@ -327,8 +645,11 @@ class FinanceService:
         )
         unit_cogs = {}
         for recipe, material in recipe_rows:
-            unit_cogs[recipe.product_id] = unit_cogs.get(recipe.product_id, Decimal("0")) + (
-                Decimal(str(recipe.quantity_required or 0)) * Decimal(str(material.cost_per_unit or 0))
+            unit_cogs[recipe.product_id] = unit_cogs.get(
+                recipe.product_id, Decimal("0")
+            ) + (
+                Decimal(str(recipe.quantity_required or 0))
+                * Decimal(str(material.cost_per_unit or 0))
             )
 
         ledger = []
@@ -336,7 +657,9 @@ class FinanceService:
             product_id = row.product_id
             units = Decimal(str(row.units_sold or 0))
             revenue = Decimal(str(row.revenue or 0))
-            cogs = (unit_cogs.get(product_id, Decimal("0")) * units).quantize(Decimal("0.01"))
+            cogs = (unit_cogs.get(product_id, Decimal("0")) * units).quantize(
+                Decimal("0.01")
+            )
             ledger.append(
                 {
                     "product_id": product_id,
@@ -354,11 +677,49 @@ class FinanceService:
         txns = self._transactions_in_period(start, end)
         by_store: Dict[str, Dict[str, Decimal]] = {}
 
+        sales_rows = (
+            db.session.query(
+                Order.branch_id,
+                func.coalesce(Branch.name, Order.branch_id).label("store"),
+                func.coalesce(
+                    func.sum(
+                        Order.total
+                        + func.coalesce(Order.gift_card_redemption_amount, 0)
+                    ),
+                    0,
+                ).label("income"),
+            )
+            .outerjoin(Branch, Branch.id == Order.branch_id)
+            .filter(*_revenue_order_filters(start, end))
+            .group_by(Order.branch_id, Branch.name)
+            .all()
+        )
+        default_store = self._branch_context(None)[1]
+        for row in sales_rows:
+            key = str(row.store or default_store or "Unassigned")
+            bucket = by_store.setdefault(
+                key,
+                {
+                    "store": key,
+                    "income": Decimal("0"),
+                    "expenses": Decimal("0"),
+                    "branch_id": row.branch_id,
+                },
+            )
+            bucket["income"] += Decimal(str(row.income or 0))
+
         for txn in txns:
+            if txn.transaction_type == "income" and txn.reference_order_id:
+                continue
             key = txn.store_location or "Unassigned"
             bucket = by_store.setdefault(
                 key,
-                {"store": key, "income": Decimal("0"), "expenses": Decimal("0"), "branch_id": txn.branch_id},
+                {
+                    "store": key,
+                    "income": Decimal("0"),
+                    "expenses": Decimal("0"),
+                    "branch_id": txn.branch_id,
+                },
             )
             amount = Decimal(str(txn.amount or 0))
             if txn.transaction_type == "income":
@@ -373,7 +734,9 @@ class FinanceService:
                     **bucket,
                     "income": bucket["income"].quantize(Decimal("0.01")),
                     "expenses": bucket["expenses"].quantize(Decimal("0.01")),
-                    "net": (bucket["income"] - bucket["expenses"]).quantize(Decimal("0.01")),
+                    "net": (bucket["income"] - bucket["expenses"]).quantize(
+                        Decimal("0.01")
+                    ),
                 }
             )
         return sorted(rows, key=lambda item: item["store"])
@@ -392,6 +755,57 @@ class FinanceService:
             "gst_paid": gst_paid,
             "net_gst_liability": net_liability,
         }
+
+    def vendor_spend_report(
+        self, start_date=None, end_date=None
+    ) -> List[Dict[str, Any]]:
+        start, end = period_bounds("custom", start_date=start_date, end_date=end_date)
+        txns = (
+            FinancialTransaction.query.filter(
+                FinancialTransaction.transaction_type == "expense",
+                FinancialTransaction.vendor_id.isnot(None),
+                FinancialTransaction.created_at >= start,
+                FinancialTransaction.created_at < end,
+            )
+            .order_by(FinancialTransaction.created_at.desc())
+            .all()
+        )
+        rows: Dict[int, Dict[str, Any]] = {}
+        for txn in txns:
+            vendor = txn.vendor
+            vendor_id = txn.vendor_id
+            name = vendor.name if vendor else txn.counterparty or "Unknown vendor"
+            row = rows.setdefault(
+                vendor_id,
+                {
+                    "vendor_id": vendor_id,
+                    "vendor_name": name,
+                    "total_spend": Decimal("0"),
+                    "gst_paid": Decimal("0"),
+                    "transaction_count": 0,
+                    "input_tax_credit_eligible": bool(vendor and vendor.gstin),
+                    "last_purchase_at": txn.created_at,
+                },
+            )
+            row["total_spend"] += Decimal(str(txn.amount or 0))
+            if row["input_tax_credit_eligible"] and txn.tax_amount is not None:
+                row["gst_paid"] += Decimal(str(txn.tax_amount))
+            row["transaction_count"] += 1
+            if txn.created_at and txn.created_at > row["last_purchase_at"]:
+                row["last_purchase_at"] = txn.created_at
+
+        return sorted(
+            [
+                {
+                    **row,
+                    "total_spend": row["total_spend"].quantize(Decimal("0.01")),
+                    "gst_paid": row["gst_paid"].quantize(Decimal("0.01")),
+                }
+                for row in rows.values()
+            ],
+            key=lambda item: item["total_spend"],
+            reverse=True,
+        )
 
     def tds_summary(self, start_date=None, end_date=None) -> Dict[str, Any]:
         start, end = period_bounds("custom", start_date=start_date, end_date=end_date)
@@ -418,6 +832,92 @@ class FinanceService:
                 if not vendor_rows
                 else ""
             ),
+        }
+
+    def finance_health_for_current_year(self) -> Dict[str, Any]:
+        start, inclusive_end = financial_year_bounds()
+        pnl = self.profit_and_loss(start_date=start, end_date=inclusive_end)
+        gst = self.gst_summary(start_date=start, end_date=inclusive_end)
+        categories = self.category_breakdown(start_date=start, end_date=inclusive_end)
+        return {
+            "label": f"FY {start.year}-{str(inclusive_end.year)[-2:]}",
+            "start_date": start.isoformat(),
+            "end_date": inclusive_end.isoformat(),
+            "net_income": pnl["net_profit"],
+            "total_income": pnl["income"],
+            "total_expenses": pnl["expenses"],
+            "tax_collected": gst["gst_collected"],
+            "tax_paid": gst["gst_paid"],
+            "net_tax_liability": gst["net_gst_liability"],
+            "expense_categories": categories["expenses"],
+        }
+
+    def dashboard_payload(
+        self, period="month", start_date=None, end_date=None
+    ) -> Dict[str, Any]:
+        selected = self.resolve_period_range(
+            period, start_date=start_date, end_date=end_date
+        )
+        start_date = selected["start_date"]
+        end_date = selected["end_date"]
+
+        period_cards = []
+        for key, label in [
+            ("day", "Today"),
+            ("week", "This Week"),
+            ("month", "This Month"),
+            ("year", "This Year"),
+        ]:
+            bounds = self.resolve_period_range(key)
+            pnl = self.profit_and_loss(
+                start_date=bounds["start_date"],
+                end_date=bounds["end_date"],
+            )
+            period_cards.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "revenue": pnl["sales_revenue"],
+                    "expenses": pnl["expenses"],
+                    "net_profit": pnl["net_profit"],
+                }
+            )
+
+        analytics_period = (
+            "custom"
+            if selected["period"] in {"custom", "financial_year"}
+            else ("today" if selected["period"] == "day" else selected["period"])
+        )
+        analytics = analytics_payload(
+            analytics_period,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        pnl = self.profit_and_loss(start_date=start_date, end_date=end_date)
+        gst = self.gst_summary(start_date=start_date, end_date=end_date)
+        tds = self.tds_summary(start_date=start_date, end_date=end_date)
+        consistency = self.revenue_consistency_check(
+            start_date=start_date, end_date=end_date
+        )
+        return {
+            "selected_period": selected,
+            "period_cards": period_cards,
+            "pnl": pnl,
+            "sales": analytics,
+            "category_breakdown": self.category_breakdown(
+                start_date=start_date, end_date=end_date
+            ),
+            "product_ledger": self.product_ledger(
+                start_date=start_date, end_date=end_date
+            ),
+            "store_ledger": self.store_ledger(start_date=start_date, end_date=end_date),
+            "vendor_spend": self.vendor_spend_report(
+                start_date=start_date, end_date=end_date
+            ),
+            "gst": gst,
+            "tds": tds,
+            "itr_health": self.finance_health_for_current_year(),
+            "consistency": consistency,
         }
 
     def save_tax_record(
@@ -447,7 +947,9 @@ class FinanceService:
         record.gst_paid = gst["gst_paid"]
         record.net_gst_liability = gst["net_gst_liability"]
         record.tds_withheld = tds["tds_withheld"]
-        record.admin_adjustment_notes = (admin_notes or "").strip() or record.admin_adjustment_notes
+        record.admin_adjustment_notes = (
+            admin_notes or ""
+        ).strip() or record.admin_adjustment_notes
         record.computed_at = utcnow()
         return record
 
@@ -483,5 +985,7 @@ def maybe_record_sale_on_payment(payment, actor_id=None):
         service.ensure_default_categories()
         return service.record_sale_from_order(order, actor_id=actor_id)
     except Exception:
-        current_app.logger.exception("finance_sale_record_failed order_id=%s", payment.order_id)
+        current_app.logger.exception(
+            "finance_sale_record_failed order_id=%s", payment.order_id
+        )
         return None

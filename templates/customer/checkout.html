@@ -284,6 +284,12 @@
             <div id="loyalty-points-summary" class="text-sm text-muted mt-1"></div>
           </div>
 
+          <div class="form-group">
+            <label class="form-label">Gift Card</label>
+            <input class="form-control" type="text" id="gift_card_code" name="gift_card_code" placeholder="SCGC-XXXX-XXXX-XXXX">
+            <p class="text-sm text-muted mt-1">Gift cards apply after coupon and loyalty savings. Any remaining payable is charged by the selected payment method.</p>
+          </div>
+
           <div class="divider"></div>
           <div class="flex justify-between mb-2">
             <span class="text-muted">Subtotal</span>
@@ -302,6 +308,10 @@
           <div id="loyalty-discount-row" class="flex justify-between mb-2" style="color:var(--sage);display:none">
             <span>⭐ Loyalty</span>
             <span id="loyalty-discount-val">−₹0</span>
+          </div>
+          <div class="flex justify-between mb-2" style="color:var(--sage)">
+            <span>🎁 Gift Card</span>
+            <span>Applied on submit</span>
           </div>
           <div class="flex justify-between mb-2">
             <span class="text-muted" id="checkout-fulfillment-charge-label">Delivery</span>
@@ -322,7 +332,7 @@
             </span>
           </div>
           <div class="checkout-payable-note">
-            Final payable updates instantly as you preview coupon and loyalty savings.
+            Order of operations: membership, coupon, and loyalty discounts apply first; gift card balance is deducted from the remaining payable when you place the order.
           </div>
           <button type="submit" class="btn btn-primary btn-block btn-lg">
             🎉 Place Order

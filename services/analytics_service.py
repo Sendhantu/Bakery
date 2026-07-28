@@ -92,19 +92,19 @@ def _revenue_order_filters(start, end):
 
 def total_revenue(period="today", start_date=None, end_date=None):
     start, end = period_bounds(period, start_date=start_date, end_date=end_date)
-    return (
-        db.session.query(func.coalesce(func.sum(Order.total), 0))
-        .filter(*_revenue_order_filters(start, end))
-        .scalar()
-        or Decimal("0")
-    )
+    realized_total = Order.total + func.coalesce(Order.gift_card_redemption_amount, 0)
+    return db.session.query(func.coalesce(func.sum(realized_total), 0)).filter(
+        *_revenue_order_filters(start, end)
+    ).scalar() or Decimal("0")
 
 
 def _product_sales_query(start, end):
     return (
         db.session.query(
             OrderItem.product_id.label("product_id"),
-            func.coalesce(Product.name, func.max(OrderItem.product_name)).label("product_name"),
+            func.coalesce(Product.name, func.max(OrderItem.product_name)).label(
+                "product_name"
+            ),
             func.coalesce(func.sum(OrderItem.quantity), 0).label("units_sold"),
             func.coalesce(func.sum(OrderItem.subtotal), 0).label("revenue"),
         )
@@ -128,7 +128,9 @@ def _serialize_product_row(row):
 
 def units_sold(period="today", start_date=None, end_date=None, limit=None):
     start, end = period_bounds(period, start_date=start_date, end_date=end_date)
-    query = _product_sales_query(start, end).order_by(desc("units_sold"), desc("revenue"))
+    query = _product_sales_query(start, end).order_by(
+        desc("units_sold"), desc("revenue")
+    )
     if limit:
         query = query.limit(limit)
     return [_serialize_product_row(row) for row in query.all()]
@@ -211,7 +213,15 @@ def revenue_trend(period="month", granularity=None, start_date=None, end_date=No
     start, end = period_bounds(period, start_date=start_date, end_date=end_date)
     bucket = _bucket_expression(granularity).label("bucket")
     rows = (
-        db.session.query(bucket, func.coalesce(func.sum(Order.total), 0).label("revenue"))
+        db.session.query(
+            bucket,
+            func.coalesce(
+                func.sum(
+                    Order.total + func.coalesce(Order.gift_card_redemption_amount, 0)
+                ),
+                0,
+            ).label("revenue"),
+        )
         .filter(*_revenue_order_filters(start, end))
         .group_by(bucket)
         .order_by(bucket)
@@ -235,14 +245,18 @@ def analytics_payload(period="month", granularity=None, start_date=None, end_dat
         "period": period,
         "period_label": PERIOD_LABELS.get(period, "Custom Range"),
         "granularity": granularity,
-        "revenue": float(total_revenue(period, start_date=start_date, end_date=end_date)),
+        "revenue": float(
+            total_revenue(period, start_date=start_date, end_date=end_date)
+        ),
         "trend": revenue_trend(
             period,
             granularity=granularity,
             start_date=start_date,
             end_date=end_date,
         ),
-        "units_sold": units_sold(period, start_date=start_date, end_date=end_date, limit=10),
+        "units_sold": units_sold(
+            period, start_date=start_date, end_date=end_date, limit=10
+        ),
         "top_sellers": top_selling_product(
             period,
             start_date=start_date,
