@@ -611,7 +611,11 @@ def register_core_routes(app):
         try:
             if service and service.enabled:
                 # Run in background to avoid blocking the client
-                socketio.start_background_task(lambda: service.flush_pending_actions())
+                def _flush_pending_actions():
+                    with app.app_context():
+                        service.flush_pending_actions()
+
+                socketio.start_background_task(_flush_pending_actions)
                 return jsonify({"status": "started"}), 200
             else:
                 # fallback to Celery scheduled retry

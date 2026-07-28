@@ -1,10 +1,3 @@
-databases:
-  - name: bakery-db
-    databaseName: bakery
-    user: bakery_user
-    plan: free
-    region: singapore
-
 services:
   # ─── Web Service (Customer Portal Only) ───────────────────────────────────────
   - type: web
@@ -26,12 +19,18 @@ services:
         generateValue: true
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: FINANCIAL_DATA_ENCRYPTION_KEY
+        sync: false
 
-      # Render-managed PostgreSQL database
+      # TiDB Cloud database shared with local admin/delivery portals
       - key: DATABASE_URL
-        fromDatabase:
-          name: bakery-db
-          property: connectionString
+        sync: false
+      - key: DB_SSL_CA
+        value: /etc/ssl/certs/ca-certificates.crt
+      - key: DB_SSL_VERIFY_CERT
+        value: "true"
+      - key: DB_SSL_VERIFY_IDENTITY
+        value: "true"
 
       # Render Key Value - shared by Socket.IO, Celery, cache, and rate limiting
       - key: REDIS_URL
@@ -144,10 +143,22 @@ services:
           name: bakery-customer-portal
           type: web
           envVarKey: JWT_SECRET_KEY
+      - key: FINANCIAL_DATA_ENCRYPTION_KEY
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: FINANCIAL_DATA_ENCRYPTION_KEY
       - key: DATABASE_URL
-        fromDatabase:
-          name: bakery-db
-          property: connectionString
+        fromService:
+          name: bakery-customer-portal
+          type: web
+          envVarKey: DATABASE_URL
+      - key: DB_SSL_CA
+        value: /etc/ssl/certs/ca-certificates.crt
+      - key: DB_SSL_VERIFY_CERT
+        value: "true"
+      - key: DB_SSL_VERIFY_IDENTITY
+        value: "true"
       - key: REDIS_URL
         fromService:
           name: bakery-redis

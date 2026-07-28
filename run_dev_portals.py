@@ -5,6 +5,12 @@ import subprocess
 import sys
 import time
 
+# Local multi-portal development starts each portal in a separate process. Keep
+# their Flask session and derived development financial encryption key aligned
+# unless the user provides real values in the environment.
+os.environ.setdefault('SECRET_KEY', 'sweetcrumbs-local-dev-secret-key-change-me')
+os.environ.setdefault('JWT_SECRET_KEY', os.environ['SECRET_KEY'])
+
 from app import PORTAL_PORTS, create_app, db, get_available_development_credentials, seed_data
 
 ROOT = os.path.dirname(os.path.abspath(__file__))

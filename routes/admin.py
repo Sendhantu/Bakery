@@ -1011,8 +1011,7 @@ def assign_delivery(order_id):
 
     assert_version(order, expected_version, entity_name="Order")
 
-    # Wrap assignment in a transaction to atomically create/update delivery and agent state
-    with db.session.begin():
+    try:
         existing = Delivery.query.filter_by(order_id=order_id).first()
         if existing:
             existing.agent_id = agent_id
@@ -1022,8 +1021,18 @@ def assign_delivery(order_id):
                 Delivery(order_id=order_id, agent_id=agent_id, assigned_time=utcnow())
             )
         agent.availability = False
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception("delivery_assignment_failed order_id=%s", order_id)
+        flash("Unable to assign delivery right now.", "danger")
+        return redirect(url_for("admin.order_detail", order_id=order_id))
+
     deliveries = Delivery.query.filter_by(agent_id=agent_id, status="ASSIGNED").all()
-    get_container().route_planning_service.plan_for_agent(agent, deliveries)
+    try:
+        get_container().route_planning_service.plan_for_agent(agent, deliveries)
+    except Exception:
+        current_app.logger.exception("delivery_route_plan_failed agent_id=%s", agent_id)
     from realtime.events import emit_delivery_assignment
 
     emit_delivery_assignment(agent_id, order_id=order_id)
@@ -3312,7 +3321,7 @@ def audit():
         FraudAlert.query.order_by(FraudAlert.created_at.desc()).limit(20).all()
     )
     return render_template(
-        "admin/audit_log.html",
+        "admin/audit.html",
         logs=logs,
         actors=actors,
         actions=actions,

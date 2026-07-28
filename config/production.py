@@ -34,6 +34,7 @@ class ProductionConfig(BaseConfig):
         storage_required = env_flag("STORAGE_REQUIRED", default=cls.STORAGE_REQUIRED)
         required_env_vars = [
             "DATABASE_URL",
+            "FINANCIAL_DATA_ENCRYPTION_KEY",
             "REDIS_URL",
             "SECRET_KEY",
             "JWT_SECRET_KEY",

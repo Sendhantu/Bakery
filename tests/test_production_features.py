@@ -19,6 +19,9 @@ def _set_required_production_env(monkeypatch):
         "RATELIMIT_STORAGE_URI": "redis://localhost:6379/0",
         "SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
         "JWT_SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
+        "FINANCIAL_DATA_ENCRYPTION_KEY": (
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+        ),
     }
     for name, value in required_values.items():
         monkeypatch.setenv(name, value)
@@ -30,6 +33,9 @@ def _set_minimal_render_production_env(monkeypatch):
         "REDIS_URL": "redis://localhost:6379/0",
         "SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
         "JWT_SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
+        "FINANCIAL_DATA_ENCRYPTION_KEY": (
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+        ),
     }
     for name, value in required_values.items():
         monkeypatch.setenv(name, value)
@@ -135,11 +141,10 @@ def test_mysql_engine_options_include_mysql_ssl_env(monkeypatch):
     assert options["connect_args"]["ssl_verify_identity"] is True
 
 
-def test_render_blueprint_uses_managed_postgres_and_keyvalue():
+def test_render_blueprint_uses_tidb_and_keyvalue():
     blueprint_path = Path(__file__).resolve().parents[1] / "render.yaml"
     blueprint = yaml.safe_load(blueprint_path.read_text())
 
-    databases = {database["name"]: database for database in blueprint["databases"]}
     services = {service["name"]: service for service in blueprint["services"]}
     web_env = {
         env_var["key"]: env_var
@@ -150,9 +155,15 @@ def test_render_blueprint_uses_managed_postgres_and_keyvalue():
         for env_var in services["bakery-celery-worker"]["envVars"]
     }
 
-    assert "bakery-db" in databases
-    assert web_env["DATABASE_URL"]["fromDatabase"]["name"] == "bakery-db"
-    assert worker_env["DATABASE_URL"]["fromDatabase"]["name"] == "bakery-db"
+    assert "databases" not in blueprint
+    assert web_env["PORTAL_ROLE"]["value"] == "customer"
+    assert web_env["DATABASE_URL"]["sync"] is False
+    assert worker_env["DATABASE_URL"]["fromService"]["name"] == "bakery-customer-portal"
+    assert web_env["FINANCIAL_DATA_ENCRYPTION_KEY"]["sync"] is False
+    assert (
+        worker_env["FINANCIAL_DATA_ENCRYPTION_KEY"]["fromService"]["envVarKey"]
+        == "FINANCIAL_DATA_ENCRYPTION_KEY"
+    )
     assert services["bakery-redis"]["type"] == "keyvalue"
     assert services["bakery-celery-worker"]["plan"] != "free"
 
@@ -160,11 +171,20 @@ def test_render_blueprint_uses_managed_postgres_and_keyvalue():
         services["bakery-customer-portal"]["envVars"]
         + services["bakery-celery-worker"]["envVars"]
     )
-    assert not any(env_var["key"].startswith("DB_SSL") for env_var in render_backed_env)
+    assert web_env["DB_SSL_VERIFY_IDENTITY"]["value"] == "true"
+    assert worker_env["DB_SSL_VERIFY_IDENTITY"]["value"] == "true"
     for env_var in render_backed_env:
         source = env_var.get("fromService", {})
         if source.get("name") == "bakery-redis":
             assert source["type"] == "keyvalue"
+
+
+def test_production_financial_encryption_key_is_required(monkeypatch):
+    _set_required_production_env(monkeypatch)
+    monkeypatch.delenv("FINANCIAL_DATA_ENCRYPTION_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="FINANCIAL_DATA_ENCRYPTION_KEY"):
+        ProductionConfig.init_app(_production_config_app())
 
 
 def test_production_cloudinary_required_when_storage_required(monkeypatch):
