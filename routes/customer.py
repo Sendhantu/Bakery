@@ -15,6 +15,7 @@ from app import csrf
 from bootstrap import get_container
 from clock import utcnow
 from exceptions import ValidationError
+from sqlalchemy import func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from models import (
     db,
@@ -27,6 +28,7 @@ from models import (
     OrderItem,
     Payment,
     Refund,
+    User,
     Coupon,
     Subscription,
     Review,
@@ -51,6 +53,7 @@ from realtime.events import (
     emit_new_order,
     emit_order_cancelled,
     emit_order_refunded,
+    emit_support_message,
     emit_stock_updated,
 )
 from services import (
@@ -96,6 +99,9 @@ def redirect_delivery_users_to_delivery_portal():
             )
         abort(404)
 
+    if request.endpoint == "customer.ai_recommend":
+        return None
+
     if current_user.is_authenticated and has_role(current_user, "delivery"):
         from routes.auth import portal_url_for_role
 
@@ -114,11 +120,90 @@ def notify(user_id, title, message, ntype="order", link=""):
     )
 
 
+SUPPORT_STAFF_ROLE_PRIORITY = {
+    "admin": 0,
+    "super_admin": 0,
+    "branch_manager": 1,
+    "cashier": 2,
+    "kitchen_staff": 3,
+}
+
+
+def support_staff_members():
+    staff = (
+        User.query.filter(
+            User.role.in_(ADMIN_PORTAL_ROLES),
+            User.is_active.is_(True),
+        )
+        .order_by(User.name.asc())
+        .all()
+    )
+    return sorted(
+        staff,
+        key=lambda user: (
+            SUPPORT_STAFF_ROLE_PRIORITY.get((user.role or "").lower(), 99),
+            user.name or "",
+        ),
+    )
+
+
+def support_staff_ids():
+    return [staff.id for staff in support_staff_members()]
+
+
+def support_recipient():
+    staff = support_staff_members()
+    return staff[0] if staff else None
+
+
+def customer_support_thread_filter(customer_id):
+    staff_ids = support_staff_ids()
+    if not staff_ids:
+        return Message.id == -1
+    return or_(
+        (Message.sender_id == customer_id) & (Message.receiver_id.in_(staff_ids)),
+        (Message.sender_id.in_(staff_ids)) & (Message.receiver_id == customer_id),
+    )
+
+
 def wants_json_response():
     return (
         request.headers.get("X-Requested-With") == "XMLHttpRequest"
         or request.accept_mimetypes.best == "application/json"
     )
+
+
+def can_use_customer_ai(user=None):
+    user = user or current_user
+    return bool(
+        getattr(user, "is_authenticated", False)
+        and has_role(user, "customer", *ADMIN_PORTAL_ROLES)
+    )
+
+
+def ai_surface_return_path(surface=None):
+    surface = (surface or "").strip().lower()
+    if surface == "shop":
+        return url_for("customer.products", _anchor="ai-assistant")
+    if surface == "support":
+        return url_for("customer.chat", _anchor="ai-assistant")
+    return url_for("customer.home", _anchor="ai-assistant")
+
+
+def ai_auth_required_payload(surface=None, *, expired=False):
+    next_url = ai_surface_return_path(surface)
+    message = (
+        "Your session has expired. Please log in again to use our AI bakery assistant."
+        if expired
+        else "Please log in to use our AI bakery assistant."
+    )
+    return {
+        "ok": False,
+        "code": "auth_required",
+        "message": message,
+        "login_url": url_for("auth.login", next=next_url),
+        "register_url": url_for("auth.register", next=next_url),
+    }
 
 
 def build_order_detail_context(order):
@@ -228,6 +313,88 @@ def serialize_cart_line(product, variant, quantity, cart_id=None, is_guest=False
     }
 
 
+def serialize_ai_product_payload(product):
+    variants = (
+        ProductVariant.query.filter_by(product_id=product["id"])
+        .order_by(ProductVariant.id.asc())
+        .all()
+    )
+    return {
+        "id": product["id"],
+        "name": product["name"],
+        "price": product["price"],
+        "current_price": product["price"],
+        "base_price": float(product.get("base_price") or product["price"]),
+        "category": product.get("category", ""),
+        "image": product.get("image", ""),
+        "description": product.get("description", ""),
+        "rating": float(product.get("rating") or 0),
+        "review_count": int(product.get("review_count") or 0),
+        "stock_status": product.get("stock_status", ""),
+        "stock": int(product.get("total_stock") or 0),
+        "eggless": bool(product.get("eggless", False)),
+        "default_variant_id": product.get("default_variant_id"),
+        "preorder_required": bool(product.get("preorder_required", False)),
+        "minimum_notice_hours": int(product.get("minimum_notice_hours") or 0),
+        "variants": [
+            {
+                "id": variant.id,
+                "name": variant.name,
+                "price": float(Decimal(str(variant.price or 0))),
+                "stock": int(variant.stock or 0),
+            }
+            for variant in variants
+        ],
+        "detail_url": url_for("customer.product_detail", product_id=product["id"]),
+    }
+
+
+def apply_checkout_addons(user_id, form):
+    addon_ids = []
+    for value in form.getlist("checkout_addon_product_id"):
+        try:
+            addon_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if not addon_ids:
+        return []
+
+    added = []
+    for product_id in addon_ids:
+        product = Product.query.filter_by(id=product_id, is_active=True).first()
+        if not product:
+            continue
+        variant = resolve_product_variant(product)
+        quantity = max(
+            form.get(f"checkout_addon_quantity_{product_id}", 1, type=int) or 1,
+            1,
+        )
+        if not variant or int(variant.stock or 0) < quantity:
+            raise ValidationError(f"{product.name} is currently out of stock.")
+
+        existing = Cart.query.filter_by(
+            user_id=user_id,
+            product_id=product.id,
+            variant_id=variant.id,
+        ).first()
+        if existing:
+            existing.quantity = min(
+                existing.quantity + quantity,
+                int(variant.stock or 0),
+            )
+        else:
+            db.session.add(
+                Cart(
+                    user_id=user_id,
+                    product_id=product.id,
+                    variant_id=variant.id,
+                    quantity=quantity,
+                )
+            )
+        added.append(product)
+    return added
+
+
 def set_guest_cart(entries):
     if entries:
         session["guest_cart"] = entries
@@ -309,6 +476,44 @@ def calculate_cart_totals(lines):
     )
     total_quantity = sum(int(line["quantity"]) for line in lines)
     return subtotal, total_quantity
+
+
+def compute_free_delivery_context(subtotal, has_items=True):
+    """Return the free-delivery configuration and the current cart's progress toward it.
+
+    Uses the same delivery configuration and subtotal that the existing delivery-charge
+    calculation relies on, so the displayed message always matches the applied fee.
+    """
+    delivery_threshold = Decimal(
+        str(current_app.config.get("DELIVERY_FREE_THRESHOLD", 500))
+    )
+    delivery_fee = Decimal(str(current_app.config.get("DELIVERY_CHARGE", 50)))
+
+    if delivery_threshold <= 0:
+        delivery_charge = Decimal("0")
+        remaining = Decimal("0")
+        progress = 100
+    elif not has_items:
+        delivery_charge = Decimal("0")
+        remaining = Decimal("0")
+        progress = 0
+    elif subtotal >= delivery_threshold:
+        delivery_charge = Decimal("0")
+        remaining = Decimal("0")
+        progress = 100
+    else:
+        delivery_charge = delivery_fee
+        remaining = max(Decimal("0"), delivery_threshold - subtotal)
+        progress = min(100, int((subtotal * 100) / delivery_threshold))
+
+    return {
+        "delivery_threshold": delivery_threshold,
+        "delivery_fee": delivery_fee,
+        "delivery_charge": delivery_charge,
+        "free_delivery_unlocked": has_items and delivery_charge == Decimal("0"),
+        "amount_to_free_delivery": remaining,
+        "free_delivery_progress": progress,
+    }
 
 
 def upsert_guest_cart_item(product, variant, quantity):
@@ -406,10 +611,17 @@ def build_cart_summary(user_id=None, added_item=None):
     if user_id is None and not current_user.is_authenticated:
         checkout_url = url_for("auth.login", next=url_for("customer.checkout"))
 
+    free_delivery = compute_free_delivery_context(subtotal, has_items=bool(lines))
+
     payload = {
         "count": total_quantity,
         "line_count": len(lines),
         "subtotal": float(subtotal),
+        "delivery_threshold": float(free_delivery["delivery_threshold"]),
+        "delivery_charge": float(free_delivery["delivery_charge"]),
+        "amount_to_free_delivery": float(free_delivery["amount_to_free_delivery"]),
+        "free_delivery_unlocked": free_delivery["free_delivery_unlocked"],
+        "free_delivery_progress": free_delivery["free_delivery_progress"],
         "cart_url": url_for("customer.cart"),
         "checkout_url": checkout_url,
         "items": [
@@ -488,7 +700,6 @@ def send_gift_card_email(card, recipient_email):
 # HOME
 # ────────────────────────────────────────
 @customer_bp.route("/")
-@cache.cached(timeout=300)
 def home():
     try:
         featured = (
@@ -513,7 +724,6 @@ def home():
 # PRODUCTS
 # ────────────────────────────────────────
 @customer_bp.route("/products")
-@cache.cached(timeout=60, query_string=True)
 def products():
     q = request.args.get("q", "")
     cat_id = request.args.get("category", type=int)
@@ -521,8 +731,8 @@ def products():
     min_price = request.args.get("min_price", type=float)
     max_price = request.args.get("max_price", type=float)
     occasion = request.args.get("occasion", "")
-    sort = request.args.get("sort", "featured")
-    page, per_page = page_args(default_per_page=12, max_per_page=24)
+    sort = request.args.get("sort", "recommended")
+    page, per_page = page_args(default_per_page=24, max_per_page=48)
 
     pagination = get_customer_products_page(
         {
@@ -533,11 +743,30 @@ def products():
             "max_price": max_price,
             "occasion": occasion,
             "sort": sort,
+            "customer_id": current_user.id if current_user.is_authenticated else None,
         },
         page,
         per_page,
     )
+    if current_user.is_authenticated and q:
+        try:
+            get_container().mcp_context_service.record_customer_activity(
+                user_id=current_user.id,
+                event_type="search",
+                query_text=q,
+                metadata={"sort": sort, "category_id": cat_id},
+                request_obj=request,
+            )
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
     categories = Category.query.all()
+
+    def page_url(page_number):
+        args = request.args.to_dict(flat=True)
+        args["page"] = page_number
+        return url_for("customer.products", **args)
+
     return render_template(
         "customer/products.html",
         products=pagination.items,
@@ -550,12 +779,33 @@ def products():
         max_price=max_price,
         occasion=occasion,
         sort=sort,
+        page_url=page_url,
     )
 
 
 @customer_bp.route("/product/<int:product_id>")
 def product_detail(product_id):
     product = db.get_or_404(Product, product_id)
+    if current_user.is_authenticated:
+        try:
+            container = get_container()
+            container.mcp_context_service.record_customer_activity(
+                user_id=current_user.id,
+                event_type="product_view",
+                product_id=product.id,
+                metadata={
+                    "product_name": product.name,
+                    "category": product.category.name if product.category else "",
+                },
+                request_obj=request,
+            )
+            container.ai_assistant_service.maybe_create_recommendation_notification(
+                current_user.id,
+                product,
+            )
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
     enrich_products([product])
     variants = product.variants.all()
     reviews = product.reviews.order_by(Review.created_at.desc()).all()
@@ -628,23 +878,18 @@ def product_detail(product_id):
 def cart():
     items = get_cart_lines(current_user.id if current_user.is_authenticated else None)
     subtotal, total_quantity = calculate_cart_totals(items)
-    delivery_threshold = Decimal(
-        str(current_app.config.get("DELIVERY_FREE_THRESHOLD", 500))
-    )
-    delivery_fee = Decimal(str(current_app.config.get("DELIVERY_CHARGE", 50)))
-    delivery_charge = (
-        Decimal("0")
-        if subtotal >= delivery_threshold
-        else (delivery_fee if items else Decimal("0"))
-    )
+    free_delivery = compute_free_delivery_context(subtotal, has_items=bool(items))
     return render_template(
         "customer/cart.html",
         items=items,
         subtotal=subtotal,
         total_quantity=total_quantity,
-        delivery_charge=delivery_charge,
-        delivery_threshold=delivery_threshold,
-        amount_to_free_delivery=max(Decimal("0"), delivery_threshold - subtotal),
+        delivery_charge=free_delivery["delivery_charge"],
+        delivery_threshold=free_delivery["delivery_threshold"],
+        delivery_fee=free_delivery["delivery_fee"],
+        amount_to_free_delivery=free_delivery["amount_to_free_delivery"],
+        free_delivery_unlocked=free_delivery["free_delivery_unlocked"],
+        free_delivery_progress=free_delivery["free_delivery_progress"],
     )
 
 
@@ -652,6 +897,15 @@ def cart():
 @login_required
 def gift_cards():
     if request.method == "POST":
+        try:
+            error = get_container().customer_risk_service.gift_card_purchase_error(
+                current_user
+            )
+            if error:
+                raise ValidationError(error)
+        except ValidationError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("customer.gift_cards"))
         amount = request.form.get("amount", "0")
         recipient_email = (
             request.form.get("recipient_email") or current_user.email or ""
@@ -680,12 +934,27 @@ def gift_cards():
         )
         return redirect(url_for("customer.gift_cards"))
 
+    owner_email = (current_user.email or "").strip().lower()
     cards = (
-        GiftCard.query.filter_by(purchased_by_user_id=current_user.id)
-        .order_by(GiftCard.issued_at.desc())
+        GiftCard.query.filter(
+            or_(
+                GiftCard.purchased_by_user_id == current_user.id,
+                func.lower(GiftCard.recipient_email) == owner_email,
+            )
+        )
+        .order_by(GiftCard.issued_at.desc(), GiftCard.id.desc())
         .all()
     )
-    return render_template("customer/gift_cards.html", cards=cards)
+    available_balance = sum(
+        Decimal(str(card.current_balance or 0))
+        for card in cards
+        if card.status == "active"
+    )
+    return render_template(
+        "customer/gift_cards.html",
+        cards=cards,
+        available_balance=available_balance,
+    )
 
 
 @customer_bp.route("/cart/add", methods=["POST"])
@@ -791,24 +1060,19 @@ def update_cart():
     if wants_json_response():
         lines = get_cart_lines(summary_user_id)
         subtotal, total_quantity = calculate_cart_totals(lines)
-        delivery_threshold = Decimal(
-            str(current_app.config.get("DELIVERY_FREE_THRESHOLD", 500))
-        )
-        delivery_fee = Decimal(str(current_app.config.get("DELIVERY_CHARGE", 50)))
-        delivery_charge = (
-            Decimal("0")
-            if subtotal >= delivery_threshold
-            else (delivery_fee if lines else Decimal("0"))
-        )
+        free_delivery = compute_free_delivery_context(subtotal, has_items=bool(lines))
         payload = {
             "ok": True,
             "count": total_quantity,
             "line_count": len(lines),
             "subtotal": float(subtotal),
-            "delivery_charge": float(delivery_charge),
-            "grand_total": float(subtotal + delivery_charge),
+            "delivery_charge": float(free_delivery["delivery_charge"]),
+            "grand_total": float(subtotal + free_delivery["delivery_charge"]),
             "empty": len(lines) == 0,
-            "delivery_threshold": float(delivery_threshold),
+            "delivery_threshold": float(free_delivery["delivery_threshold"]),
+            "amount_to_free_delivery": float(free_delivery["amount_to_free_delivery"]),
+            "free_delivery_unlocked": free_delivery["free_delivery_unlocked"],
+            "free_delivery_progress": free_delivery["free_delivery_progress"],
         }
         if updated_line:
             payload["item"] = {
@@ -876,6 +1140,22 @@ def checkout():
         flash("Your cart is empty.", "warning")
         return redirect(url_for("customer.cart"))
 
+    if request.method == "POST":
+        try:
+            get_container().customer_risk_service.ensure_can_purchase(current_user)
+        except ValidationError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("customer.cart"))
+        try:
+            added_addons = apply_checkout_addons(current_user.id, request.form)
+            if added_addons:
+                db.session.flush()
+                cart_items = Cart.query.filter_by(user_id=current_user.id).all()
+        except ValidationError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return redirect(url_for("customer.checkout"))
+
     subtotal = sum(
         get_container().pricing_service.resolve_product_price(i.product, i.variant)[
             "price"
@@ -890,21 +1170,37 @@ def checkout():
     if sub and sub.end_date > utcnow():
         discount = (subtotal * sub.discount_pct / 100).quantize(Decimal("0.01"))
 
-    delivery_threshold = Decimal(
-        str(current_app.config.get("DELIVERY_FREE_THRESHOLD", 500))
+    free_delivery = compute_free_delivery_context(subtotal, has_items=bool(cart_items))
+    delivery_threshold = free_delivery["delivery_threshold"]
+    delivery_fee = free_delivery["delivery_fee"]
+    delivery_charge = free_delivery["delivery_charge"]
+    finance_service = get_container().finance_service
+    gst_rate = finance_service.resolve_active_sales_tax_rate()
+    gst_preview = finance_service.calculate_sales_gst(
+        subtotal,
+        discount=discount,
+        rate_percent=gst_rate,
     )
-    delivery_fee = Decimal(str(current_app.config.get("DELIVERY_CHARGE", 50)))
-    delivery_charge = delivery_fee if subtotal < delivery_threshold else Decimal("0")
+    gst_amount = gst_preview["gst_amount"]
+    taxable_amount = gst_preview["taxable_amount"]
     loyalty_balance = current_user.loyalty_points
-    loyalty_preview = calculate_loyalty_redemption(0, subtotal, loyalty_balance)
     loyalty_rules = get_loyalty_config()
-    total = subtotal - discount + delivery_charge
+    loyalty_preview = calculate_loyalty_redemption(
+        max(loyalty_balance, loyalty_rules["LOYALTY_REDEEM_PER"]),
+        subtotal,
+        None,
+    )
+    total = subtotal - discount + gst_amount + delivery_charge
 
     slot_service = get_container().slot_service
     time_slots = current_app.config["TIME_SLOTS"]
     pickup_available_slots = slot_service.get_available_slots(utcnow().date())
     pickup_opening_time, pickup_closing_time = slot_service.business_hours_range()
     saved_addresses = get_saved_addresses_for_user(current_user.id)
+    checkout_addons = get_container().mcp_context_service.get_checkout_addons(
+        cart_items,
+        limit=6,
+    )
     default_saved_address = next(
         (addr for addr in saved_addresses if addr.is_default),
         saved_addresses[0] if saved_addresses else None,
@@ -945,6 +1241,15 @@ def checkout():
         loyalty_points_requested = request.form.get("loyalty_points", type=int) or 0
         loyalty_points_applied = 0
         loyalty_discount = Decimal("0")
+        risk_service = get_container().customer_risk_service
+        if coupon_code and risk_service.promotion_error(current_user):
+            flash(
+                "Promotional offers are not available for this account.", "warning"
+            )
+            coupon_code = ""
+        if loyalty_points_requested and risk_service.loyalty_error(current_user):
+            flash("Loyalty rewards are not available for this account.", "warning")
+            return redirect(url_for("customer.checkout"))
         selected_address_id = request.form.get("selected_address_id", type=int)
         selected_saved_address = get_selected_saved_address(
             current_user.id, selected_address_id
@@ -1036,14 +1341,19 @@ def checkout():
 
         if coupon_code:
             coupon = Coupon.query.filter_by(code=coupon_code).first()
+            prior_order_count = Order.query.filter_by(user_id=current_user.id).count()
             prior_coupon_uses = Order.query.filter_by(
                 user_id=current_user.id,
                 coupon_code=coupon_code,
             ).count()
+            eligibility_message = (
+                coupon.eligibility_message(prior_order_count) if coupon else None
+            )
             if (
                 coupon
                 and coupon.is_valid()
                 and subtotal >= coupon.min_order_value
+                and eligibility_message is None
                 and prior_coupon_uses < int(coupon.per_user_limit or 1)
             ):
                 if coupon.discount_type == "percentage":
@@ -1054,7 +1364,10 @@ def checkout():
                     coupon_discount = coupon.discount_value
                 coupon.used_count += 1
             elif coupon_code:
-                flash("Invalid or expired coupon code.", "warning")
+                flash(
+                    eligibility_message or "Invalid or expired coupon code.",
+                    "warning",
+                )
                 if coupon and prior_coupon_uses >= int(coupon.per_user_limit or 1):
                     db.session.add(
                         FraudAlert(
@@ -1070,13 +1383,45 @@ def checkout():
         )
         loyalty_points_applied = loyalty_result["points_applied"]
         loyalty_discount = Decimal(str(loyalty_result["discount"]))
+        if (
+            loyalty_points_requested
+            and loyalty_points_requested % loyalty_result["redeem_per"] != 0
+        ):
+            flash(
+                "Loyalty points can be redeemed only in multiples of "
+                f"{loyalty_result['redeem_per']}.",
+                "warning",
+            )
+            return redirect(url_for("customer.checkout"))
+        if loyalty_points_requested and loyalty_result.get("below_minimum"):
+            flash(
+                "Orders above ₹{threshold} need at least {points} points "
+                "(₹{discount:.2f}) to redeem.".format(
+                    threshold=loyalty_result["min_order_value"],
+                    points=loyalty_result["min_points_required"],
+                    discount=loyalty_result["min_required_discount"],
+                ),
+                "warning",
+            )
+            return redirect(url_for("customer.checkout"))
         if loyalty_points_requested and loyalty_points_applied <= 0:
             flash("Those loyalty points cannot be applied to this order.", "warning")
             return redirect(url_for("customer.checkout"))
 
         total_discount = discount + coupon_discount + loyalty_discount
+        gst_payload = finance_service.sales_gst_context(
+            subtotal,
+            discount=discount + coupon_discount,
+            loyalty_discount=loyalty_discount,
+            rate_percent=gst_rate,
+            channel="online",
+            source="WEB",
+            fulfillment_type=fulfillment_type,
+        )
+        gst_amount = gst_payload["gst_amount"]
+        taxable_amount = gst_payload["taxable_amount"]
         payable_before_gift_card = (
-            subtotal - total_discount + applied_delivery_charge
+            subtotal - total_discount + gst_amount + applied_delivery_charge
         ).quantize(Decimal("0.01"))
         gift_card_code = request.form.get("gift_card_code", "").strip().upper()
         gift_card_redemption_amount = Decimal("0")
@@ -1154,6 +1499,10 @@ def checkout():
                     else "PENDING"
                 )
 
+                risk_service.ensure_can_purchase(
+                    current_user, payment_method=requested_payment_method
+                )
+
                 creation = order_service.create_order(
                     user_id=current_user.id,
                     branch_id=default_branch_id,
@@ -1162,6 +1511,18 @@ def checkout():
                     discount=discount + coupon_discount,
                     loyalty_discount=loyalty_discount,
                     delivery_charge=applied_delivery_charge,
+                    gst_rate=gst_rate,
+                    gst_amount=gst_amount,
+                    gst_taxable_amount=gst_payload["taxable_amount"],
+                    cgst_amount=gst_payload["cgst_amount"],
+                    sgst_amount=gst_payload["sgst_amount"],
+                    gst_supply_type=gst_payload["gst_supply_type"],
+                    gst_order_source=gst_payload["gst_order_source"],
+                    gst_liability_party=gst_payload["gst_liability_party"],
+                    gst_return_bucket=gst_payload["gst_return_bucket"],
+                    gst_invoice_note=gst_payload["gst_invoice_note"],
+                    ecommerce_operator=gst_payload["ecommerce_operator"],
+                    ecommerce_tcs_amount=gst_payload["ecommerce_tcs_amount"],
                     total=final_total,
                     gift_card_redemption_amount=gift_card_redemption_amount,
                     gift_card_code=(
@@ -1190,6 +1551,22 @@ def checkout():
                 order = creation.order
                 stock_update_variant_ids = creation.stock_update_variant_ids
                 stock_update_material_ids = creation.stock_update_material_ids
+
+                if risk_service.order_needs_manual_approval(current_user):
+                    order.status = "ON_HOLD"
+                    order.mark_status_change()
+                    db.session.add(
+                        FraudAlert(
+                            order_id=order.id,
+                            user_id=current_user.id,
+                            alert_type="requires_manual_approval",
+                            severity="medium",
+                            details=(
+                                "Order placed by a restricted customer and requires "
+                                "manual approval before fulfilment."
+                            ),
+                        )
+                    )
 
                 if gift_card_redemption_amount > 0:
                     gift_card_service.redeem(
@@ -1303,6 +1680,9 @@ def checkout():
         subtotal=subtotal,
         discount=discount,
         delivery_charge=delivery_charge,
+        gst_rate=gst_rate,
+        gst_amount=gst_amount,
+        taxable_amount=taxable_amount,
         total=total,
         time_slots=time_slots,
         pickup_available_slots=pickup_available_slots,
@@ -1319,8 +1699,12 @@ def checkout():
         loyalty_rules=loyalty_rules,
         delivery_threshold=delivery_threshold,
         delivery_fee=delivery_fee,
+        amount_to_free_delivery=free_delivery["amount_to_free_delivery"],
+        free_delivery_unlocked=free_delivery["free_delivery_unlocked"],
+        free_delivery_progress=free_delivery["free_delivery_progress"],
         earliest_pickup_date=utcnow().date().isoformat(),
-        earliest_delivery_date=(utcnow().date() + timedelta(days=1)).isoformat(),
+        earliest_delivery_date=utcnow().date().isoformat(),
+        checkout_addons=checkout_addons,
     )
 
 
@@ -1597,41 +1981,53 @@ def add_review():
 @customer_bp.route("/chat")
 @login_required
 def chat():
-    from models import User
-
-    admin = User.query.filter_by(role="admin").first()
     messages = (
-        Message.query.filter(
-            ((Message.sender_id == current_user.id) & (Message.receiver_id == admin.id))
-            | (
-                (Message.sender_id == admin.id)
-                & (Message.receiver_id == current_user.id)
-            )
-        )
+        Message.query.filter(customer_support_thread_filter(current_user.id))
         .order_by(Message.sent_at.asc())
         .all()
     )
 
     # Mark as read
-    Message.query.filter_by(receiver_id=current_user.id, is_read=False).update(
-        {"is_read": True}
-    )
+    staff_ids = support_staff_ids()
+    if staff_ids:
+        Message.query.filter(
+            Message.receiver_id == current_user.id,
+            Message.sender_id.in_(staff_ids),
+            Message.is_read.is_(False),
+        ).update({"is_read": True}, synchronize_session=False)
     db.session.commit()
-    return render_template("customer/chat.html", messages=messages, admin=admin)
+    return render_template(
+        "customer/chat.html",
+        messages=messages,
+        support_recipient=support_recipient(),
+        support_staff=support_staff_members(),
+    )
 
 
 @customer_bp.route("/chat/send", methods=["POST"])
 @login_required
 def send_message():
-    from models import User
-
     content = request.form.get("content", "").strip()
-    admin = User.query.filter_by(role="admin").first()
-    if content and admin:
-        db.session.add(
-            Message(sender_id=current_user.id, receiver_id=admin.id, content=content)
+    recipient = support_recipient()
+    if content and recipient:
+        message = Message(
+            sender_id=current_user.id,
+            receiver_id=recipient.id,
+            content=content,
+        )
+        db.session.add(message)
+        db.session.flush()
+        notify(
+            recipient.id,
+            f"Support message from {current_user.name}",
+            content[:100],
+            "chat",
+            url_for("admin.chat_thread", customer_id=current_user.id),
         )
         db.session.commit()
+        emit_support_message(message, current_user.id)
+    elif content:
+        flash("Support is temporarily unavailable. Please call the bakery.", "warning")
     return redirect(url_for("customer.chat"))
 
 
@@ -1639,6 +2035,33 @@ def send_message():
 @csrf.exempt
 def ai_recommend():
     payload = request.get_json(silent=True) or {}
+    surface = payload.get("surface") or "customer"
+    if not current_user.is_authenticated:
+        return jsonify(ai_auth_required_payload(surface, expired=True)), 401
+    if not can_use_customer_ai(current_user):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "code": "forbidden",
+                    "message": "This AI assistant is available only to customer accounts.",
+                }
+            ),
+            403,
+        )
+    ai_error = get_container().customer_risk_service.ai_error(current_user)
+    if ai_error:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "code": "forbidden",
+                    "message": ai_error,
+                }
+            ),
+            403,
+        )
+
     query = (payload.get("query") or "").strip()
     if not query:
         return (
@@ -1651,25 +2074,70 @@ def ai_recommend():
             400,
         )
 
-    user_id = current_user.id if current_user.is_authenticated else None
-    engine = get_recommendation_engine()
-    products, message = engine.recommend(user_id, query, limit=6)
-    result = {
-        "ok": True,
-        "message": message,
-        "products": [
-            {
-                "id": product.id,
-                "name": product.name,
-                "price": float(product.base_price),
-                "current_price": float(product.current_price),
-                "category": product.category.name if product.category else "",
-                "image": product.image_src,
-                "description": product.description or "",
-            }
-            for product in products
-        ],
-    }
+    history = payload.get("history") or []
+    if not isinstance(history, list):
+        history = []
+    history = [
+        {
+            "role": str(turn.get("role"))[:16] if isinstance(turn, dict) else "",
+            "content": str(turn.get("content"))[:500] if isinstance(turn, dict) else "",
+        }
+        for turn in history[-12:]
+        if isinstance(turn, dict)
+        and str(turn.get("role")) in {"user", "assistant"}
+        and turn.get("content")
+    ]
+
+    user_id = current_user.id
+    container = get_container()
+    try:
+        container.mcp_context_service.record_customer_activity(
+            user_id=user_id,
+            event_type="ai_query",
+            query_text=query,
+            metadata={"surface": surface},
+            request_obj=request,
+        )
+        result = container.ai_assistant_service.answer_customer_request(
+            user_id,
+            query,
+            limit=6,
+            history=history,
+        )
+        if has_role(current_user, "customer"):
+            messages = container.ai_assistant_service.store_support_exchange(
+                current_user.id,
+                query,
+                result["message"],
+            )
+        else:
+            messages = []
+        db.session.commit()
+        for message in messages:
+            emit_support_message(message, current_user.id)
+    except SQLAlchemyError:
+        db.session.rollback()
+        engine = get_recommendation_engine()
+        products, message = engine.recommend(user_id, query, limit=6)
+        result = {
+            "ok": True,
+            "source": "rules",
+            "model": "rule-based fallback",
+            "message": message,
+            "products": [
+                container.mcp_context_service.compact_product(product)
+                for product in products
+            ],
+            "checkout_addons": [],
+            "context_tools": [],
+        }
+    result["products"] = [
+        serialize_ai_product_payload(product) for product in result.get("products", [])
+    ]
+    result["checkout_addons"] = [
+        serialize_ai_product_payload(product)
+        for product in result.get("checkout_addons", [])
+    ]
     return jsonify(result)
 
 

@@ -103,6 +103,13 @@ def external_service_stubs(monkeypatch):
         raising=False,
     )
     monkeypatch.setattr(
+        "services.ai_assistant_service.requests.post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("Ollama HTTP calls disabled in tests")
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
         "utils.maps.urlopen",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             RuntimeError("Reverse geocoding disabled in tests")

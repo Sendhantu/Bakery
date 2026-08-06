@@ -9,18 +9,27 @@
 </div>
 {% endif %}
 <div class="stat-card brown" style="margin-bottom:1rem;padding:1rem;border-radius:var(--radius-lg)">
-  <div class="stat-value">₹{{ summary.tds_withheld|int }}</div>
-  <div class="stat-label">Total TDS Withheld (from manual expense entries)</div>
+  <div class="stat-value">₹{{ '%.2f'|format(summary.tds_withheld or 0) }}</div>
+  <div class="stat-label">Total TDS Withheld</div>
 </div>
 {% if summary.rows %}
 <div class="card"><div class="table-wrap"><table>
-  <thead><tr><th>Vendor</th><th>Payment</th><th>TDS</th><th>Date</th></tr></thead>
+  <thead><tr><th>Vendor</th><th>Payment</th><th>TDS</th><th>Section</th><th>Deposit Due</th><th>Date</th></tr></thead>
   <tbody>
     {% for row in summary.rows %}
     <tr>
       <td>{{ row.counterparty }}</td>
       <td>₹{{ row.amount|int }}</td>
-      <td>₹{{ row.tds_withheld|int }}</td>
+      <td>₹{{ '%.2f'|format(row.tds_withheld or 0) }}</td>
+      <td>{{ row.section or '—' }}</td>
+      <td>
+        {% if row.deposit_due_date %}
+        <span class="badge {% if row.deposit_status == 'Deposited' %}badge-green{% else %}badge-orange{% endif %}">{{ row.deposit_status }}</span><br>
+        <span class="text-sm text-muted">{{ row.deposit_due_date.strftime('%d %b %Y') }}</span>
+        {% else %}
+        —
+        {% endif %}
+      </td>
       <td class="text-sm">{{ row.created_at.strftime('%d %b %Y') }}</td>
     </tr>
     {% endfor %}

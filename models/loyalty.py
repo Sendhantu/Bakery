@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
+
 from clock import utcnow
 from flask import current_app, has_app_context
 from .base import db
@@ -8,8 +10,11 @@ from .base import db
 # ─────────────────────────────────────────
 LOYALTY_EARN_RATE = 1  # 1 point per ₹10 spent
 LOYALTY_EARN_PER = 10  # ₹10 = 1 point
-LOYALTY_REDEEM_RATE = 10  # 100 points = ₹10 off
-LOYALTY_REDEEM_PER = 100  # 100 points minimum to redeem
+LOYALTY_REDEEM_RATE = 10  # 10 points = ₹10 off
+LOYALTY_REDEEM_PER = 10  # redeem only in 10-point chunks
+LOYALTY_REDEEM_MAX_PERCENT = 20
+LOYALTY_MIN_REDEEM_ORDER_VALUE = 500
+LOYALTY_MIN_REDEEM_PERCENT = 10
 LOYALTY_POINTS_TTL_DAYS = 365  # points expire after 1 year
 
 
@@ -19,6 +24,9 @@ def get_loyalty_config():
         "LOYALTY_EARN_PER": LOYALTY_EARN_PER,
         "LOYALTY_REDEEM_RATE": LOYALTY_REDEEM_RATE,
         "LOYALTY_REDEEM_PER": LOYALTY_REDEEM_PER,
+        "LOYALTY_REDEEM_MAX_PERCENT": LOYALTY_REDEEM_MAX_PERCENT,
+        "LOYALTY_MIN_REDEEM_ORDER_VALUE": LOYALTY_MIN_REDEEM_ORDER_VALUE,
+        "LOYALTY_MIN_REDEEM_PERCENT": LOYALTY_MIN_REDEEM_PERCENT,
         "LOYALTY_EXPIRY_DAYS": LOYALTY_POINTS_TTL_DAYS,
     }
     if not has_app_context():
@@ -37,6 +45,9 @@ def calculate_loyalty_redemption(points_requested, subtotal, available_points=No
     loyalty = get_loyalty_config()
     redeem_per = max(1, loyalty["LOYALTY_REDEEM_PER"])
     redeem_rate = max(1, loyalty["LOYALTY_REDEEM_RATE"])
+    max_percent = max(0, loyalty["LOYALTY_REDEEM_MAX_PERCENT"])
+    min_order_value = max(0, loyalty["LOYALTY_MIN_REDEEM_ORDER_VALUE"])
+    min_percent = max(0, loyalty["LOYALTY_MIN_REDEEM_PERCENT"])
 
     try:
         points_requested = int(points_requested or 0)
@@ -49,28 +60,59 @@ def calculate_loyalty_redemption(points_requested, subtotal, available_points=No
     normalized_points -= normalized_points % redeem_per
 
     try:
-        subtotal_value = float(subtotal or 0)
-    except (TypeError, ValueError):
-        subtotal_value = 0
+        subtotal_value = Decimal(str(subtotal or 0))
+    except (InvalidOperation, TypeError, ValueError):
+        subtotal_value = Decimal("0")
 
-    max_allowed_discount = max(0, round(subtotal_value * 0.20, 2))
-    max_discount_units = int(max_allowed_discount // redeem_rate) if redeem_rate else 0
+    subtotal_value = max(subtotal_value, Decimal("0"))
+    redeem_rate_value = Decimal(str(redeem_rate))
+    max_allowed_discount = (
+        subtotal_value * Decimal(str(max_percent)) / Decimal("100")
+    ).quantize(Decimal("0.01"))
+    max_discount_units = int(
+        (max_allowed_discount / redeem_rate_value).to_integral_value(
+            rounding=ROUND_FLOOR
+        )
+    )
+
     max_points_by_cap = max_discount_units * redeem_per
-    points_applied = min(normalized_points, max_points_by_cap)
-    discount = (points_applied // redeem_per) * redeem_rate if redeem_per else 0
+    min_required_discount = Decimal("0")
+    min_points_required = 0
+    below_minimum = False
+
+    if normalized_points > 0 and subtotal_value > Decimal(str(min_order_value)):
+        min_required_discount = (
+            subtotal_value * Decimal(str(min_percent)) / Decimal("100")
+        ).quantize(Decimal("0.01"))
+        min_discount_units = int(
+            (min_required_discount / redeem_rate_value).to_integral_value(
+                rounding=ROUND_CEILING
+            )
+        )
+        min_points_required = min_discount_units * redeem_per
+        below_minimum = normalized_points < min_points_required
+
+    points_applied = 0 if below_minimum else min(normalized_points, max_points_by_cap)
+    discount = Decimal(points_applied // redeem_per) * redeem_rate_value
 
     return {
         "points_requested": normalized_points,
         "points_applied": points_applied,
         "discount": round(float(discount), 2),
         "requested_discount": round(
-            float((normalized_points // redeem_per) * redeem_rate if redeem_per else 0),
+            float(Decimal(normalized_points // redeem_per) * redeem_rate_value),
             2,
         ),
-        "max_allowed_discount": max_allowed_discount,
+        "max_allowed_discount": round(float(max_allowed_discount), 2),
+        "min_required_discount": round(float(min_required_discount), 2),
+        "min_points_required": min_points_required,
+        "below_minimum": below_minimum,
         "capped": points_applied < normalized_points,
         "redeem_per": redeem_per,
         "redeem_rate": redeem_rate,
+        "max_percent": max_percent,
+        "min_order_value": min_order_value,
+        "min_percent": min_percent,
     }
 
 

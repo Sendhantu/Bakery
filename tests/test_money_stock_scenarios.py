@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
 import json
 
@@ -29,6 +29,7 @@ from services.analytics_service import total_revenue
 
 
 SCENARIO_DAY = date(2026, 7, 28)
+SCENARIO_MOMENT = datetime.combine(SCENARIO_DAY, time(10, 0))
 
 
 def sign_in(test_client, email, password):
@@ -99,7 +100,11 @@ def create_order(
         delivery_date=SCENARIO_DAY,
         payment_reason="scenario_test",
     )
-    creation.order.placed_at = utcnow()
+    creation.order.placed_at = SCENARIO_MOMENT
+    for txn in FinancialTransaction.query.filter_by(
+        reference_order_id=creation.order.id
+    ).all():
+        txn.created_at = SCENARIO_MOMENT
     return creation.order
 
 
@@ -418,6 +423,8 @@ def test_vendor_po_received_expense_and_gst_input_credit_registered_vs_unregiste
         unregistered_po,
         actor_id=None,
     )
+    registered_result["transaction"].created_at = SCENARIO_MOMENT
+    unregistered_result["transaction"].created_at = SCENARIO_MOMENT
     db_session.commit()
 
     assert registered_material.stock == Decimal("5.00")
@@ -432,7 +439,9 @@ def test_vendor_po_received_expense_and_gst_input_credit_registered_vs_unregiste
     assert unregistered_result["transaction"].tax_amount == Decimal("0.00")
 
     gst = finance.gst_summary(start_date=SCENARIO_DAY, end_date=SCENARIO_DAY)
-    assert gst["gst_paid"] == Decimal("36.00")
+    assert gst["input_gst_recorded"] == Decimal("36.00")
+    assert gst["non_creditable_input_gst"] == Decimal("36.00")
+    assert gst["gst_paid"] == Decimal("0.00")
 
 
 def test_staff_counter_sale_session_cannot_access_refund_vendor_or_finance(
@@ -554,6 +563,11 @@ def test_full_period_reconciliation_matches_analytics_ledger_and_finance_dashboa
         subscription,
         today=SCENARIO_DAY,
     )
+    FinancialTransaction.query.update(
+        {FinancialTransaction.created_at: SCENARIO_MOMENT},
+        synchronize_session=False,
+    )
+    Order.query.update({Order.placed_at: SCENARIO_MOMENT}, synchronize_session=False)
     db_session.commit()
 
     analytics_revenue = Decimal(

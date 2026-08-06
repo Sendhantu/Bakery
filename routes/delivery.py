@@ -3,7 +3,6 @@ from flask_login import login_required, current_user
 from bootstrap import get_container
 from exceptions import ValidationError
 from functools import wraps
-from realtime.events import customer_room, delivery_agent_room, emit_order_status_updated
 from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -177,10 +176,6 @@ def update_status(order_id):
         return redirect(url_for('delivery.order_detail', order_id=order_id))
 
     get_container().offline_sync_service.cache_order(order)
-    emit_order_status_updated(
-        order,
-        [customer_room(order.user_id), "admin", "kds", delivery_agent_room(agent.id)],
-    )
 
     flash(f'Status updated to {status}.', 'success')
     return redirect(url_for('delivery.order_detail', order_id=order.id))
@@ -189,7 +184,7 @@ def update_status(order_id):
 @delivery_bp.route('/order/<int:order_id>/collect-payment', methods=['POST'])
 @delivery_required
 def collect_payment(order_id):
-    _agent, _delivery, order = get_assigned_delivery_or_404(order_id)
+    agent, _delivery, order = get_assigned_delivery_or_404(order_id)
     offline_sync = get_container().offline_sync_service
     expected_version = request.form.get('expected_version')
     if expected_version is not None:
@@ -207,6 +202,7 @@ def collect_payment(order_id):
             request.form.get('amount_received'),
             request.form.get('payment_mode', 'CASH'),
             actor_id=current_user.id,
+            agent_id=agent.id,
             expected_version=snapshot.get("version"),
             snapshot_payload={**snapshot, "id": order_id, "payment_status": "PAID"},
         )
@@ -222,6 +218,7 @@ def collect_payment(order_id):
             payment_mode=request.form.get('payment_mode', 'CASH'),
             actor_id=current_user.id,
             expected_version=expected_version,
+            agent_id=agent.id,
         )
     except ValidationError as exc:
         flash(str(exc), 'danger')
@@ -235,6 +232,7 @@ def collect_payment(order_id):
             request.form.get('amount_received'),
             request.form.get('payment_mode', 'CASH'),
             actor_id=current_user.id,
+            agent_id=agent.id,
             expected_version=snapshot.get("version"),
             snapshot_payload={**snapshot, "id": order_id, "payment_status": "PAID"},
         )

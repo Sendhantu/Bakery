@@ -8,6 +8,10 @@
         <h1 class="section-title mb-1">Gift Cards</h1>
         <p class="text-muted">Buy stored-value gift cards for yourself or someone you love.</p>
       </div>
+      <div class="stat-card" style="min-width:220px">
+        <div class="stat-label">Available Gift Card Amount</div>
+        <div class="stat-value">₹{{ '%.2f'|format(available_balance or 0) }}</div>
+      </div>
     </div>
 
     <div class="page-grid">
@@ -35,7 +39,7 @@
       </section>
 
       <section class="card">
-        <div class="card-header">Purchased Cards</div>
+        <div class="card-header">Your Gift Cards</div>
         <div class="card-body">
           {% if cards %}
           <div class="table-responsive">
@@ -43,8 +47,9 @@
               <thead>
                 <tr>
                   <th>Code</th>
+                  <th>Owner</th>
                   <th>Initial</th>
-                  <th>Balance</th>
+                  <th>Available Amount</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -52,6 +57,13 @@
                 {% for card in cards %}
                 <tr>
                   <td><strong>{{ card.code }}</strong></td>
+                  <td>
+                    {% if card.purchased_by_user_id == current_user.id %}
+                      Bought by you
+                    {% else %}
+                      Sent to {{ current_user.email }}
+                    {% endif %}
+                  </td>
                   <td>₹{{ '%.2f'|format(card.initial_value or 0) }}</td>
                   <td>₹{{ '%.2f'|format(card.current_balance or 0) }}</td>
                   <td><span class="badge badge-brown">{{ card.status|title }}</span></td>
@@ -61,7 +73,7 @@
             </table>
           </div>
           {% else %}
-          <p class="text-muted">No gift cards purchased yet.</p>
+          <p class="text-muted">No gift cards owned by your account yet.</p>
           {% endif %}
         </div>
       </section>

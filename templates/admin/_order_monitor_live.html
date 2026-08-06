@@ -1,0 +1,104 @@
+<div id="admin-order-monitor-live">
+  <div class="order-monitor-summary">
+    <article class="order-monitor-stat">
+      <span>Live Orders</span>
+      <strong data-rt-counter="live-orders">{{ live_count }}</strong>
+      <small>Open queue needing shop action</small>
+    </article>
+    <article class="order-monitor-stat">
+      <span>Past Orders</span>
+      <strong data-rt-counter="past-orders">{{ past_count }}</strong>
+      <small>Delivered, cancelled, or refunded history</small>
+    </article>
+  </div>
+
+  <section class="card order-monitor-card">
+    <div class="card-header order-monitor-card-header">
+      <div>
+        <span>Live Orders</span>
+        <p class="text-sm text-muted">Oldest active orders first so the team can clear the queue.</p>
+      </div>
+      <span class="badge badge-orange">{{ live_count }} open</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Order #</th>
+            <th>Customer</th>
+            <th>Items</th>
+            <th>Total</th>
+            <th>Payment</th>
+            <th>Status</th>
+            <th>Placed</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody data-admin-orders-table="live">
+          {% for o in live_orders %}
+          <tr data-order-id="{{ o.id }}">
+            <td>
+              <a href="{{ url_for('admin.order_detail', order_id=o.id) }}" style="font-weight:700;color:var(--brown)">#{{ o.order_number }}</a>
+              <div class="text-sm text-muted">{{ o.channel|title }} · {{ o.fulfillment_type|replace('_', ' ')|title }}</div>
+            </td>
+            <td>{{ o.customer.name }}<br><span class="text-sm text-muted">{{ o.customer.email }}</span></td>
+            <td>{{ o.item_count }}</td>
+            <td style="font-weight:700;color:var(--caramel)">₹{{ o.total|int }}<br><span class="text-sm text-muted">GST ₹{{ (o.gst_amount or 0)|int }}</span></td>
+            <td><span class="badge {% if o.payment_status=='PAID' %}badge-green{% elif o.payment_status in ['CANCELLED', 'REFUNDED'] %}badge-red{% else %}badge-orange{% endif %}">{{ o.payment_status }}</span></td>
+            <td><span class="badge {% if o.status=='DELIVERED' %}badge-green{% elif o.status in ['CANCELLED', 'REFUNDED'] %}badge-red{% elif o.status=='ON_HOLD' %}badge-orange{% elif o.status=='OUT_FOR_DELIVERY' %}badge-blue{% else %}badge-brown{% endif %}" data-order-status="{{ o.id }}">{{ o.status.replace('_',' ') }}</span></td>
+            <td class="text-sm text-muted">{{ o.placed_at.strftime('%d %b %Y %I:%M %p') }}</td>
+            <td><a href="{{ url_for('admin.order_detail', order_id=o.id) }}" class="btn btn-primary btn-sm">Manage</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted)">No live orders right now.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card order-monitor-card">
+    <div class="card-header order-monitor-card-header">
+      <div>
+        <span>Past Orders</span>
+        <p class="text-sm text-muted">Most recent completed, cancelled, and refunded orders.</p>
+      </div>
+      <span class="badge badge-brown">{{ past_count }} closed</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Order #</th>
+            <th>Customer</th>
+            <th>Items</th>
+            <th>Total</th>
+            <th>Payment</th>
+            <th>Status</th>
+            <th>Placed</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody data-admin-orders-table="past">
+          {% for o in past_orders %}
+          <tr data-order-id="{{ o.id }}">
+            <td>
+              <a href="{{ url_for('admin.order_detail', order_id=o.id) }}" style="font-weight:700;color:var(--brown)">#{{ o.order_number }}</a>
+              <div class="text-sm text-muted">{{ o.channel|title }} · {{ o.fulfillment_type|replace('_', ' ')|title }}</div>
+            </td>
+            <td>{{ o.customer.name }}<br><span class="text-sm text-muted">{{ o.customer.email }}</span></td>
+            <td>{{ o.item_count }}</td>
+            <td style="font-weight:700;color:var(--caramel)">₹{{ o.total|int }}<br><span class="text-sm text-muted">GST ₹{{ (o.gst_amount or 0)|int }}</span></td>
+            <td><span class="badge {% if o.payment_status=='PAID' %}badge-green{% elif o.payment_status in ['CANCELLED', 'REFUNDED'] %}badge-red{% else %}badge-orange{% endif %}">{{ o.payment_status }}</span></td>
+            <td><span class="badge {% if o.status=='DELIVERED' %}badge-green{% elif o.status in ['CANCELLED', 'REFUNDED'] %}badge-red{% elif o.status=='ON_HOLD' %}badge-orange{% elif o.status=='OUT_FOR_DELIVERY' %}badge-blue{% else %}badge-brown{% endif %}" data-order-status="{{ o.id }}">{{ o.status.replace('_',' ') }}</span></td>
+            <td class="text-sm text-muted">{{ o.placed_at.strftime('%d %b %Y %I:%M %p') }}</td>
+            <td><a href="{{ url_for('admin.order_detail', order_id=o.id) }}" class="btn btn-ghost btn-sm">View</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted)">No past orders found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

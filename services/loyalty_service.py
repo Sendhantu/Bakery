@@ -26,6 +26,11 @@ class LoyaltyService:
         user = db.session.get(User, user_id)
         if user is None:
             raise ValueError("User not found.")
+        from bootstrap import get_container
+
+        error = get_container().customer_risk_service.loyalty_error(user)
+        if error:
+            raise ValueError(error)
         result = calculate_loyalty_redemption(
             points_requested,
             subtotal,

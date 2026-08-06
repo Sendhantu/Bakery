@@ -25,6 +25,12 @@ class User(UserMixin, db.Model):
     admin_tier = db.Column(db.String(20), default="owner", nullable=False)
     is_active = db.Column(db.Boolean, default=True)
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
+    staff_address = db.Column(db.Text)
+    date_of_joining = db.Column(db.Date)
+    designation = db.Column(db.String(120))
+    emergency_contact = db.Column(db.String(50))
+    staff_notes = db.Column(db.Text)
+    email_locked = db.Column(db.Boolean, default=False, nullable=False)
     birthday = db.Column(db.Date)
     referral_code = db.Column(
         db.String(32),
@@ -35,12 +41,30 @@ class User(UserMixin, db.Model):
     referred_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     wallet_balance = db.Column(db.Numeric(10, 2), default=0)
     is_mobile_verified = db.Column(db.Boolean, default=False)
+    must_change_password = db.Column(db.Boolean, default=False, nullable=False)
+    password_changed_at = db.Column(db.DateTime)
     last_seen_at = db.Column(db.DateTime, default=utcnow)
     created_at = db.Column(db.DateTime, default=utcnow)
     avatar = db.Column(db.String(255), default="default.png")
 
     oauth_id = db.Column(db.String(100), unique=True)
     oauth_provider = db.Column(db.String(50))
+
+    # ── RBAC / employee management ──────────────────────────────
+    rbac_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    employee_status = db.Column(db.String(30), default="active", nullable=False)
+    employment_status = db.Column(db.String(30), default="full_time")
+    employee_id = db.Column(db.String(40), index=True)
+    department = db.Column(db.String(80))
+    job_title = db.Column(db.String(120))
+    invite_token = db.Column(db.String(64), index=True)
+    invite_token_expires_at = db.Column(db.DateTime)
+    invited_at = db.Column(db.DateTime)
+    invite_accepted_at = db.Column(db.DateTime)
+    force_logout_before = db.Column(db.DateTime)
+    branch_scope = db.Column(db.String(20), default="all", nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    last_login_at = db.Column(db.DateTime)
 
     # Relationships
     orders = db.relationship(
@@ -82,6 +106,11 @@ class User(UserMixin, db.Model):
         foreign_keys="AttendanceRecord.user_id",
     )
     branch = db.relationship("Branch", backref="staff_members")
+    created_by = db.relationship(
+        "User",
+        remote_side=[id],
+        foreign_keys=[created_by_id],
+    )
     referred_customers = db.relationship(
         "User",
         backref=db.backref("referrer", remote_side=[id]),
@@ -92,10 +121,14 @@ class User(UserMixin, db.Model):
         db.Index("idx_users_role_active_branch", "role", "is_active", "branch_id"),
     )
 
-    def set_password(self, password):
+    def set_password(self, password, *, require_change=False):
         self.password = bcrypt.generate_password_hash(password).decode("utf-8")
+        self.password_changed_at = utcnow()
+        self.must_change_password = bool(require_change)
 
     def check_password(self, password):
+        if not self.password:
+            return False
         return bcrypt.check_password_hash(self.password, password)
 
     def has_role(self, role_name):
@@ -122,6 +155,13 @@ class User(UserMixin, db.Model):
         from utils.permissions import admin_tier_meets
 
         return admin_tier_meets(self, *tiers)
+
+    @property
+    def is_employee_access_active(self):
+        return (self.employee_status or "active").strip().lower() in {
+            "active",
+            "invited",
+        }
 
     @property
     def loyalty_points(self):

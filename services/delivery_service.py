@@ -8,11 +8,20 @@ from clock import utcnow
 
 
 class DeliveryService:
-    def __init__(self, order_repository=None, audit_service=None):
+    def __init__(self, order_repository=None, audit_service=None, cash_service=None):
         self.order_repository = order_repository or OrderRepository()
         self.audit_service = audit_service
+        self.cash_service = cash_service
 
-    def collect_cod_payment(self, order_id, amount_received, payment_mode="CASH", actor_id=None, expected_version=None):
+    def collect_cod_payment(
+        self,
+        order_id,
+        amount_received,
+        payment_mode="CASH",
+        actor_id=None,
+        expected_version=None,
+        agent_id=None,
+    ):
         order = self.order_repository.get_or_404(order_id)
         # optimistic check if caller provided expected_version
         from utils.optimistic import assert_version
@@ -45,6 +54,17 @@ class DeliveryService:
                 actor_id=actor_id,
                 reason="cod_collection",
             )
+            resolved_agent_id = agent_id or (
+                order.delivery.agent_id if order.delivery else None
+            )
+            if self.cash_service is not None and resolved_agent_id:
+                self.cash_service.record_cod_collection(
+                    agent_id=resolved_agent_id,
+                    order_id=order.id,
+                    amount=amount,
+                    payment_mode=payment_mode,
+                    actor_id=actor_id,
+                )
             order.mark_status_change()
             if self.audit_service is not None:
                 self.audit_service.log(

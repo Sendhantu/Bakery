@@ -1,5 +1,6 @@
 import os
 import secrets
+from decimal import Decimal
 
 from .utils import (
     BASE_DIR,
@@ -23,6 +24,9 @@ class BaseConfig:
     TESTING = False
     AUTO_INIT_DB = False
     SHOW_DEMO_ACCOUNTS = False
+    DEVELOPMENT_CREDENTIALS_ENABLED = env_flag(
+        "DEVELOPMENT_CREDENTIALS_ENABLED", default=False
+    )
     MIGRATIONS_ENABLED = True
 
     SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_urlsafe(32)
@@ -163,8 +167,21 @@ class BaseConfig:
     DEMAND_MIN_HISTORY_DAYS = int(os.environ.get("DEMAND_MIN_HISTORY_DAYS", 21))
     DEMAND_MIN_MATCHING_DAYS = int(os.environ.get("DEMAND_MIN_MATCHING_DAYS", 3))
     OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1")
+    OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:latest")
+    OLLAMA_TIMEOUT_SECONDS = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "3"))
     DEMAND_USE_OLLAMA = env_flag("DEMAND_USE_OLLAMA", default=False)
+    AI_ASSISTANT_ENABLED = env_flag("AI_ASSISTANT_ENABLED", default=False)
+    AI_SUPPORT_BOT_ENABLED = env_flag("AI_SUPPORT_BOT_ENABLED", default=False)
+    AI_PUSH_RECOMMENDATIONS_ENABLED = env_flag(
+        "AI_PUSH_RECOMMENDATIONS_ENABLED", default=False
+    )
+    AI_CONTEXT_WINDOW_DAYS = int(os.environ.get("AI_CONTEXT_WINDOW_DAYS", "90"))
+    AI_CONTEXT_PRODUCT_LIMIT = int(os.environ.get("AI_CONTEXT_PRODUCT_LIMIT", "8"))
+    AI_OFFERS_ENABLED = env_flag("AI_OFFERS_ENABLED", default=False)
+    AI_OFFERS_PROVIDER = os.environ.get("AI_OFFERS_PROVIDER", "").strip()
+    AI_OFFERS_MODEL = os.environ.get("AI_OFFERS_MODEL", "").strip()
+    AI_OFFERS_LOOKBACK_DAYS = int(os.environ.get("AI_OFFERS_LOOKBACK_DAYS", "30"))
+    AI_OFFERS_HORIZON_DAYS = int(os.environ.get("AI_OFFERS_HORIZON_DAYS", "7"))
 
     FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "")
     FIREBASE_CLIENT_EMAIL = os.environ.get("FIREBASE_CLIENT_EMAIL", "")
@@ -217,6 +234,7 @@ class BaseConfig:
     )
     STORE_DETAILS = {
         "name": os.environ.get("STORE_NAME", "SweetCrumbs Studio Bakery"),
+        "gstin": os.environ.get("STORE_GSTIN", "").strip().upper(),
         "address_line1": os.environ.get("STORE_ADDRESS_LINE1", "12 Baker Street"),
         "address_line2": os.environ.get("STORE_ADDRESS_LINE2", "RS Puram"),
         "city": os.environ.get("STORE_CITY", "Coimbatore"),
@@ -238,11 +256,27 @@ class BaseConfig:
     PICKUP_BUFFER_MINUTES = int(os.environ.get("PICKUP_BUFFER_MINUTES", 20))
     DELIVERY_FREE_THRESHOLD = int(os.environ.get("DELIVERY_FREE_THRESHOLD", 500))
     DELIVERY_CHARGE = int(os.environ.get("DELIVERY_CHARGE", 50))
+    GST_RESTAURANT_SERVICE_NO_ITC = (
+        os.environ.get("GST_RESTAURANT_SERVICE_NO_ITC", "true").strip().lower()
+        not in {"0", "false", "no", "off"}
+    )
+    GST_ECOMMERCE_TCS_RATE = Decimal(
+        os.environ.get("GST_ECOMMERCE_TCS_RATE", "1")
+    )
 
     LOYALTY_EARN_RATE = int(os.environ.get("LOYALTY_EARN_RATE", 1))
     LOYALTY_EARN_PER = int(os.environ.get("LOYALTY_EARN_PER", 10))
     LOYALTY_REDEEM_RATE = int(os.environ.get("LOYALTY_REDEEM_RATE", 10))
-    LOYALTY_REDEEM_PER = int(os.environ.get("LOYALTY_REDEEM_PER", 100))
+    LOYALTY_REDEEM_PER = int(os.environ.get("LOYALTY_REDEEM_PER", 10))
+    LOYALTY_REDEEM_MAX_PERCENT = int(
+        os.environ.get("LOYALTY_REDEEM_MAX_PERCENT", 20)
+    )
+    LOYALTY_MIN_REDEEM_ORDER_VALUE = int(
+        os.environ.get("LOYALTY_MIN_REDEEM_ORDER_VALUE", 500)
+    )
+    LOYALTY_MIN_REDEEM_PERCENT = int(
+        os.environ.get("LOYALTY_MIN_REDEEM_PERCENT", 10)
+    )
     LOYALTY_EXPIRY_DAYS = int(os.environ.get("LOYALTY_EXPIRY_DAYS", 365))
 
     LOGIN_MAX_ATTEMPTS = int(os.environ.get("LOGIN_MAX_ATTEMPTS", 5))

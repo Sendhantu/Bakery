@@ -25,11 +25,22 @@
 </head>
 <body>
   <main>
+    {% set taxable_amount = order.gst_taxable_amount or ((order.subtotal or 0) - (order.discount or 0) - (order.loyalty_discount or 0)) %}
+    {% set cgst_amount = order.cgst_amount or ((order.gst_amount or 0) / 2) %}
+    {% set sgst_amount = order.sgst_amount or ((order.gst_amount or 0) - cgst_amount) %}
     <h1>SweetCrumbs Receipt</h1>
     <div class="muted">Order {{ order.order_number }}</div>
+    <div class="muted">Invoice {{ order.invoice_number or order.order_number }}</div>
+    {% if store_details.gstin %}
+    <div class="muted">GSTIN: {{ store_details.gstin }}</div>
+    {% endif %}
     <div class="muted">{{ order.placed_at.strftime('%d-%m-%Y %H:%M') if order.placed_at else '' }}</div>
     <div class="muted">Customer: {{ order.customer.name if order.customer else 'Walk-in Customer' }}</div>
     <div class="muted">Payment: {{ order.payment_method }} · {{ order.payment_status }}</div>
+    <div class="muted">Source: {{ order.gst_order_source_label }} · {{ order.gst_liability_label }}</div>
+    {% if payment_payload %}
+    <div class="muted">Received: {{ payment_payload.amount_received or payment_payload.amount_due }} · Change: {{ payment_payload.change_due or '0.00' }}</div>
+    {% endif %}
 
     <table>
       <thead>
@@ -46,16 +57,22 @@
       </tbody>
     </table>
 
+    <div class="muted" style="display:flex;justify-content:space-between"><span>Taxable Value</span><span>₹{{ '%.2f'|format(taxable_amount or 0) }}</span></div>
+    <div class="muted" style="display:flex;justify-content:space-between"><span>CGST {{ ((order.gst_rate or 0) / 2)|round(3) }}%</span><span>₹{{ '%.2f'|format(cgst_amount or 0) }}</span></div>
+    <div class="muted" style="display:flex;justify-content:space-between"><span>SGST {{ ((order.gst_rate or 0) / 2)|round(3) }}%</span><span>₹{{ '%.2f'|format(sgst_amount or 0) }}</span></div>
     <div class="total">
       <span>Total</span>
       <span>₹{{ '%.2f'|format(order.total or 0) }}</span>
     </div>
 
+    {% if order.gst_invoice_note %}
+    <p class="muted">{{ order.gst_invoice_note }}</p>
+    {% endif %}
     <p class="muted">GST invoice requirements can vary by registration and sale details; confirm final compliance wording with your accountant.</p>
 
     <div class="actions">
       <button type="button" onclick="window.print()">Print</button>
-      <a href="{{ url_for('admin.pos') }}">Back to POS</a>
+      <a href="{{ url_for('admin.pos') }}">Back to Walk-in Orders</a>
     </div>
   </main>
 </body>

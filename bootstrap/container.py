@@ -2,24 +2,30 @@ from events import EventBus, handle_order_status_updated
 from repositories import OrderRepository, ProductRepository, UserRepository
 from services import (
     AuditService,
+    AIAssistantService,
     AuthService,
+    BakeryMCPContextService,
     DemandService,
+    DeliveryCashService,
     DeliveryService,
     FinanceExportService,
     FinanceService,
     ForecastService,
     GiftCardService,
+    CustomerRiskService,
     InventoryService,
     InvoiceService,
     LoyaltyService,
     OfflineSyncService,
     OrderReversalService,
     OrderService,
+    OfferRecommendationService,
     PaymentService,
     PricingService,
     PurchaseOrderService,
     PushService,
     QRService,
+    RbacService,
     RoutePlanningService,
     SlotService,
     StorageService,
@@ -41,7 +47,13 @@ class ServiceContainer:
         self.product_repository = ProductRepository()
         self.user_repository = UserRepository()
         self.audit_service = AuditService()
+        self.mcp_context_service = BakeryMCPContextService(app.config)
+        self.ai_assistant_service = AIAssistantService(
+            app.config,
+            self.mcp_context_service,
+        )
         self.auth_service = AuthService(self.user_repository)
+        self.rbac_service = RbacService()
         self.payment_service = PaymentService()
         self.inventory_service = InventoryService()
         self.loyalty_service = LoyaltyService()
@@ -51,13 +63,16 @@ class ServiceContainer:
             self.audit_service,
             self.loyalty_service,
         )
+        self.offer_recommendation_service = OfferRecommendationService(app.config)
         self.slot_service = SlotService(
             time_slots=app.config.get("TIME_SLOTS", []),
             pickup_buffer_minutes=app.config.get("PICKUP_BUFFER_MINUTES", 20),
         )
+        self.delivery_cash_service = DeliveryCashService()
         self.delivery_service = DeliveryService(
             self.order_repository,
             self.audit_service,
+            self.delivery_cash_service,
         )
         self.storage_service = StorageService(app.config)
         self.pricing_service = PricingService()
@@ -69,6 +84,7 @@ class ServiceContainer:
         self.invoice_service = InvoiceService(self.storage_service)
         self.finance_service = FinanceService()
         self.gift_card_service = GiftCardService()
+        self.customer_risk_service = CustomerRiskService()
         self.finance_export_service = FinanceExportService()
         self.purchase_order_service = PurchaseOrderService(
             inventory_service=self.inventory_service,
@@ -83,7 +99,11 @@ class ServiceContainer:
         )
         self.weather_service = WeatherService(app.config)
         self.demand_service = DemandService(app.config, self.weather_service)
-        self.offline_sync_service = OfflineSyncService(app, self.audit_service)
+        self.offline_sync_service = OfflineSyncService(
+            app,
+            self.audit_service,
+            self.delivery_cash_service,
+        )
         self._register_default_handlers()
 
     def _register_default_handlers(self):

@@ -34,7 +34,8 @@ def upgrade():
         END
         """
     )
-    op.alter_column("orders", "channel", server_default=None)
+    if op.get_context().dialect.name != "sqlite":
+        op.alter_column("orders", "channel", server_default=None)
 
 
 def downgrade():

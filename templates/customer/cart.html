@@ -16,6 +16,7 @@
       <div class="cart-item" data-cart-item>
         <img src="{{ item.product.image_src }}"
              alt="{{ item.product.name }}" class="cart-item-img" loading="lazy" decoding="async"
+             style="--product-image-fit: {{ item.product.image_object_fit }}; --product-image-position: {{ item.product.image_object_position }};"
              onerror="this.onerror=null;this.src='{{ item.product.fallback_image_src }}'">
         <div style="flex:1">
           <h4 style="font-family:var(--font-display);font-size:1rem;margin-bottom:0.2rem">{{ item.product.name }}</h4>
@@ -67,9 +68,11 @@
           <div class="flex justify-between mb-2"><span class="text-muted">Products</span><span class="fw-600" id="cart-summary-products">{{ items|length }}</span></div>
           <div class="flex justify-between mb-2"><span class="text-muted">Total quantity</span><span class="fw-600" id="cart-summary-quantity">{{ total_quantity }}</span></div>
           <div class="flex justify-between mb-2"><span class="text-muted">Subtotal</span><span class="fw-600" id="cart-summary-subtotal">₹{{ subtotal|int }}</span></div>
-          <div class="flex justify-between mb-2"><span class="text-muted">Delivery</span><span class="fw-600" id="cart-summary-delivery">{% if subtotal >= 500 %}<span style="color:var(--sage)">FREE</span>{% else %}₹50{% endif %}</span></div>
+          <div class="flex justify-between mb-2"><span class="text-muted">Delivery</span><span class="fw-600" id="cart-summary-delivery">{% if delivery_charge == 0 %}<span style="color:var(--sage)">FREE</span>{% else %}₹{{ delivery_fee|int }}{% endif %}</span></div>
           <div class="divider"></div>
-          <div class="flex justify-between mb-3"><span style="font-weight:600">Total</span><span style="font-family:var(--font-display);font-size:1.3rem;font-weight:700;color:var(--caramel)" id="cart-summary-total">₹{{ (subtotal + (0 if subtotal >= 500 else 50))|int }}</span></div>
+          <div class="flex justify-between mb-3"><span style="font-weight:600">Total</span><span style="font-family:var(--font-display);font-size:1.3rem;font-weight:700;color:var(--caramel)" id="cart-summary-total">₹{{ (subtotal + delivery_charge)|int }}</span></div>
+          {% set free_delivery_banner_id = 'cart-free-delivery-note' %}
+          {% include 'customer/_free_delivery_banner.html' %}
           <a href="{{ url_for('customer.checkout') if current_user.is_authenticated else url_for('auth.login', next=url_for('customer.checkout')) }}" class="btn btn-primary btn-block btn-lg">
             {{ 'Proceed to Checkout →' if current_user.is_authenticated else 'Login to Checkout →' }}
           </a>
@@ -87,11 +90,6 @@
           <span>If you prefer self-pickup, mention it in the order instructions at checkout.</span>
         </div>
       </div>
-      {% if subtotal < 500 %}
-      <div style="margin-top:1rem;padding:1rem;background:var(--cream);border-radius:var(--radius-lg);border:1px solid var(--border);text-align:center;font-size:0.85rem;color:var(--text-muted)" id="cart-free-delivery-note">
-        Add ₹{{ (500 - subtotal)|int }} more for <strong style="color:var(--sage)">FREE delivery</strong> 🎁
-      </div>
-      {% endif %}
     </div>
   </div>
   {% else %}

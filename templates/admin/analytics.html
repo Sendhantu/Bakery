@@ -98,7 +98,7 @@
 
 {% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', () => {
+(() => {
   const endpoint = {{ url_for('admin.analytics_revenue_api')|tojson }};
   const initialPayload = {{ selected_payload|tojson }};
   const periodLabels = {{ period_labels|tojson }};
@@ -230,8 +230,15 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Unable to refresh analytics.', error);
     });
   };
-  window.sweetCrumbsSocket?.on('new_order', refreshToday);
-  window.sweetCrumbsSocket?.on('order_status_updated', refreshToday);
-});
+  if (window.sweetCrumbsSocket) {
+    if (window.sweetCrumbsAnalyticsRefreshToday) {
+      window.sweetCrumbsSocket.off('new_order', window.sweetCrumbsAnalyticsRefreshToday);
+      window.sweetCrumbsSocket.off('order_status_updated', window.sweetCrumbsAnalyticsRefreshToday);
+    }
+    window.sweetCrumbsAnalyticsRefreshToday = refreshToday;
+    window.sweetCrumbsSocket.on('new_order', refreshToday);
+    window.sweetCrumbsSocket.on('order_status_updated', refreshToday);
+  }
+})();
 </script>
 {% endblock %}

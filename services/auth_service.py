@@ -16,6 +16,8 @@ class AuthService:
     def record_login(self, user, request, status="success"):
         user_agent = request.headers.get("User-Agent", "")[:200]
         ip_address = request.headers.get("X-Forwarded-For", request.remote_addr)
+        if status == "success":
+            user.last_seen_at = utcnow()
         db.session.add(
             LoginHistory(
                 user_id=user.id,

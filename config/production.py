@@ -19,6 +19,10 @@ class ProductionConfig(BaseConfig):
     ENV = "production"
     DEBUG = False
     SHOW_DEMO_ACCOUNTS = False
+    DEVELOPMENT_CREDENTIALS_ENABLED = False
+    AI_ASSISTANT_ENABLED = False
+    AI_SUPPORT_BOT_ENABLED = False
+    AI_PUSH_RECOMMENDATIONS_ENABLED = False
     USE_PROXY_FIX = env_flag("USE_PROXY_FIX", default=True)
     SOCKETIO_ASYNC_MODE = os.environ.get("SOCKETIO_ASYNC_MODE", "gevent")
     CACHE_TYPE = "RedisCache"
@@ -48,7 +52,9 @@ class ProductionConfig(BaseConfig):
                 ]
             )
         require_env_vars(required_env_vars)
-        redis_url = (app.config.get("REDIS_URL") or os.environ.get("REDIS_URL") or "").strip()
+        redis_url = (
+            app.config.get("REDIS_URL") or os.environ.get("REDIS_URL") or ""
+        ).strip()
         redis_backed_settings = [
             "SOCKETIO_MESSAGE_QUEUE",
             "CELERY_BROKER_URL",
@@ -72,6 +78,7 @@ class ProductionConfig(BaseConfig):
         app.config["REDIS_REQUIRED"] = cls.REDIS_REQUIRED
         app.config["SOCKETIO_QUEUE_REQUIRED"] = cls.SOCKETIO_QUEUE_REQUIRED
         app.config["CELERY_REQUIRED"] = cls.CELERY_REQUIRED
+        app.config["DEVELOPMENT_CREDENTIALS_ENABLED"] = False
         app.config["STORAGE_REQUIRED"] = storage_required
         reject_weak_secret_key(app.config.get("SECRET_KEY"), cls.ENV)
         forbid_sqlite_in_production(app.config.get("SQLALCHEMY_DATABASE_URI"), cls.ENV)

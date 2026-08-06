@@ -18,7 +18,15 @@ from .notifications import (
     send_sms,
     send_status_update_email,
 )
-from .permissions import ADMIN_PORTAL_ROLES, ROLE_HIERARCHY, has_role, role_meets_minimum, roles_required
+from .permissions import (
+    ADMIN_PORTAL_ROLES,
+    ORDER_SCREEN_ROLES,
+    ROLE_HIERARCHY,
+    has_role,
+    is_order_screen_user,
+    role_meets_minimum,
+    roles_required,
+)
 from .security import (
     admin_2fa_provision,
     apply_security_headers,
@@ -47,6 +55,7 @@ __all__ = [
     "parse_decimal",
     "reverse_geocode",
     "ADMIN_PORTAL_ROLES",
+    "ORDER_SCREEN_ROLES",
     "ROLE_HIERARCHY",
     "save_address_for_customer",
     "send_email",
@@ -57,6 +66,7 @@ __all__ = [
     "send_sms",
     "send_status_update_email",
     "has_role",
+    "is_order_screen_user",
     "role_meets_minimum",
     "roles_required",
     "should_force_https",

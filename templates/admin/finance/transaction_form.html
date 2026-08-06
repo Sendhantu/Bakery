@@ -32,6 +32,26 @@
         <label class="form-label">TDS withheld (optional, vendor payments)</label>
         <input class="form-control" type="number" step="0.01" min="0" name="tds_withheld">
       </div>
+      {% if vendors %}
+      <div class="form-group">
+        <label class="form-label">Vendor</label>
+        <select class="form-control" name="vendor_id">
+          <option value="">Not vendor-linked</option>
+          {% for vendor in vendors %}
+          <option value="{{ vendor.id }}">{{ vendor.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div class="form-group">
+        <label class="form-label">Payment Method</label>
+        <select class="form-control" name="payment_method">
+          <option value="">Not recorded</option>
+          {% for value, label in payment_method_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
       <div class="form-group">
         <label class="form-label">Counterparty (vendor/customer)</label>
         <input class="form-control" name="counterparty" placeholder="Vendor or customer name">

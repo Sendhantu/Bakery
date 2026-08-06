@@ -1,4 +1,22 @@
-version: "3.8"
+x-app-environment: &app_environment
+  FLASK_ENV: development
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+  DATABASE_URL: ""
+  DB_SCHEME: mysql
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_USER: ${MYSQL_USER:-local}
+  DB_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+  DB_NAME: ${MYSQL_DATABASE:-sweetcrumbs_local}
+  DB_SSL_CA: ""
+  DB_SSL_VERIFY_CERT: "false"
+  DB_SSL_VERIFY_IDENTITY: "false"
+  REDIS_URL: redis://redis:6379/0
+  SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  RATELIMIT_STORAGE_URI: redis://redis:6379/0
 
 services:
   customer_web:
@@ -6,17 +24,14 @@ services:
     env_file:
       - .env
     environment:
-      FLASK_ENV: development
+      <<: *app_environment
       PORTAL_ROLE: customer
       PORT: "5000"
-      REDIS_URL: redis://redis:6379/0
-      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      RATELIMIT_STORAGE_URI: redis://redis:6379/0
     ports:
       - "5000:5000"
     depends_on:
+      db_migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
@@ -26,17 +41,14 @@ services:
       - .env
     command: gunicorn --config gunicorn.conf.py 'app:create_app("development", portal_role="admin")'
     environment:
-      FLASK_ENV: development
+      <<: *app_environment
       PORTAL_ROLE: admin
       PORT: "5001"
-      REDIS_URL: redis://redis:6379/0
-      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      RATELIMIT_STORAGE_URI: redis://redis:6379/0
     ports:
       - "5001:5001"
     depends_on:
+      db_migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
@@ -46,18 +58,27 @@ services:
       - .env
     command: gunicorn --config gunicorn.conf.py 'app:create_app("development", portal_role="delivery")'
     environment:
-      FLASK_ENV: development
+      <<: *app_environment
       PORTAL_ROLE: delivery
       PORT: "5002"
-      REDIS_URL: redis://redis:6379/0
-      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      RATELIMIT_STORAGE_URI: redis://redis:6379/0
     ports:
       - "5002:5002"
     depends_on:
+      db_migrate:
+        condition: service_completed_successfully
       redis:
+        condition: service_healthy
+
+  db_migrate:
+    build: .
+    env_file:
+      - .env
+    command: flask --app 'app:create_app("development", portal_role="customer")' db upgrade
+    environment:
+      <<: *app_environment
+      PORTAL_ROLE: customer
+    depends_on:
+      mysql:
         condition: service_healthy
 
   celery_worker:
@@ -66,16 +87,31 @@ services:
       - .env
     command: celery -A celery_app.celery worker --loglevel=info
     environment:
-      FLASK_ENV: development
+      <<: *app_environment
       PORTAL_ROLE: customer
-      REDIS_URL: redis://redis:6379/0
-      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      RATELIMIT_STORAGE_URI: redis://redis:6379/0
     depends_on:
+      db_migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sweetcrumbs_local}
+      MYSQL_USER: ${MYSQL_USER:-local}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    ports:
+      - "${MYSQL_HOST_PORT:-3307}:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -86,3 +122,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+volumes:
+  mysql_data:

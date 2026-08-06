@@ -13,7 +13,16 @@
       <div class="card-body">
         <div class="form-group"><label class="form-label">Product Name *</label><input class="form-control" name="name" required value="{{ product.name if product else '' }}"></div>
         <div class="form-group"><label class="form-label">Description</label><textarea class="form-control" name="description">{{ product.description if product else '' }}</textarea></div>
-        <div class="form-group"><label class="form-label">Ingredients (comma-separated)</label><input class="form-control" name="ingredients" value="{{ product.ingredients if product else '' }}" placeholder="Flour, Butter, Sugar, Eggs"></div>
+        <div class="form-group">
+          <label class="form-label">Ingredients (comma-separated)</label>
+          <textarea class="form-control" name="ingredients" rows="2" placeholder="Flour, Butter, Sugar, Cocoa">{{ product.ingredients if product else '' }}</textarea>
+          <p class="text-sm text-muted mt-1">Customers will see this ingredient list on the product page.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Special Ingredient</label>
+          <input class="form-control" name="special_ingredient" value="{{ product.special_ingredient if product else '' }}" placeholder="Belgian chocolate, almond praline, vanilla bean">
+          <p class="text-sm text-muted mt-1">Optional. Use this when a premium or special ingredient should be highlighted.</p>
+        </div>
         <div class="form-group"><label class="form-label">Preparation Details</label><textarea class="form-control" name="preparation">{{ product.preparation if product else '' }}</textarea></div>
         <div class="form-row">
           <div class="form-group"><label class="form-label">Base Price (₹) *</label><input class="form-control" type="number" step="0.01" name="base_price" required value="{{ product.base_price if product else '' }}"></div>
@@ -25,8 +34,20 @@
           </div>
         </div>
         <div class="form-group"><label class="form-label">Occasion Tags (comma-separated)</label><input class="form-control" name="occasion_tags" value="{{ product.occasion_tags if product else '' }}" placeholder="birthday,wedding,anniversary"></div>
+        <div class="form-group">
+          <label class="form-label">Egg Type *</label>
+          <div class="flex gap-3 flex-wrap">
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+              <input type="radio" name="egg_preference" value="eggless" {% if product and product.is_eggless %}checked{% endif %}>
+              Eggless cake
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+              <input type="radio" name="egg_preference" value="contains_egg" {% if not product or not product.is_eggless %}checked{% endif %}>
+              Contains egg
+            </label>
+          </div>
+        </div>
         <div class="flex gap-3 flex-wrap">
-          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_eggless" {% if product and product.is_eggless %}checked{% endif %}> 🌿 Eggless</label>
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_featured" {% if product and product.is_featured %}checked{% endif %}> ⭐ Featured</label>
           <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="preorder_required" {% if product and product.preorder_required %}checked{% endif %}> ⏰ Requires Preorder</label>
           {% if product %}<label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer"><input type="checkbox" name="is_active" {% if product.is_active %}checked{% endif %}> ✅ Active</label>{% endif %}
@@ -116,24 +137,49 @@
 
   <!-- Image -->
   <div>
-    <div class="card" style="position:sticky;top:90px">
+    <div class="card" id="product-image-card" style="position:sticky;top:90px">
       <div class="card-header">Product Image</div>
       <div class="card-body">
+        {% set current_image_fit = product.image_fit if product and product.image_fit else 'cover' %}
+        {% set current_image_position = product.image_position if product and product.image_position else 'center' %}
         <div style="background:var(--cream-dark);border-radius:var(--radius-lg);overflow:hidden;aspect-ratio:1;margin-bottom:1rem;display:flex;align-items:center;justify-content:center">
           <img id="image-preview" src="{{ product.image_src if product else '' }}"
-               style="width:100%;height:100%;object-fit:cover;{% if not product %}display:none{% endif %}"
+               style="width:100%;height:100%;object-fit:{{ product.image_object_fit if product else 'cover' }};object-position:{{ product.image_object_position if product else 'center center' }};{% if not product %}display:none{% endif %}"
                data-fallback-src="{{ product.fallback_image_src if product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=800&q=80' }}">
           <span style="color:var(--text-muted);font-size:3rem;{% if product %}display:none{% endif %}" id="img-placeholder">🖼️</span>
         </div>
         <div class="form-group">
+          {% set product_image_value = (product.image_url or product.image) if product else '' %}
           <label class="form-label">Image URL</label>
           <input class="form-control" type="url" id="image-url-input" name="image_url"
-                 value="{{ product.image if product and product.image and (product.image.startswith('http://') or product.image.startswith('https://')) else '' }}"
+                 value="{{ product_image_value if product_image_value and (product_image_value.startswith('http://') or product_image_value.startswith('https://')) else '' }}"
                  placeholder="https://example.com/cake-photo.jpg">
-          <p class="text-sm text-muted mt-1">Paste a real cake photo URL, or upload a file below.</p>
+          <p class="text-sm text-muted mt-1">
+            {% if product %}Paste a new URL to replace the current image, or upload a new file below.{% else %}Paste a real cake photo URL, or upload a file below.{% endif %}
+          </p>
         </div>
         <input class="form-control" type="file" id="product-image-input" name="image" accept="image/*">
-        <p class="text-sm text-muted mt-1">JPG, PNG up to 5MB</p>
+        <p class="text-sm text-muted mt-1">JPG, PNG, WebP, or GIF. Uploaded files use Cloudinary storage in production.</p>
+        <div class="form-row mt-2">
+          <div class="form-group">
+            <label class="form-label">Frame Fit</label>
+            <select class="form-control" id="image-fit-input" name="image_fit">
+              {% for value, label in image_fit_choices %}
+              <option value="{{ value }}" {% if current_image_fit == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <p class="text-sm text-muted mt-1">Use “Fit whole image” when the photo is getting cropped.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Frame Position</label>
+            <select class="form-control" id="image-position-input" name="image_position">
+              {% for value, label in image_position_choices %}
+              <option value="{{ value }}" {% if current_image_position == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <p class="text-sm text-muted mt-1">Move the focus inside the product frame.</p>
+          </div>
+        </div>
         <div class="divider"></div>
         <button type="submit" class="btn btn-primary btn-block btn-lg">
           {% if product %}Update Product{% else %}Add Product{% endif %}
@@ -149,8 +195,23 @@ const imagePreview = document.getElementById('image-preview');
 const imagePlaceholder = document.getElementById('img-placeholder');
 const imageInput = document.getElementById('product-image-input');
 const imageUrlInput = document.getElementById('image-url-input');
+const imageFitInput = document.getElementById('image-fit-input');
+const imagePositionInput = document.getElementById('image-position-input');
 const existingPreview = {{ (product.image_src if product else '')|tojson }};
 const fallbackPreview = {{ (product.fallback_image_src if product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=800&q=80')|tojson }};
+
+const imagePositionMap = {
+  center: 'center center',
+  top: 'center top',
+  bottom: 'center bottom',
+  left: 'left center',
+  right: 'right center',
+};
+
+function syncImageFrame() {
+  imagePreview.style.objectFit = imageFitInput.value || 'cover';
+  imagePreview.style.objectPosition = imagePositionMap[imagePositionInput.value] || 'center center';
+}
 
 function showImagePreview(src) {
   if (!src) {
@@ -161,6 +222,7 @@ function showImagePreview(src) {
   }
 
   imagePreview.src = src;
+  syncImageFrame();
   imagePreview.style.display = 'block';
   imagePlaceholder.style.display = 'none';
 }
@@ -209,5 +271,9 @@ imageInput.addEventListener('change', () => {
   reader.onload = (event) => showImagePreview(event.target?.result || '');
   reader.readAsDataURL(file);
 });
+
+imageFitInput.addEventListener('change', syncImageFrame);
+imagePositionInput.addEventListener('change', syncImageFrame);
+syncImageFrame();
 </script>
 {% endblock %}

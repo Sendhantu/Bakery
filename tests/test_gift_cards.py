@@ -199,6 +199,9 @@ def test_admin_gift_cards_page_and_pos_issue_route_are_manager_gated(admin_clien
     response = admin_client.get("/admin/gift-cards")
     assert response.status_code == 200
     assert b"Outstanding Liability" in response.data
+    assert b"Available Amount" in response.data
+    assert b'data-toggle-target="#issue-gift-card-form"' in response.data
+    assert b'id="issue-gift-card-form" class="card mb-4 hidden"' in response.data
 
     response = admin_client.post(
         "/admin/pos/gift-card",
@@ -207,3 +210,42 @@ def test_admin_gift_cards_page_and_pos_issue_route_are_manager_gated(admin_clien
     )
     assert response.status_code == 200
     assert b"issued" in response.data
+    assert b"Available Amount" in response.data
+
+
+def test_customer_gift_cards_show_owned_available_amounts(client):
+    sign_in(client, "customer@test.com", "customer123")
+
+    with client.application.app_context():
+        from models import User, db
+        from bootstrap import get_container
+
+        customer = User.query.filter_by(email="customer@test.com").first()
+        assert customer is not None
+        purchased_card = get_container().gift_card_service.issue(
+            amount=Decimal("200"),
+            purchased_by_user_id=customer.id,
+            recipient_email="friend@example.com",
+        )
+        received_card = get_container().gift_card_service.issue(
+            amount=Decimal("150"),
+            recipient_email="CUSTOMER@Test.com",
+        )
+        other_card = get_container().gift_card_service.issue(
+            amount=Decimal("999"),
+            recipient_email="other@example.com",
+        )
+        db.session.commit()
+        purchased_code = purchased_card.code
+        received_code = received_card.code
+        other_code = other_card.code
+
+    response = client.get("/gift-cards")
+
+    assert response.status_code == 200
+    assert b"Available Gift Card Amount" in response.data
+    assert b"Available Amount" in response.data
+    assert purchased_code.encode() in response.data
+    assert received_code.encode() in response.data
+    assert other_code.encode() not in response.data
+    assert b"350.00" in response.data

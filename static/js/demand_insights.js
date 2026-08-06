@@ -1,4 +1,4 @@
-(function () {
+(() => {
   const storageKey = 'sweetcrumbs:demand-insights:acknowledged';
 
   const readAcknowledged = () => {
@@ -22,9 +22,9 @@
     if (empty) empty.classList.toggle('hidden', cards.length > 0);
   };
 
-  document.addEventListener('DOMContentLoaded', () => {
+  const initDemandInsights = (root = document) => {
     const acknowledged = readAcknowledged();
-    const cards = document.querySelectorAll('[data-demand-advisory]');
+    const cards = root.querySelectorAll?.('[data-demand-advisory]') || [];
 
     cards.forEach((card) => {
       const advisoryId = card.dataset.advisoryId;
@@ -38,6 +38,8 @@
 
       const button = card.querySelector('[data-demand-ack]');
       if (!button) return;
+      if (button.dataset.demandAckBound === 'true') return;
+      button.dataset.demandAckBound = 'true';
       button.addEventListener('click', () => {
         acknowledged.add(advisoryId);
         writeAcknowledged(acknowledged);
@@ -47,5 +49,14 @@
     });
 
     updateCount();
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initDemandInsights(), { once: true });
+  } else {
+    initDemandInsights();
+  }
+  document.addEventListener('sweetcrumbs:admin-page-loaded', (event) => {
+    initDemandInsights(event.detail?.root || document);
   });
 })();

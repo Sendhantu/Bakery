@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="SweetCrumbs admin — catalogue, orders, and analytics.">
-  <meta name="theme-color" content="#5C3D2E">
+  <meta name="theme-color" content="#16324f">
   <meta name="robots" content="noindex, nofollow">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="manifest" href="{{ url_for('admin_manifest') }}">
@@ -39,9 +39,9 @@
     <button class="hamburger admin-menu-toggle" style="display:flex" aria-label="Toggle sidebar">
       <span></span><span></span><span></span>
     </button>
-    <a href="{{ url_for('admin.dashboard') }}" class="navbar-brand">
-      🎂 Sweet<span>Crumbs</span>
-      <span class="navbar-portal-tag">Admin</span>
+    <a href="{{ url_for(admin_start_endpoint) }}" class="navbar-brand">
+      Sweet<span>Crumbs</span>
+      <span class="navbar-portal-tag">{{ 'Order Screen' if is_order_screen_user else 'Admin' }}</span>
     </a>
   </div>
   <div class="flex items-center gap-2 admin-toolbar-meta">
@@ -57,7 +57,7 @@
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}
     <div class="flash-msg flash-{{ category }}" role="alert">
-      <span>{% if category=='success' %}✅{% elif category=='danger' %}❌{% elif category=='warning' %}⚠️{% else %}ℹ️{% endif %}</span>
+      <span class="flash-dot" aria-hidden="true"></span>
       <span>{{ message }}</span>
       <button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:1.1rem;opacity:0.6;" aria-label="Dismiss">✕</button>
     </div>
@@ -69,22 +69,26 @@
   <aside class="admin-sidebar" id="admin-sidebar">
     <div class="admin-sidebar-brand">Admin Console</div>
     <ul class="admin-nav">
+      {% if not is_order_screen_user %}
       <li class="section-label">Overview</li>
       <li><a href="{{ url_for('admin.dashboard') }}" class="{{ 'active' if request.endpoint == 'admin.dashboard' }}">
         <span class="icon">📊</span>Dashboard</a></li>
+      {% endif %}
       {% if can_admin_manager %}
       <li><a href="{{ url_for('admin.analytics') }}" class="{{ 'active' if request.endpoint == 'admin.analytics' }}">
         <span class="icon">📈</span>Analytics</a></li>
       {% endif %}
 
+      {% if not is_order_screen_user %}
       <li class="section-label">Catalogue</li>
+      {% endif %}
       {% if can_admin_manager %}
       <li><a href="{{ url_for('admin.products') }}" class="{{ 'active' if 'product' in request.endpoint }}">
         <span class="icon">🎂</span>Products</a></li>
       <li><a href="{{ url_for('admin.categories') }}" class="{{ 'active' if 'categor' in request.endpoint }}">
         <span class="icon">📁</span>Categories</a></li>
       {% endif %}
-      {% if can_admin_operations %}
+      {% if can_admin_operations and not is_order_screen_user %}
       <li><a href="{{ url_for('admin.inventory') }}" class="{{ 'active' if 'inventory' in request.endpoint }}">
         <span class="icon">📦</span>Inventory</a></li>
       {% endif %}
@@ -94,31 +98,39 @@
       <li><a href="{{ url_for('admin.demand_insights') }}" class="{{ 'active' if 'demand_insights' in request.endpoint or 'local_event' in request.endpoint }}">
         <span class="icon">📈</span>Demand Insights</a></li>
       {% endif %}
-      {% if can_admin_operations %}
+      {% if can_admin_operations and not is_order_screen_user %}
       <li><a href="{{ url_for('admin.raw_materials') }}" class="{{ 'active' if 'raw_material' in request.endpoint }}">
         <span class="icon">🧂</span>Raw Materials</a></li>
       {% endif %}
 
-      {% if can_admin_operations %}
+      {% if can_admin_operations and not is_order_screen_user %}
       <li class="section-label">Orders</li>
+      <li><a href="{{ url_for('admin.live_past_orders') }}" class="{{ 'active' if request.endpoint == 'admin.live_past_orders' }}">
+        <span class="icon">📡</span>Live / Past Orders</a></li>
       <li><a href="{{ url_for('admin.orders') }}" class="{{ 'active' if request.endpoint == 'admin.orders' }}">
         <span class="icon">🛒</span>All Orders</a></li>
       <li><a href="{{ url_for('admin.modifications') }}" class="{{ 'active' if 'modification' in request.endpoint }}">
         <span class="icon">✏️</span>Modifications</a></li>
-      {% endif %}
-      {% if can_admin_manager %}
-      <li><a href="{{ url_for('admin.reviews') }}" class="{{ 'active' if 'review' in request.endpoint }}">
-        <span class="icon">⭐</span>Reviews</a></li>
-
-      <li class="section-label">Customers</li>
-      <li><a href="{{ url_for('admin.customers') }}" class="{{ 'active' if request.endpoint in ['admin.customers','admin.customer_detail'] }}">
-        <span class="icon">👥</span>Customers</a></li>
       <li><a href="{{ url_for('admin.chat') }}" class="{{ 'active' if 'chat' in request.endpoint }}">
-        <span class="icon">💬</span>Chat
+        <span class="icon">💬</span>Customer Support
         {% if pending_msgs > 0 %}
         <span class="badge badge-orange" style="margin-left:auto;font-size:0.7rem">{{ pending_msgs }}</span>
         {% endif %}
       </a></li>
+      {% endif %}
+      {% if can_admin_manager %}
+      <li><a href="{{ url_for('admin.reviews') }}" class="{{ 'active' if 'review' in request.endpoint }}">
+        <span class="icon">⭐</span>Reviews</a></li>
+      {% endif %}
+
+      {% if can_admin_operations and not is_order_screen_user %}
+      <li class="section-label">Customers</li>
+      <li><a href="{{ url_for('admin.customers') }}" class="{{ 'active' if request.endpoint in ['admin.customers','admin.customer_detail'] }}">
+        <span class="icon">👥</span>Customers</a></li>
+      <li><a href="{{ url_for('admin.blocklist') }}" class="{{ 'active' if 'blocklist' in request.endpoint }}">
+        <span class="icon">🛡️</span>Fraud Blocklist</a></li>
+      {% endif %}
+      {% if can_admin_manager %}
       <li><a href="{{ url_for('admin.loyalty') }}" class="{{ 'active' if 'loyalty' in request.endpoint }}">
         <span class="icon">⭐</span>Loyalty Points</a></li>
       {% endif %}
@@ -138,10 +150,12 @@
       {% endif %}
 
       {% if can_admin_operations or can_admin_manager or can_admin_owner %}
-      <li class="section-label">Delivery</li>
+      <li class="section-label">{{ 'Order Taking' if is_order_screen_user else 'Delivery' }}</li>
       {% if can_admin_manager %}
       <li><a href="{{ url_for('admin.agents') }}" class="{{ 'active' if 'agent' in request.endpoint }}">
         <span class="icon">🚚</span>Agents</a></li>
+      <li><a href="{{ url_for('admin.delivery_cash_ledger') }}" class="{{ 'active' if 'delivery_cash' in request.endpoint }}">
+        <span class="icon">💵</span>Delivery Cash</a></li>
       <li><a href="{{ url_for('admin.branches') }}" class="{{ 'active' if 'branches' in request.endpoint }}">
         <span class="icon">🏬</span>Branches</a></li>
       <li><a href="{{ url_for('admin.suppliers') }}" class="{{ 'active' if 'suppliers' in request.endpoint }}">
@@ -150,18 +164,22 @@
         <span class="icon">🛠️</span>Production</a></li>
       <li><a href="{{ url_for('admin.batches') }}" class="{{ 'active' if 'batches' in request.endpoint }}">
         <span class="icon">🧾</span>Batches</a></li>
-      <li><a href="{{ url_for('admin.forecasts') }}" class="{{ 'active' if 'forecast' in request.endpoint }}">
-        <span class="icon">📦</span>Forecasts</a></li>
       {% endif %}
       {% if can_admin_operations %}
+      {% if not is_order_screen_user %}
       <li><a href="{{ url_for('admin.kitchen_display') }}" class="{{ 'active' if 'kitchen_display' in request.endpoint }}">
         <span class="icon">🔥</span>KDS</a></li>
+      {% endif %}
       <li><a href="{{ url_for('admin.pos') }}" class="{{ 'active' if request.endpoint == 'admin.pos' }}">
-        <span class="icon">🧾</span>POS</a></li>
+        <span class="icon">🧾</span>Walk-in Orders</a></li>
+      {% if not is_order_screen_user %}
       <li><a href="{{ url_for('admin.vendors') }}" class="{{ 'active' if 'vendor' in request.endpoint }}">
         <span class="icon">🏢</span>Vendors</a></li>
-      <li><a href="{{ url_for('admin.purchase_orders') }}" class="{{ 'active' if 'purchase_order' in request.endpoint }}">
+      <li><a href="{{ url_for('admin.purchase_orders') }}" class="{{ 'active' if request.endpoint in ['admin.purchase_orders', 'admin.new_purchase_order', 'admin.purchase_order_detail'] }}">
         <span class="icon">📋</span>Purchase Orders</a></li>
+      <li><a href="{{ url_for('admin.purchase_order_updates') }}" class="{{ 'active' if request.endpoint == 'admin.purchase_order_updates' }}">
+        <span class="icon">🔔</span>Purchase Updates</a></li>
+      {% endif %}
       {% endif %}
       {% if can_admin_owner %}
       <li><a href="{{ url_for('admin.staff') }}" class="{{ 'active' if 'staff' in request.endpoint }}">
@@ -181,7 +199,7 @@
       <li><a href="{{ url_for('admin.offline_admin') }}" class="{{ 'active' if request.endpoint == 'admin.offline_admin' }}">
         <span class="icon">📴</span>Offline / Sync</a></li>
       {% endif %}
-      {% if can_admin_operations %}
+      {% if can_admin_operations and not is_order_screen_user %}
       <li><a href="{{ url_for('admin.qr_scanner') }}" class="{{ 'active' if request.endpoint == 'admin.qr_scanner' }}">
         <span class="icon">📷</span>QR Scanner</a></li>
       {% endif %}
@@ -192,7 +210,7 @@
       {% endif %}
     </ul>
   </aside>
-  <main class="admin-main">{% block content %}{% endblock %}</main>
+  <main class="admin-main" id="admin-main" tabindex="-1" aria-live="polite">{% block content %}{% endblock %}</main>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -215,6 +233,8 @@
 })();
 </script>
 
+<div id="admin-page-scripts" hidden aria-hidden="true">
 {% block scripts %}{% endblock %}
+</div>
 </body>
 </html>

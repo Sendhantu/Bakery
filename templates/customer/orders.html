@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}My Orders — {{ bakery_name }}{% endblock %}
 {% block content %}
-<div class="page-wrap" data-live-refresh="30000" data-live-refresh-source="{{ request.full_path.rstrip('?') }}">
+<div class="page-wrap" data-live-refresh="5000" data-live-refresh-source="{{ request.full_path.rstrip('?') }}">
 <div class="container">
   <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
     <h1 class="section-title" style="margin-bottom:0">📦 My Orders</h1>

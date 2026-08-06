@@ -36,9 +36,11 @@ if hasattr(app.jinja_loader, "searchpath"):
 
 
 if __name__ == "__main__":
-    app.run(
+    ROOT_APP_MODULE.socketio.run(
+        app,
         debug=config_name != "production",
         host="127.0.0.1",
         port=APP_PORT,
         use_reloader=False,
+        allow_unsafe_werkzeug=True,
     )

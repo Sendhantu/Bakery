@@ -13,6 +13,8 @@ services:
     envVars:
       - key: FLASK_ENV
         value: production
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: PORTAL_ROLE
         value: customer
       - key: SECRET_KEY
@@ -88,13 +90,31 @@ services:
       # Production settings
       - key: USE_PROXY_FIX
         value: "true"
+      - key: FORCE_HTTPS
+        value: "true"
       - key: CUSTOMER_PORTAL_URL
         sync: false
       - key: SHOW_DEMO_ACCOUNTS
         value: "false"
+      - key: DEVELOPMENT_CREDENTIALS_ENABLED
+        value: "false"
+      - key: BOOTSTRAP_SEED_DATA
+        value: "false"
+      - key: AUTO_INIT_DB
+        value: "false"
       - key: OFFLINE_SYNC_ENABLED
         value: "false"
+      - key: ENABLE_LOCAL_SYNC_WORKER
+        value: "false"
+      - key: ENABLE_PORTAL_SIDECARS
+        value: "false"
       - key: STORAGE_REQUIRED
+        value: "true"
+      - key: AI_ASSISTANT_ENABLED
+        value: "false"
+      - key: AI_SUPPORT_BOT_ENABLED
+        value: "false"
+      - key: AI_PUSH_RECOMMENDATIONS_ENABLED
         value: "false"
       - key: SOCKETIO_ASYNC_MODE
         value: gevent
@@ -131,6 +151,8 @@ services:
     envVars:
       - key: FLASK_ENV
         value: production
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: PORTAL_ROLE
         value: customer
       - key: SECRET_KEY
@@ -271,9 +293,29 @@ services:
           envVarKey: SENTRY_DSN
       - key: USE_PROXY_FIX
         value: "true"
+      - key: FORCE_HTTPS
+        value: "true"
       - key: SHOW_DEMO_ACCOUNTS
         value: "false"
+      - key: DEVELOPMENT_CREDENTIALS_ENABLED
+        value: "false"
+      - key: BOOTSTRAP_SEED_DATA
+        value: "false"
+      - key: AUTO_INIT_DB
+        value: "false"
       - key: OFFLINE_SYNC_ENABLED
+        value: "false"
+      - key: ENABLE_LOCAL_SYNC_WORKER
+        value: "false"
+      - key: ENABLE_PORTAL_SIDECARS
+        value: "false"
+      - key: STORAGE_REQUIRED
+        value: "true"
+      - key: AI_ASSISTANT_ENABLED
+        value: "false"
+      - key: AI_SUPPORT_BOT_ENABLED
+        value: "false"
+      - key: AI_PUSH_RECOMMENDATIONS_ENABLED
         value: "false"
       - key: SOCKETIO_ASYNC_MODE
         value: gevent

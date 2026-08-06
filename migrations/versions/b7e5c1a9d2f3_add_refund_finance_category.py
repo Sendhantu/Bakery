@@ -7,6 +7,7 @@ Create Date: 2026-07-28 16:45:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from datetime import datetime
 
 
 revision = "b7e5c1a9d2f3"
@@ -24,6 +25,7 @@ def upgrade():
         sa.column("is_system", sa.Boolean),
         sa.column("is_active", sa.Boolean),
         sa.column("sort_order", sa.Integer),
+        sa.column("created_at", sa.DateTime),
     )
     bind = op.get_bind()
     existing = bind.execute(
@@ -38,6 +40,7 @@ def upgrade():
                 is_system=True,
                 is_active=True,
                 sort_order=65,
+                created_at=datetime.utcnow(),
             )
         )
 

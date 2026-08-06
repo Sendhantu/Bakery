@@ -54,7 +54,7 @@
 
       <div class="portal-auth-footer">
         {% if current_portal_role == 'customer' %}
-        <p class="text-sm text-muted">Don’t have an account? <a href="{{ url_for('auth.register') }}">Register here</a></p>
+        <p class="text-sm text-muted">Don’t have an account? <a href="{{ url_for('auth.register', next=request.args.get('next')) if request.args.get('next') else url_for('auth.register') }}">Register here</a></p>
         {% else %}
         <p class="text-sm text-muted">Need a customer account? <a href="{{ portal_urls.customer }}/auth/register" target="_blank" rel="noopener">Register on the storefront</a></p>
         {% endif %}

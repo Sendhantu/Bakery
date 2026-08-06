@@ -23,7 +23,7 @@
       <div style="border-radius:var(--radius-xl);overflow:hidden;background:var(--cream-dark);aspect-ratio:1;position:relative">
         <img src="{{ product.image_src }}"
              alt="{{ product.name }}"
-             style="width:100%;height:100%;object-fit:cover"
+             style="width:100%;height:100%;object-fit:{{ product.image_object_fit }};object-position:{{ product.image_object_position }}"
              fetchpriority="high" decoding="async"
              onerror="this.onerror=null;this.src='{{ product.fallback_image_src }}'">
         {% if product.is_eggless %}
@@ -36,8 +36,12 @@
     <div>
       <div class="flex gap-2 items-center mb-2">
         <span class="badge badge-brown">{{ product.category.name if product.category else '—' }}</span>
+        <span class="badge {% if product.is_eggless %}badge-green{% else %}badge-orange{% endif %}">{{ product.egg_status_label }}</span>
         {% if product.preorder_required %}
         <span class="badge badge-orange">Requires {{ product.minimum_notice_hours }}h preorder</span>
+        {% endif %}
+        {% if product.special_ingredient %}
+        <span class="badge badge-purple">Special Ingredient</span>
         {% endif %}
         {% if product.occasion_tags %}
         {% for tag in product.occasion_tags.split(',') %}
@@ -165,13 +169,37 @@
     </div>
 
     <div id="tab-ingredients" class="tab-content" style="display:block">
-      {% if product.ingredients %}
-      <div style="display:flex;flex-wrap:wrap;gap:0.75rem">
-        {% for ing in product.ingredients.split(',') %}
-        <span class="badge badge-brown" style="padding:0.4rem 0.9rem">{{ ing.strip() }}</span>
-        {% endfor %}
+      <div style="display:flex;flex-direction:column;gap:1rem;max-width:760px">
+        <div class="detail-card">
+          <h3>Egg Type</h3>
+          <div class="detail-list">
+            <span>{{ product.egg_status_label }}</span>
+          </div>
+        </div>
+        {% if product.special_ingredient %}
+        <div class="detail-card">
+          <h3>Special Ingredient</h3>
+          <div class="detail-list">
+            <span>{{ product.special_ingredient }}</span>
+          </div>
+        </div>
+        {% endif %}
+        {% if product.ingredients %}
+        <div class="detail-card">
+          <h3>Ingredients</h3>
+          <div style="display:flex;flex-wrap:wrap;gap:0.75rem">
+            {% for ing in product.ingredients.split(',') %}
+            {% if ing.strip() %}
+            <span class="badge badge-brown" style="padding:0.4rem 0.9rem">{{ ing.strip() }}</span>
+            {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if not product.ingredients and not product.special_ingredient %}
+        <p class="text-muted">No ingredient information available.</p>
+        {% endif %}
       </div>
-      {% else %}<p class="text-muted">No ingredient information available.</p>{% endif %}
     </div>
 
     <div id="tab-preparation" class="tab-content" style="display:none">
@@ -270,6 +298,7 @@
           <a href="{{ url_for('customer.product_detail', product_id=p.id) }}">
             <img src="{{ p.image_src }}"
                  alt="{{ p.name }}" class="product-card-img" loading="lazy" decoding="async"
+                 style="--product-image-fit: {{ p.image_object_fit }}; --product-image-position: {{ p.image_object_position }};"
                  onerror="this.onerror=null;this.src='{{ p.fallback_image_src }}'">
           </a>
         </div>

@@ -86,28 +86,23 @@ def upgrade():
     op.create_index(
         "idx_purchase_order_item_material", "purchase_order_items", ["raw_material_id"]
     )
-    op.add_column(
-        "financial_transactions",
-        sa.Column("reference_purchase_order_id", sa.Integer(), nullable=True),
-    )
-    op.add_column(
-        "financial_transactions",
-        sa.Column("vendor_id", sa.Integer(), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_financial_transactions_purchase_order",
-        "financial_transactions",
-        "purchase_orders",
-        ["reference_purchase_order_id"],
-        ["id"],
-    )
-    op.create_foreign_key(
-        "fk_financial_transactions_vendor",
-        "financial_transactions",
-        "vendors",
-        ["vendor_id"],
-        ["id"],
-    )
+    with op.batch_alter_table("financial_transactions", schema=None) as batch_op:
+        batch_op.add_column(
+            sa.Column("reference_purchase_order_id", sa.Integer(), nullable=True)
+        )
+        batch_op.add_column(sa.Column("vendor_id", sa.Integer(), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_financial_transactions_purchase_order",
+            "purchase_orders",
+            ["reference_purchase_order_id"],
+            ["id"],
+        )
+        batch_op.create_foreign_key(
+            "fk_financial_transactions_vendor",
+            "vendors",
+            ["vendor_id"],
+            ["id"],
+        )
     op.create_index(
         "idx_fin_txn_purchase_order",
         "financial_transactions",
@@ -123,18 +118,17 @@ def upgrade():
 def downgrade():
     op.drop_index("idx_fin_txn_vendor_created", table_name="financial_transactions")
     op.drop_index("idx_fin_txn_purchase_order", table_name="financial_transactions")
-    op.drop_constraint(
-        "fk_financial_transactions_vendor",
-        "financial_transactions",
-        type_="foreignkey",
-    )
-    op.drop_constraint(
-        "fk_financial_transactions_purchase_order",
-        "financial_transactions",
-        type_="foreignkey",
-    )
-    op.drop_column("financial_transactions", "vendor_id")
-    op.drop_column("financial_transactions", "reference_purchase_order_id")
+    with op.batch_alter_table("financial_transactions", schema=None) as batch_op:
+        batch_op.drop_constraint(
+            "fk_financial_transactions_vendor",
+            type_="foreignkey",
+        )
+        batch_op.drop_constraint(
+            "fk_financial_transactions_purchase_order",
+            type_="foreignkey",
+        )
+        batch_op.drop_column("vendor_id")
+        batch_op.drop_column("reference_purchase_order_id")
     op.drop_index("idx_purchase_order_item_material", table_name="purchase_order_items")
     op.drop_index("idx_purchase_order_item_order", table_name="purchase_order_items")
     op.drop_table("purchase_order_items")

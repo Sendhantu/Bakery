@@ -12,6 +12,7 @@
       <form method="POST" action="{{ url_for('admin.refresh_demand_weather') }}">
         <button type="submit" class="btn btn-outline btn-sm">Refresh Weather</button>
       </form>
+      <button type="button" class="btn btn-primary btn-sm" data-toggle-target="#add-local-event-form" data-toggle-hide-self>Add Local Event</button>
       <a href="{{ url_for('admin.triage') }}" class="btn btn-ghost btn-sm">Open Smart Triage</a>
     </div>
   </div>
@@ -90,7 +91,39 @@
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,0.85fr);gap:1rem;align-items:start">
+  <div id="add-local-event-form" class="card hidden" style="margin-bottom:1rem">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+      <span>Add Local Event</span>
+      <button type="button" class="btn btn-ghost btn-sm" data-hide-target="#add-local-event-form">Cancel</button>
+    </div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.save_local_event') }}" style="display:flex;flex-direction:column;gap:0.75rem">
+        <div>
+          <label class="form-label">Event name</label>
+          <input class="form-control" name="name" required>
+        </div>
+        <div>
+          <label class="form-label">Date</label>
+          <input class="form-control" type="date" name="event_date" required>
+        </div>
+        <div>
+          <label class="form-label">Expected impact</label>
+          <select class="form-control" name="expected_impact">
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Notes</label>
+          <textarea class="form-control" name="notes" rows="3"></textarea>
+        </div>
+        <button class="btn btn-primary" type="submit">Save Event</button>
+      </form>
+    </div>
+  </div>
+
+  <div style="margin-bottom:1rem">
     <div class="card">
       <div class="card-header">Weather Forecast</div>
       <div class="table-wrap">
@@ -112,35 +145,6 @@
       </div>
       <div class="card-body text-sm text-muted">
         Source: {{ forecast.source or 'OpenWeatherMap forecast API' }} · {{ forecast.location_label }} · {{ forecast.status|replace('_', ' ')|title }}
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">Add Local Event</div>
-      <div class="card-body">
-        <form method="POST" action="{{ url_for('admin.save_local_event') }}" style="display:flex;flex-direction:column;gap:0.75rem">
-          <div>
-            <label class="form-label">Event name</label>
-            <input class="form-control" name="name" required>
-          </div>
-          <div>
-            <label class="form-label">Date</label>
-            <input class="form-control" type="date" name="event_date" required>
-          </div>
-          <div>
-            <label class="form-label">Expected impact</label>
-            <select class="form-control" name="expected_impact">
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="low">Low</option>
-            </select>
-          </div>
-          <div>
-            <label class="form-label">Notes</label>
-            <textarea class="form-control" name="notes" rows="3"></textarea>
-          </div>
-          <button class="btn btn-primary" type="submit">Save Event</button>
-        </form>
       </div>
     </div>
   </div>

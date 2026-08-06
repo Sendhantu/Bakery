@@ -6,15 +6,18 @@
     <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Purchase Orders</h1>
     <p class="text-muted">Restock history tied to vendors, inventory, and finance.</p>
   </div>
-  {% if can_admin_manager %}
-  <a href="{{ url_for('admin.new_purchase_order') }}" class="btn btn-primary btn-sm">New Purchase Order</a>
-  {% endif %}
+  <div class="flex gap-2 flex-wrap">
+    <a href="{{ url_for('admin.purchase_order_updates') }}" class="btn btn-outline btn-sm">View Updates</a>
+    {% if can_admin_manager %}
+    <a href="{{ url_for('admin.new_purchase_order') }}" class="btn btn-primary btn-sm">New Purchase Order</a>
+    {% endif %}
+  </div>
 </div>
 
 <section class="card">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>PO</th><th>Vendor</th><th>Date</th><th>Expected</th><th>Status</th><th>Total</th></tr></thead>
+      <thead><tr><th>PO</th><th>Vendor</th><th>Date</th><th>Expected</th><th>Status</th><th>Total</th><th>TDS</th></tr></thead>
       <tbody>
         {% for po in purchase_orders %}
         <tr>
@@ -24,9 +27,18 @@
           <td>{{ po.expected_delivery_date.strftime('%d %b %Y') if po.expected_delivery_date else '—' }}</td>
           <td><span class="badge badge-brown">{{ po.status }}</span></td>
           <td>₹{{ po.subtotal|int }}</td>
+          <td>
+            {% if po.tds_amount and po.tds_amount > 0 %}
+            ₹{{ '%.2f'|format(po.tds_amount) }}<br><span class="text-sm text-muted">{{ po.tds_section }}</span>
+            {% elif po.vendor.tds_enabled %}
+            <span class="badge badge-orange">Configured</span>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="text-center text-muted" style="padding:1rem">No purchase orders yet.</td></tr>
+        <tr><td colspan="7" class="text-center text-muted" style="padding:1rem">No purchase orders yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

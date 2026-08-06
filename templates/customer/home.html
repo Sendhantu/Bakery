@@ -14,6 +14,11 @@
         <div class="hero-kicker mb-3">
           🌟 Artisan Baked Fresh Daily
         </div>
+        {% if current_user.is_authenticated and current_user.role == 'customer' %}
+        <div class="hero-kicker mb-3">
+          👤 Signed in as {{ current_user.name.split()[0] }}
+        </div>
+        {% endif %}
         <h1 class="hero-title">
           Every Occasion<br>Deserves <em>Perfect</em><br>Bakes
         </h1>
@@ -38,9 +43,9 @@
             🎂 Birthday Cakes
           </a>
         </div>
-        <p class="hero-highlight">Order by 3PM for same-day delivery in Coimbatore. Fresh bakes, hand-delivered with care.</p>
+        <p class="hero-highlight">Choose a convenient delivery slot at checkout. Fresh bakes, hand-delivered with care.</p>
         <div class="hero-badges">
-          <span class="hero-badge">⚡ 2-Hour Delivery</span>
+          <span class="hero-badge">⚡ Choose Delivery Slot</span>
           <span class="hero-badge">🌿 Fresh Ingredients</span>
           <span class="hero-badge">🥚 Eggless Options</span>
         </div>
@@ -53,6 +58,7 @@
                  alt="{{ hero_product.name if hero_product else 'Signature celebration cake' }}"
                  fetchpriority="high" decoding="async"
                  width="1200" height="1500"
+                 style="--product-image-fit: {{ hero_product.image_object_fit if hero_product else 'cover' }}; --product-image-position: {{ hero_product.image_object_position if hero_product else 'center center' }};"
                  data-fallback-src="{{ hero_product.fallback_image_src if hero_product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=1200&q=80' }}">
             <div class="hero-visual-caption">
               <div class="hero-visual-caption-kicker">Today’s Signature Bake</div>
@@ -78,8 +84,8 @@
       <div class="home-trust-card">
         <span class="home-trust-card-icon">🚚</span>
         <div>
-          <div class="home-trust-card-value">2-Hour Delivery</div>
-          <div class="home-trust-card-label">On selected bakes</div>
+          <div class="home-trust-card-value">Slot Delivery</div>
+          <div class="home-trust-card-label">Choose your checkout time</div>
         </div>
       </div>
       <div class="home-trust-card">
@@ -101,9 +107,16 @@
 </section>
 
 <!-- AI ASSISTANT -->
-<section class="home-section home-section--white">
+<section class="home-section home-section--white" id="ai-assistant">
   <div class="container">
-    <div class="ai-panel">
+    {% set ai_next = ((request.full_path if request.query_string else request.path) ~ '#ai-assistant') %}
+    {% set ai_login_url = url_for('auth.login', next=ai_next) %}
+    {% set ai_register_url = url_for('auth.register', next=ai_next) %}
+    {% if not current_user.is_authenticated or current_user.role != 'customer' %}
+    {% set ai_auth_title = 'Need help picking the perfect bake?' %}
+    {% include 'customer/_ai_login_prompt.html' %}
+    {% else %}
+    <div class="ai-panel" data-ai-chat data-ai-endpoint="{{ url_for('customer.ai_recommend') }}" data-ai-surface="home">
       <div class="ai-panel-header">
         <div>
           <p class="section-kicker">AI Bakery Assistant</p>
@@ -113,16 +126,18 @@
         <span class="ai-panel-badge">Fast recommendations</span>
       </div>
 
-      <div class="ai-panel-form">
+      <form class="ai-panel-form" data-ai-chat-form>
         <input id="home-ai-query" class="form-control" type="text"
-          placeholder="E.g. chocolate birthday cake under ₹800, eggless gift box, savoury breads" />
-        <button id="home-ai-submit" class="btn btn-caramel">Ask AI</button>
-      </div>
+          placeholder="E.g. chocolate birthday cake under ₹800, eggless gift box, savoury breads"
+          data-ai-chat-input autocomplete="off" />
+        <button id="home-ai-submit" class="btn btn-caramel" type="submit" data-ai-chat-submit>Ask AI</button>
+      </form>
 
-      <div id="home-ai-response" class="ai-panel-response">
-        <div class="ai-panel-note">Type your bakery question above and get personalized product suggestions instantly.</div>
+      <div id="home-ai-response" class="ai-panel-response ai-chat-log" data-ai-chat-log aria-live="polite">
+        <div class="ai-panel-note" data-ai-chat-empty>Type your bakery question above and get personalized product suggestions instantly.</div>
       </div>
     </div>
+    {% endif %}
   </div>
 </section>
 
@@ -158,6 +173,7 @@
         <div class="product-img-wrap">
           <img src="{{ product.image_src }}"
                alt="{{ product.name }}" class="product-card-img" loading="lazy" decoding="async"
+               style="--product-image-fit: {{ product.image_object_fit }}; --product-image-position: {{ product.image_object_position }};"
                data-fallback-src="{{ product.fallback_image_src }}">
           <span class="badge stock-badge
             {% if product.stock_status == 'in_stock' %}badge-green
@@ -270,60 +286,5 @@
     </div>
   </div>
 </section>
-
-<script>
-  async function askHomeAI(event) {
-    event.preventDefault && event.preventDefault();
-    const queryBox = document.getElementById('home-ai-query');
-    const responseBox = document.getElementById('home-ai-response');
-    const query = queryBox.value.trim();
-
-    if (!query) {
-      responseBox.innerHTML = '<div class="ai-error">Please enter what you would like help with.</div>';
-      return;
-    }
-
-    responseBox.innerHTML = '<div class="ai-loading">Finding the best bakery recommendations for you…</div>';
-
-    try {
-      const response = await fetch('{{ url_for('customer.ai_recommend') }}', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query }),
-      });
-      const result = await response.json();
-      if (!result.ok) {
-        responseBox.innerHTML = `<div class="ai-error">${result.message || 'Unable to get recommendations.'}</div>`;
-        return;
-      }
-
-      const productsHtml = result.products.length
-        ? result.products.map(product => `
-          <div class="ai-product-card">
-            <div class="ai-product-card-title">${product.name} — ₹${product.price.toFixed(0)}</div>
-            <div class="ai-product-card-meta">${product.category}</div>
-            <div class="ai-product-card-desc">${product.description || 'A delicious bakery choice.'}</div>
-          </div>
-        `).join('')
-        : '<div class="ai-empty">No matching bakes found. Try another query.</div>';
-
-      responseBox.innerHTML = `
-        <div class="ai-message">${result.message}</div>
-        <div class="ai-products">${productsHtml}</div>
-      `;
-    } catch (error) {
-      console.error(error);
-      responseBox.innerHTML = '<div class="ai-error">Something went wrong while fetching recommendations. Please try again.</div>';
-    }
-  }
-
-  document.getElementById('home-ai-submit').addEventListener('click', askHomeAI);
-  document.getElementById('home-ai-query').addEventListener('keydown', function (event) {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      askHomeAI();
-    }
-  });
-</script>
 
 {% endblock %}

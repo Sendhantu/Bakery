@@ -1,0 +1,399 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}{{ material.name }} - Raw Material - Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <a href="{{ url_for('admin.raw_materials') }}" class="btn btn-ghost btn-sm" style="margin-bottom:0.5rem">← All Raw Materials</a>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">{{ material.name }}</h1>
+    <div class="flex gap-2 flex-wrap">
+      {% if material.sku %}<span class="badge badge-brown">{{ material.sku }}</span>{% endif %}
+      {% if material.category %}<span class="badge badge-blue">{{ material.category }}</span>{% endif %}
+      {% if stock_status == 'out_of_stock' %}
+      <span class="badge badge-red">Out of Stock</span>
+      {% elif stock_status == 'low_stock' %}
+      <span class="badge badge-orange">Low Stock</span>
+      {% else %}
+      <span class="badge badge-green">In Stock</span>
+      {% endif %}
+      {% if expiry_summary and expiry_summary.status == 'expired' %}
+      <span class="badge badge-red">Expired</span>
+      {% elif expiry_summary and expiry_summary.status == 'expiring_soon' %}
+      <span class="badge badge-orange">Expiring Soon</span>
+      {% endif %}
+      {% if not material.is_active %}
+      <span class="badge badge-brown">Paused</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="flex gap-2 flex-wrap">
+    {% if can_admin_manager %}
+    <button type="button" class="btn btn-primary" data-toggle-target="#edit-material-form" data-toggle-hide-self>Edit Details</button>
+    <form method="POST" action="{{ url_for('admin.toggle_raw_material_status', material_id=material.id) }}" style="display:inline">
+      <button type="submit" class="btn btn-ghost" style="color:{% if material.is_active %}var(--dusty-rose){% else %}var(--sage){% endif %}">
+        {% if material.is_active %}Pause Material{% else %}Enable Material{% endif %}
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card brown"><div class="stat-value">{{ usable_quantity }}</div><div class="stat-label">Available ({{ material.unit }})</div></div>
+  <div class="stat-card brown"><div class="stat-value">{{ material.stock }}</div><div class="stat-label">Stock On Hand</div></div>
+  <div class="stat-card brown"><div class="stat-value">{{ material.reserved_quantity or 0 }}</div><div class="stat-label">Reserved</div></div>
+  <div class="stat-card rose"><div class="stat-value">{{ material.reorder_level or 0 }}</div><div class="stat-label">Reorder Level</div></div>
+  <div class="stat-card green"><div class="stat-value">₹{{ '{:,.2f}'.format(inventory_value) }}</div><div class="stat-label">Inventory Value</div></div>
+  <div class="stat-card blue">
+    <div class="stat-value">
+      {% if expiry_summary and expiry_summary.nearest %}{{ expiry_summary.nearest.strftime('%d %b %Y') }}{% else %}—{% endif %}
+    </div>
+    <div class="stat-label">
+      {% if expiry_summary and expiry_summary.status == 'expired' %}Expired{% elif expiry_summary and expiry_summary.status == 'expiring_soon' %}Expiring Soon{% elif expiry_summary and expiry_summary.status == 'ok' %}Next Expiry{% else %}Expiry Not Tracked{% endif %}
+    </div>
+  </div>
+</div>
+
+{% if last_purchase %}
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">Last Purchase</div>
+  <div class="card-body raw-material-last-purchase">
+    <div>
+      <span class="text-muted">Vendor</span><br>
+      <strong>{{ last_purchase.vendor.name if last_purchase.vendor else '—' }}</strong>
+    </div>
+    <div>
+      <span class="text-muted">Ordered</span><br>
+      <strong>{{ last_purchase.purchase_order.order_date.strftime('%d %b %Y') }}</strong>
+    </div>
+    <div>
+      <span class="text-muted">Quantity</span><br>
+      <strong>{{ last_purchase.quantity }} {{ material.unit }}</strong>
+    </div>
+    <div>
+      <span class="text-muted">Unit Cost</span><br>
+      <strong>₹{{ last_purchase.unit_cost }}</strong>
+    </div>
+    <div>
+      <span class="text-muted">PO #</span><br>
+      <strong><a href="{{ url_for('admin.purchase_order_detail', order_id=last_purchase.purchase_order.id) }}">#{{ last_purchase.purchase_order.id }}</a></strong>
+    </div>
+    <div>
+      <span class="text-muted">PO Status</span><br>
+      <strong>{{ last_purchase.purchase_order.status|title }}</strong>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if can_admin_manager %}
+<div class="card" id="stock-actions" style="margin-bottom:1.5rem">
+  <div class="card-header">Record Stock Change</div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('admin.record_material_stock_action', material_id=material.id) }}" class="raw-material-stock-form">
+      <div class="form-group">
+        <label class="form-label">Action</label>
+        <select class="form-control" name="action" required>
+          <option value="">Choose action</option>
+          <option value="add">Add Stock (purchase / restock)</option>
+          <option value="usage">Usage (used in production)</option>
+          <option value="wastage">Wastage</option>
+          <option value="damage">Damage</option>
+          <option value="expired">Expired</option>
+          <option value="return">Return to Supplier</option>
+          <option value="adjust">Manual Adjustment (signed)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Quantity ({{ material.unit }})</label>
+        <input class="form-control" type="number" step="0.01" name="quantity" required placeholder="e.g. 5 or -2 for adjustment">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Batch (optional)</label>
+        <select class="form-control" name="reference_batch_id">
+          <option value="">No batch</option>
+          {% for batch in batches %}
+          {% if batch.status in ['available', 'partially_used'] and batch.remaining_quantity > 0 %}
+          <option value="{{ batch.id }}">{{ batch.batch_number }} · {{ batch.remaining_quantity }} left{% if batch.expiry_date %} · exp {{ batch.expiry_date.strftime('%d %b %Y') }}{% endif %}</option>
+          {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <input class="form-control" name="notes" placeholder="Optional note">
+      </div>
+      <button type="submit" class="btn btn-primary">Apply Stock Change</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">Details</div>
+  <div class="card-body">
+    <dl class="raw-material-detail-grid">
+      <div><dt>Unit</dt><dd>{{ material.unit }}</dd></div>
+      <div><dt>SKU</dt><dd>{{ material.sku or '—' }}</dd></div>
+      <div><dt>Category</dt><dd>{{ material.category or '—' }}</dd></div>
+      <div><dt>Reorder Level</dt><dd>{{ material.reorder_level or 0 }} {{ material.unit }}</dd></div>
+      <div><dt>Min / Max Stock</dt><dd>{{ material.min_stock or 0 }} / {{ material.max_stock or '—' }}</dd></div>
+      <div><dt>Cost per Unit</dt><dd>₹{{ material.cost_per_unit or 0 }}</dd></div>
+      <div><dt>Tax Rate</dt><dd>{{ material.tax_rate_percent or 0 }}%</dd></div>
+      <div><dt>Preferred Supplier</dt><dd>{{ supplier_name or '—' }}</dd></div>
+      <div><dt>Storage Location</dt><dd>{{ material.storage_location or '—' }}</dd></div>
+      <div><dt>Shelf Life</dt><dd>{{ (material.shelf_life_days ~ ' days') if material.shelf_life_days else '—' }}</dd></div>
+      <div><dt>Expiring Soon Window</dt><dd>{{ material.expiring_soon_days }} days</dd></div>
+      <div><dt>Last Purchased</dt><dd>{{ material.last_purchased_at.strftime('%d %b %Y') if material.last_purchased_at else 'Never' }}</dd></div>
+      <div><dt>Notes</dt><dd>{{ material.notes or '—' }}</dd></div>
+      <div><dt>Last Updated</dt><dd>{{ material.updated_at.strftime('%d %b %Y %H:%M') if material.updated_at else '—' }}{% if material.updater %} by {{ material.updater.name }}{% endif %}</dd></div>
+    </dl>
+  </div>
+</div>
+
+{% if can_admin_manager %}
+<div id="edit-material-form" class="card hidden" style="margin-bottom:1.5rem">
+  <div class="card-header raw-material-create-header">
+    <span>Edit Details</span>
+    <button type="button" class="btn btn-ghost btn-sm" data-hide-target="#edit-material-form">Cancel</button>
+  </div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('admin.update_raw_material_details', material_id=material.id) }}">
+      <div class="raw-material-create-grid">
+        <div class="form-group">
+          <label class="form-label">Material Name *</label>
+          <input class="form-control" name="name" value="{{ material.name }}" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">SKU</label>
+          <input class="form-control" name="sku" value="{{ material.sku or '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <input class="form-control" name="category" value="{{ material.category or '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Unit *</label>
+          <input class="form-control" name="unit" value="{{ material.unit }}" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Reorder Level</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="reorder_level" value="{{ material.reorder_level }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Min Stock</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="min_stock" value="{{ material.min_stock or '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Max Stock</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="max_stock" value="{{ material.max_stock or '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tax Rate (%)</label>
+          <input class="form-control" type="number" step="0.001" min="0" name="tax_rate_percent" value="{{ material.tax_rate_percent or '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Preferred Supplier</label>
+          <select class="form-control" name="preferred_supplier_id">
+            <option value="">No preferred supplier</option>
+            {% for option in vendors %}
+            <option value="{{ option.id }}" {% if material.preferred_supplier_id == option.id %}selected{% endif %}>{{ option.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Storage Location</label>
+          <input class="form-control" name="storage_location" value="{{ material.storage_location or '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Shelf Life (days)</label>
+          <input class="form-control" type="number" min="0" name="shelf_life_days" value="{{ material.shelf_life_days or '' }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Expiring Soon Window (days)</label>
+          <input class="form-control" type="number" min="1" name="expiring_soon_days" value="{{ material.expiring_soon_days }}">
+        </div>
+        <div class="form-group" style="grid-column:span 2">
+          <label class="form-label">Notes</label>
+          <textarea class="form-control" name="notes">{{ material.notes or '' }}</textarea>
+        </div>
+      </div>
+      <p class="text-muted" style="margin:0.5rem 0 1rem">Stock and cost are managed through stock ledger actions and purchase orders — not this form.</p>
+      <button type="submit" class="btn btn-primary">Save Details</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">Batches &amp; Expiry Tracking</div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Batch</th>
+          <th>Received / Remaining</th>
+          <th>Unit Cost</th>
+          <th>Manufactured</th>
+          <th>Expires</th>
+          <th>Status</th>
+          <th>Source</th>
+          {% if can_admin_manager %}<th>Change Status</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for batch in batches %}
+        <tr>
+          <td><strong>{{ batch.batch_number }}</strong></td>
+          <td>{{ batch.received_quantity }} / {{ batch.remaining_quantity }} {{ material.unit }}</td>
+          <td>₹{{ batch.unit_cost or '—' }}</td>
+          <td>{{ batch.manufacturing_date.strftime('%d %b %Y') if batch.manufacturing_date else '—' }}</td>
+          <td>
+            {{ batch.expiry_date.strftime('%d %b %Y') if batch.expiry_date else '—' }}
+            {% if batch.expiry_date %}
+              {% if batch.days_to_expiry is not none and batch.days_to_expiry < 0 %}
+              <span class="badge badge-red">Expired</span>
+              {% elif batch.days_to_expiry is not none and batch.days_to_expiry <= material.expiring_soon_days %}
+              <span class="badge badge-orange">{{ batch.days_to_expiry }} days</span>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td><span class="badge {% if batch.status in ['expired','damaged','returned','blocked'] %}badge-red{% elif batch.status == 'fully_used' %}badge-brown{% else %}badge-green{% endif %}">{{ batch_status_labels.get(batch.status, batch.status)|title }}</span></td>
+          <td>
+            {% if batch.purchase_order %}
+            <a href="{{ url_for('admin.purchase_order_detail', order_id=batch.purchase_order.id) }}">PO #{{ batch.purchase_order.id }}</a>
+            {% else %}—{% endif %}
+            {% if batch.supplier %}<div class="text-muted text-sm">{{ batch.supplier.name }}</div>{% endif %}
+          </td>
+          {% if can_admin_manager %}
+          <td>
+            <form method="POST" action="{{ url_for('admin.set_material_batch_status', material_id=material.id, batch_id=batch.id) }}" class="raw-material-stock-form">
+              <select class="form-control" name="status">
+                {% for value, label in batch_status_options %}
+                <option value="{{ value }}" {% if batch.status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-ghost btn-sm">Save</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr><td colspan="{% if can_admin_manager %}8{% else %}7{% endif %}" class="text-center text-muted">No batches tracked yet. Batches are created when a purchase order is received.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">Purchase History</div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>PO #</th>
+          <th>Date</th>
+          <th>Vendor</th>
+          <th>Quantity</th>
+          <th>Unit Cost</th>
+          <th>Total</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item, po in purchases %}
+        <tr>
+          <td><a href="{{ url_for('admin.purchase_order_detail', order_id=po.id) }}">#{{ po.id }}</a></td>
+          <td>{{ po.order_date.strftime('%d %b %Y') }}</td>
+          <td>{{ po.vendor.name if po.vendor else '—' }}</td>
+          <td>{{ item.quantity }} {{ material.unit }}</td>
+          <td>₹{{ item.unit_cost }}</td>
+          <td>₹{{ item.line_total }}</td>
+          <td><span class="badge {% if po.status == 'received' %}badge-green{% elif po.status == 'cancelled' %}badge-red{% else %}badge-orange{% endif %}">{{ po.status|title }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted">No purchases recorded yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">
+    Documents &amp; Attachments
+    {% if can_admin_manager %}
+    <button type="button" class="btn btn-outline btn-sm" data-toggle-target="#upload-document-form" data-toggle-hide-self>Upload Document</button>
+    {% endif %}
+  </div>
+  {% if can_admin_manager %}
+  <div id="upload-document-form" class="card-body hidden" style="border-bottom:1px solid var(--border)">
+    <form method="POST" action="{{ url_for('admin.upload_material_document', material_id=material.id) }}" enctype="multipart/form-data" class="raw-material-stock-form">
+      <div class="form-group">
+        <label class="form-label">Document Type</label>
+        <select class="form-control" name="doc_type" required>
+          {% for value, label in document_type_options %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">File</label>
+        <input class="form-control" type="file" name="document" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Upload</button>
+    </form>
+  </div>
+  {% endif %}
+  <div class="card-body">
+    {% for document in documents %}
+    <div class="flex justify-between items-center gap-2 flex-wrap" style="padding:0.4rem 0;border-bottom:1px dashed var(--border)">
+      <div>
+        <span class="badge badge-blue">{{ document_type_labels.get(document.doc_type, document.doc_type) }}</span>
+        <strong style="margin-left:0.5rem">{{ document.original_filename }}</strong>
+        <span class="text-muted text-sm">
+          · {{ '%.1f KB'|format(document.size_bytes / 1024) if document.size_bytes else '' }}
+          · {{ document.created_at.strftime('%d %b %Y') }}
+          {% if document.uploader %} by {{ document.uploader.name }}{% endif %}
+        </span>
+      </div>
+      <a href="{{ url_for('admin.material_document_file', document_id=document.id) }}" class="btn btn-outline btn-sm" target="_blank" rel="noopener">Download</a>
+    </div>
+    {% else %}
+    <p class="text-muted" style="margin:0">No documents attached.</p>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Stock Movement History</div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Reason</th>
+          <th>Change</th>
+          <th>Stock After</th>
+          <th>Notes</th>
+          <th>Actor</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for movement in movements %}
+        <tr>
+          <td>{{ movement.created_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td><span class="badge badge-brown">{{ movement_reason_labels.get(movement.reason, movement.reason)|title }}</span></td>
+          <td style="color:{{ '#b23b3b' if movement.change_amount < 0 else '#3a7d44' }}">{{ '+' if movement.change_amount > 0 else '' }}{{ movement.change_amount }}</td>
+          <td>{{ movement.stock_after }}</td>
+          <td class="text-muted">{{ movement.notes or '—' }}{% if movement.reference_purchase_order %}<div>PO #{{ movement.reference_purchase_order.id }}</div>{% endif %}</td>
+          <td>{{ movement.actor.name if movement.actor else 'System' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted">No stock movements recorded.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

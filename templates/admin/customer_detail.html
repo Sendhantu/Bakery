@@ -11,7 +11,7 @@
       <p><strong>Email:</strong> {{ user.email }}</p><p><strong>Phone:</strong> {{ user.phone or '—' }}</p>
       <p><strong>Role:</strong> {{ user.role }}</p><p><strong>Joined:</strong> {{ user.created_at.strftime('%d %b %Y') }}</p>
       <div class="mt-2 flex gap-2">
-        <a href="{{ url_for('admin.chat_thread', customer_id=user.id) }}" class="btn btn-outline btn-sm">💬 Chat</a>
+        <a href="{{ url_for('admin.chat_thread', customer_id=user.id) }}" class="btn btn-outline btn-sm">💬 Support</a>
         {% if user.phone %}<a href="tel:{{ user.phone }}" class="btn btn-ghost btn-sm">📞 Call</a>{% endif %}
       </div>
     </div>
@@ -27,6 +27,175 @@
     </div>
   </div>
 </div>
+
+<div class="card mt-3">
+  <div class="card-header">Risk Management</div>
+  <div class="card-body">
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+      <span class="badge {% if risk.profile.risk_status == 'normal' %}badge-green{% elif risk.profile.risk_status == 'confirmed_fraud' %}badge-red{% else %}badge-orange{% endif %}">
+        Risk: {{ risk.profile.risk_status|replace('_',' ') }}
+      </span>
+      <span class="badge {% if risk.profile.account_status == 'active' %}badge-green{% elif risk.profile.account_status in ['suspended','blocked','soft_deleted','anonymized','permanently_deleted'] %}badge-red{% else %}badge-orange{% endif %}">
+        Account: {{ risk.profile.account_status|replace('_',' ') }}
+      </span>
+      {% if risk.profile.case_owner %}<span class="badge badge-brown">Owner: {{ risk.profile.case_owner.name }}</span>{% endif %}
+      {% if risk.unresolved_alerts %}<span class="badge badge-red">{{ risk.unresolved_alerts }} open alert(s)</span>{% endif %}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
+      <div>
+        <h4 style="color:var(--brown);margin-bottom:0.5rem">Flag for Review</h4>
+        <form method="post" action="{{ url_for('admin.customer_risk_flag', user_id=user.id) }}">
+          <select name="reason_category" class="form-control" required>
+            <option value="">Select reason…</option>
+            {% for reason in flag_reasons %}
+            <option value="{{ reason }}">{{ flag_reason_labels[reason] }}</option>
+            {% endfor %}
+          </select>
+          <input type="text" name="reason" class="form-control mt-2" placeholder="Short reason" required>
+          <textarea name="notes" class="form-control mt-2" placeholder="Notes"></textarea>
+          <input type="text" name="evidence" class="form-control mt-2" placeholder="Evidence reference (optional)">
+          <input type="text" name="order_ids" class="form-control mt-2" placeholder="Related order IDs (space or comma separated)">
+          <button class="btn btn-primary btn-sm mt-2">Flag customer</button>
+        </form>
+      </div>
+
+      <div>
+        <h4 style="color:var(--brown);margin-bottom:0.5rem">Case Review</h4>
+        <form method="post" action="{{ url_for('admin.customer_risk_review', user_id=user.id) }}">
+          <select name="action" class="form-control" required>
+            <option value="start_review">Start review</option>
+            <option value="keep_monitoring">Keep monitoring</option>
+            <option value="escalate">Escalate</option>
+            <option value="clear_case">Clear case (back to normal)</option>
+          </select>
+          <textarea name="notes" class="form-control mt-2" placeholder="Review notes"></textarea>
+          <button class="btn btn-outline btn-sm mt-2">Apply review action</button>
+        </form>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-top:1.5rem">
+      <div>
+        <h4 style="color:var(--brown);margin-bottom:0.5rem">Restrictions</h4>
+        {% if risk.restrictions %}
+        <div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:0.75rem">
+          {% for r in risk.restrictions %}
+          <div style="border:1px solid var(--border);border-radius:0.5rem;padding:0.5rem 0.75rem;display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <strong>{{ restriction_labels.get(r.restriction_type, r.restriction_type) }}</strong>
+              {% if r.is_temporary %}<span class="text-muted"> (until {{ r.expires_at.strftime('%d %b %Y') }})</span>{% else %}<span class="badge badge-red">permanent</span>{% endif %}
+              <div class="text-sm text-muted">{{ r.reason }}</div>
+            </div>
+            <form method="post" action="{{ url_for('admin.customer_risk_restrict', user_id=user.id) }}" class="flex" style="gap:0.35rem">
+              <input type="hidden" name="restriction_type" value="__lift__">
+              <input type="hidden" name="restriction_id" value="{{ r.id }}">
+              <input type="text" name="reason" class="form-control" placeholder="Lift reason" required style="width:9rem">
+              <button class="btn btn-ghost btn-sm">Lift</button>
+            </form>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}<p class="text-muted">No active restrictions.</p>{% endif %}
+        <form method="post" action="{{ url_for('admin.customer_risk_restrict', user_id=user.id) }}" style="display:grid;gap:0.5rem">
+          <select name="restriction_type" class="form-control">
+            <option value="">Add restriction…</option>
+            {% for rtype in restriction_types %}
+            <option value="{{ rtype }}">{{ restriction_labels[rtype] }}</option>
+            {% endfor %}
+          </select>
+          <input type="number" name="duration_days" class="form-control" placeholder="Duration in days (blank = permanent)">
+          <input type="text" name="reason" class="form-control" placeholder="Reason" required>
+          <button class="btn btn-outline btn-sm">Apply restriction</button>
+        </form>
+      </div>
+
+      <div>
+        <h4 style="color:var(--brown);margin-bottom:0.5rem">Account Actions</h4>
+        <div style="display:flex;flex-direction:column;gap:0.6rem">
+          <form method="post" action="{{ url_for('admin.customer_risk_suspend', user_id=user.id) }}" class="flex" style="gap:0.35rem">
+            <input type="text" name="reason" class="form-control" placeholder="Suspension reason" required>
+            <input type="number" name="duration_days" class="form-control" placeholder="Days" style="width:5rem">
+            <button class="btn btn-outline btn-sm">Suspend</button>
+          </form>
+          <form method="post" action="{{ url_for('admin.customer_risk_restore', user_id=user.id) }}" class="flex" style="gap:0.35rem">
+            <input type="text" name="reason" class="form-control" placeholder="Restore reason" required>
+            <button class="btn btn-ghost btn-sm">Restore</button>
+          </form>
+          {% if can_admin_manager %}
+          <form method="post" action="{{ url_for('admin.customer_risk_block', user_id=user.id) }}" class="flex" style="gap:0.35rem">
+            <input type="text" name="reason" class="form-control" placeholder="Block reason" required>
+            <button class="btn btn-outline btn-sm">Block</button>
+          </form>
+          <form method="post" action="{{ url_for('admin.customer_risk_confirm_fraud', user_id=user.id) }}" class="flex" style="gap:0.35rem">
+            <input type="text" name="reason" class="form-control" placeholder="Fraud reason" required>
+            <button class="btn btn-outline btn-sm">Confirm fraud</button>
+          </form>
+          <form method="post" action="{{ url_for('admin.customer_risk_soft_delete', user_id=user.id) }}" onsubmit="return confirm('Type DELETE CUSTOMER to soft-delete this account.');">
+            <div class="flex" style="gap:0.35rem">
+              <input type="text" name="reason" class="form-control" placeholder="Deletion reason" required>
+              <input type="text" name="confirm" class="form-control" placeholder="Type: DELETE CUSTOMER" required>
+              <button class="btn btn-danger btn-sm">Soft delete</button>
+            </div>
+          </form>
+          {% endif %}
+          {% if can_admin_owner %}
+          <form method="post" action="{{ url_for('admin.customer_risk_anonymize', user_id=user.id) }}" onsubmit="return confirm('Anonymize permanently removes personal data. Continue?');">
+            <div class="flex" style="gap:0.35rem">
+              <input type="text" name="reason" class="form-control" placeholder="Anonymize reason" required>
+              <button class="btn btn-danger btn-sm">Anonymize</button>
+            </div>
+          </form>
+          <form method="post" action="{{ url_for('admin.customer_risk_delete', user_id=user.id) }}" onsubmit="return confirm('Type DELETE CUSTOMER to permanently delete this account.');">
+            <div class="flex" style="gap:0.35rem">
+              <input type="text" name="reason" class="form-control" placeholder="Permanent deletion reason" required>
+              <input type="text" name="confirm" class="form-control" placeholder="Type: DELETE CUSTOMER" required>
+              <button class="btn btn-danger btn-sm">Delete permanently</button>
+            </div>
+          </form>
+          {% endif %}
+        </div>
+        {% if risk.blockers %}
+        <div class="mt-2" style="padding:0.6rem;border:1px solid var(--dusty-rose);border-radius:0.5rem;background:rgba(214,122,127,0.08)">
+          <strong class="text-sm">Cannot permanently delete until resolved:</strong>
+          <ul style="margin:0.35rem 0 0 1.2rem;font-size:0.8rem">
+            {% for blocker in risk.blockers %}<li>{{ blocker }}</li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-top:1.5rem">
+      <div>
+        <h4 style="color:var(--brown);margin-bottom:0.5rem">Linked Activity</h4>
+        <p class="text-sm"><strong>Loyalty points:</strong> {{ risk.loyalty_balance }}</p>
+        <p class="text-sm"><strong>Store credit:</strong> ₹{{ '%.2f'|format(risk.wallet_balance) }}</p>
+        <p class="text-sm"><strong>Gift-card balance:</strong> ₹{{ '%.2f'|format(risk.gift_card_balance) }}</p>
+        {% if risk.pending_refunds %}<p class="text-sm text-muted">{{ risk.pending_refunds|length }} pending refund(s)</p>{% endif %}
+      </div>
+      <div>
+        <h4 style="color:var(--brown);margin-bottom:0.5rem">Action History</h4>
+        <div style="max-height:16rem;overflow:auto">
+          {% for a in risk.recent_actions %}
+          <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.82rem">
+            <div class="flex justify-between">
+              <strong>{{ a.action_type|replace('_',' ') }}</strong>
+              <span class="text-muted">{{ a.created_at.strftime('%d %b %Y, %I:%M %p') }}</span>
+            </div>
+            {% if a.reason %}<div class="text-muted">{{ a.reason }}</div>{% endif %}
+            <div class="text-muted">
+              {% if a.admin %}{{ a.admin.name }}{% endif %}
+              {% if a.approver %}<span class="badge badge-brown">approved by {{ a.approver.name }}</span>{% endif %}
+            </div>
+          </div>
+          {% else %}<div class="text-muted">No risk actions recorded.</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="card mt-3">
   <div class="card-header">Order History</div>
   <div class="table-wrap">

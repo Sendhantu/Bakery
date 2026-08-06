@@ -11,7 +11,7 @@
       <p class="portal-auth-subtitle">Join SweetCrumbs and enjoy fresh bakes.</p>
     </div>
     <div class="portal-auth-card-body">
-      <form method="POST" action="{{ url_for('auth.register') }}">
+      <form method="POST" action="{{ url_for('auth.register', next=request.args.get('next')) if request.args.get('next') else url_for('auth.register') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
           <label class="form-label">Full Name</label>

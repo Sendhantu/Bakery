@@ -6,7 +6,10 @@ from realtime.events import (
     emit_delivery_assignment,
     emit_new_order,
     emit_order_cancelled,
+    emit_order_status_updated,
     emit_order_updated,
+    customer_room,
+    delivery_agent_room,
 )
 
 
@@ -114,6 +117,42 @@ def test_delivery_status_emit_targets_agent_room_not_general_delivery_room(
     assert all(
         kwargs.get("broadcast") is None for _event, _payload, kwargs in socket_emit_spy
     )
+
+
+def test_admin_status_emit_reaches_admin_kds_customer_and_assigned_agent(
+    db_session,
+    user_factory,
+    order_factory,
+    socket_emit_spy,
+):
+    delivery_user = user_factory(
+        email="admin-status-agent@test.com",
+        role="delivery",
+        name="Admin Status Agent",
+    )
+    agent = DeliveryAgent(user_id=delivery_user.id, name="Admin Status Agent")
+    db_session.add(agent)
+    db_session.flush()
+    order = order_factory(status="PACKED", total=215)
+    db_session.add(Delivery(order_id=order.id, agent_id=agent.id, status="ASSIGNED"))
+    db_session.commit()
+
+    emit_order_status_updated(
+        order,
+        ["admin", "kds", customer_room(order.user_id), delivery_agent_room(agent.id)],
+    )
+
+    rooms = _rooms(socket_emit_spy)
+    assert rooms == ["admin", "kds", f"customer_{order.user_id}", f"delivery_{agent.id}"]
+    assert all(event == "order_status_updated" for event, _payload, _kwargs in socket_emit_spy)
+    assert all(
+        kwargs.get("broadcast") is None for _event, _payload, kwargs in socket_emit_spy
+    )
+    payload = socket_emit_spy[0][1]
+    assert payload["order_id"] == order.id
+    assert payload["new_status"] == "PACKED"
+    assert payload["status"] == "PACKED"
+    assert payload["detail_url"] == f"/admin/orders/{order.id}"
 
 
 def test_order_cancellation_emit_reaches_admin_kds_customer_and_assigned_agent(

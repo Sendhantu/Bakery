@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from sqlalchemy import func
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import selectinload
 
 from models import (
@@ -135,6 +135,56 @@ def get_customer_orders_page(user_id, page, per_page):
     return pagination
 
 
+def _customer_preference_context(customer_id):
+    if not customer_id:
+        return {
+            "wishlist_product_ids": [],
+            "ordered_product_ids": [],
+            "preferred_category_ids": [],
+        }
+
+    wishlist_product_ids = [
+        row[0]
+        for row in db.session.query(Wishlist.product_id)
+        .filter(Wishlist.user_id == customer_id)
+        .all()
+    ]
+    ordered_product_ids = [
+        row[0]
+        for row in db.session.query(OrderItem.product_id)
+        .join(Order, Order.id == OrderItem.order_id)
+        .filter(
+            Order.user_id == customer_id,
+            OrderItem.product_id.isnot(None),
+        )
+        .group_by(OrderItem.product_id)
+        .order_by(func.sum(OrderItem.quantity).desc())
+        .all()
+    ]
+    preferred_product_ids = list(
+        dict.fromkeys(wishlist_product_ids + ordered_product_ids)
+    )
+    preferred_category_ids = []
+    if preferred_product_ids:
+        preferred_category_ids = [
+            row[0]
+            for row in db.session.query(Product.category_id, func.count(Product.id))
+            .filter(
+                Product.id.in_(preferred_product_ids),
+                Product.category_id.isnot(None),
+            )
+            .group_by(Product.category_id)
+            .order_by(func.count(Product.id).desc())
+            .all()
+        ]
+
+    return {
+        "wishlist_product_ids": wishlist_product_ids,
+        "ordered_product_ids": ordered_product_ids,
+        "preferred_category_ids": preferred_category_ids,
+    }
+
+
 def get_customer_products_page(filters, page, per_page):
     q = filters.get("q")
     cat_id = filters.get("category")
@@ -143,8 +193,9 @@ def get_customer_products_page(filters, page, per_page):
     max_price = filters.get("max_price")
     occasion = filters.get("occasion")
     sort = filters.get("sort") or "featured"
+    customer_id = filters.get("customer_id")
 
-    if q:
+    if q and sort in {"featured", "relevance"} and eggless is None and not occasion:
         import os
 
         import meilisearch
@@ -166,7 +217,11 @@ def get_customer_products_page(filters, page, per_page):
 
             results = index.search(
                 q,
-                {"filter": filter_arr, "offset": (page - 1) * per_page, "limit": per_page},
+                {
+                    "filter": filter_arr,
+                    "offset": (page - 1) * per_page,
+                    "limit": per_page,
+                },
             )
 
             product_ids = [hit["id"] for hit in results["hits"]]
@@ -183,12 +238,34 @@ def get_customer_products_page(filters, page, per_page):
                         self.items = items
                         self.total = total
                         self.page = page
+                        self.per_page = per_page
                         self.pages = (total + per_page - 1) // per_page
                         self.has_prev = page > 1
                         self.has_next = page < self.pages
                         self.prev_num = page - 1
                         self.next_num = page + 1
-                        self.iter_pages = lambda: range(1, self.pages + 1)
+
+                    def iter_pages(
+                        self,
+                        left_edge=2,
+                        left_current=2,
+                        right_current=4,
+                        right_edge=2,
+                    ):
+                        last = 0
+                        for num in range(1, self.pages + 1):
+                            if (
+                                num <= left_edge
+                                or (
+                                    num > self.page - left_current - 1
+                                    and num < self.page + right_current
+                                )
+                                or num > self.pages - right_edge
+                            ):
+                                if last + 1 != num:
+                                    yield None
+                                yield num
+                                last = num
 
                 return MockPagination(items, results["estimatedTotalHits"])
         except Exception:
@@ -196,7 +273,16 @@ def get_customer_products_page(filters, page, per_page):
 
     query = Product.query.options(selectinload(Product.category)).filter_by(is_active=True)
     if q:
-        query = query.filter(Product.name.ilike(f"%{q}%"))
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                Product.name.ilike(like),
+                Product.description.ilike(like),
+                Product.ingredients.ilike(like),
+                Product.occasion_tags.ilike(like),
+                Product.category.has(Category.name.ilike(like)),
+            )
+        )
     if cat_id:
         query = query.filter_by(category_id=cat_id)
     if eggless == 1:
@@ -217,13 +303,40 @@ def get_customer_products_page(filters, page, per_page):
     elif sort == "newest":
         query = query.order_by(Product.created_at.desc())
     elif sort == "rating":
+        rating_subquery = (
+            db.session.query(
+                Review.product_id.label("product_id"),
+                func.coalesce(func.avg(Review.rating), 0).label("avg_rating"),
+                func.count(Review.id).label("review_count"),
+            )
+            .group_by(Review.product_id)
+            .subquery()
+        )
         query = (
-            query.outerjoin(Review, Review.product_id == Product.id)
-            .group_by(Product.id)
+            query.outerjoin(rating_subquery, rating_subquery.c.product_id == Product.id)
             .order_by(
-                func.coalesce(func.avg(Review.rating), 0).desc(),
+                func.coalesce(rating_subquery.c.avg_rating, 0).desc(),
+                func.coalesce(rating_subquery.c.review_count, 0).desc(),
                 Product.created_at.desc(),
             )
+        )
+    elif sort == "recommended":
+        preference = _customer_preference_context(customer_id)
+        conditions = []
+        if preference["wishlist_product_ids"]:
+            conditions.append((Product.id.in_(preference["wishlist_product_ids"]), 80))
+        if preference["ordered_product_ids"]:
+            conditions.append((Product.id.in_(preference["ordered_product_ids"]), 60))
+        if preference["preferred_category_ids"]:
+            conditions.append(
+                (Product.category_id.in_(preference["preferred_category_ids"]), 30)
+            )
+        conditions.append((Product.is_featured.is_(True), 10))
+        preference_score = case(*conditions, else_=0)
+        query = query.order_by(
+            preference_score.desc(),
+            Product.is_featured.desc(),
+            Product.created_at.desc(),
         )
     else:
         query = query.order_by(Product.is_featured.desc(), Product.created_at.desc())

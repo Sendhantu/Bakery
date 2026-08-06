@@ -1,0 +1,15 @@
+<div class="ai-auth-card">
+  <div class="ai-auth-icon" aria-hidden="true">🔐</div>
+  <div class="ai-auth-copy">
+    <p class="section-kicker">Login Required</p>
+    <h2 class="section-title">{{ ai_auth_title|default('AI Bakery Assistant') }}</h2>
+    <p class="section-subtitle">Please log in to use our AI bakery assistant.</p>
+    <p class="text-sm text-muted">Your assistant history and recommendations stay connected to your bakery account.</p>
+  </div>
+  <div class="ai-auth-actions">
+    <a href="{{ ai_login_url }}" class="btn btn-primary">Login</a>
+    {% if ai_register_url %}
+    <a href="{{ ai_register_url }}" class="btn btn-outline">Create Account / Sign Up</a>
+    {% endif %}
+  </div>
+</div>

@@ -299,5 +299,95 @@
     "variants": [
       {"name": "Single", "price": 190, "stock": 16}
     ]
+  },
+  {
+    "name": "Birthday Candle Set",
+    "description": "A colourful candle set for birthday cakes and celebration desserts.",
+    "ingredients": "Food-safe wax candles, holders",
+    "preparation": "Packed with the order as a party add-on.",
+    "base_price": 49,
+    "image": "https://images.unsplash.com/photo-1464349153735-7db50ed83c84?auto=format&fit=crop&w=1200&q=80",
+    "category": "Party Add-ons",
+    "is_eggless": true,
+    "is_featured": true,
+    "occasion_tags": "birthday,party,addon,candle",
+    "variants": [
+      {"name": "12 candles", "price": 49, "stock": 100}
+    ]
+  },
+  {
+    "name": "Sparkler Candle Pack",
+    "description": "Cake sparklers for a bright celebration moment.",
+    "ingredients": "Cake-safe sparklers",
+    "preparation": "Packed separately with safety instructions.",
+    "base_price": 89,
+    "image": "https://images.unsplash.com/photo-1513151233558-d860c5398176?auto=format&fit=crop&w=1200&q=80",
+    "category": "Party Add-ons",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "birthday,celebration,party,addon,candle",
+    "variants": [
+      {"name": "Pack of 4", "price": 89, "stock": 80}
+    ]
+  },
+  {
+    "name": "Plastic Cake Knife Pack",
+    "description": "Disposable cake knife for easy cake cutting during delivery or pickup celebrations.",
+    "ingredients": "Food-grade plastic knife",
+    "preparation": "Packed with your cake order on request.",
+    "base_price": 25,
+    "image": "https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&w=1200&q=80",
+    "category": "Party Add-ons",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "birthday,party,addon,knife",
+    "variants": [
+      {"name": "Single", "price": 25, "stock": 150}
+    ]
+  },
+  {
+    "name": "Birthday Party Hat Set",
+    "description": "A cheerful set of party hats to complete the birthday table.",
+    "ingredients": "Paper hats, elastic bands",
+    "preparation": "Packed flat with the order.",
+    "base_price": 120,
+    "image": "https://images.unsplash.com/photo-1530103862676-de8c9debad1d?auto=format&fit=crop&w=1200&q=80",
+    "category": "Party Add-ons",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "birthday,party,addon,hats",
+    "variants": [
+      {"name": "Set of 6", "price": 120, "stock": 60}
+    ]
+  },
+  {
+    "name": "Cake Serving Plates & Forks",
+    "description": "Disposable plates and forks for serving cake at small parties.",
+    "ingredients": "Food-grade plates, forks",
+    "preparation": "Packed as a sealed accessory set.",
+    "base_price": 75,
+    "image": "https://images.unsplash.com/photo-1602631985686-1bb0e6a8696e?auto=format&fit=crop&w=1200&q=80",
+    "category": "Party Add-ons",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "party,addon,plates,forks",
+    "variants": [
+      {"name": "Set of 10", "price": 75, "stock": 90}
+    ]
+  },
+  {
+    "name": "Celebration Greeting Card",
+    "description": "A small greeting card for birthday, anniversary, and gift orders.",
+    "ingredients": "Printed paper card, envelope",
+    "preparation": "Add your message in checkout instructions.",
+    "base_price": 60,
+    "image": "https://images.unsplash.com/photo-1512909006721-3d6018887383?auto=format&fit=crop&w=1200&q=80",
+    "category": "Party Add-ons",
+    "is_eggless": true,
+    "is_featured": false,
+    "occasion_tags": "gift,birthday,anniversary,addon,card",
+    "variants": [
+      {"name": "Single", "price": 60, "stock": 100}
+    ]
   }
 ]

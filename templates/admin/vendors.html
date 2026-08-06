@@ -6,35 +6,61 @@
     <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Vendors</h1>
     <p class="text-muted">Supplier records for purchase orders, spend tracking, and GST input-credit review.</p>
   </div>
-  <form method="GET" class="flex gap-2">
-    <input class="form-control" name="q" value="{{ search }}" placeholder="Search vendors">
-    <button class="btn btn-outline btn-sm" type="submit">Search</button>
-  </form>
+  <div class="flex gap-2 flex-wrap">
+    <form method="GET" class="flex gap-2">
+      <input class="form-control" name="q" value="{{ search }}" placeholder="Search vendors">
+      <button class="btn btn-outline btn-sm" type="submit">Search</button>
+    </form>
+    {% if can_admin_manager %}
+      {% if show_add_vendor %}
+      <a href="{{ url_for('admin.vendors', q=search) }}" class="btn btn-ghost btn-sm">View Existing Vendors</a>
+      {% else %}
+      <a href="{{ url_for('admin.vendors', add=1, q=search) }}" class="btn btn-primary btn-sm">Add Vendor</a>
+      {% endif %}
+    {% endif %}
+  </div>
 </div>
 
-<div class="page-grid page-grid-sidebar">
+<div class="{% if show_add_vendor %}page-grid page-grid-sidebar{% endif %}">
   <section class="card">
     <div class="card-header">Vendor Directory</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th><th>Contact</th><th>GSTIN</th><th>Terms</th><th>Status</th></tr></thead>
+        <thead><tr><th>Name</th><th>Contact</th><th>GSTIN</th><th>PAN</th><th>TDS</th><th>Terms</th><th>Status</th></tr></thead>
         <tbody>
           {% for vendor in vendors %}
           <tr>
             <td><a href="{{ url_for('admin.vendor_detail', vendor_id=vendor.id) }}">{{ vendor.name }}</a></td>
             <td class="text-sm">{{ vendor.contact_person or '—' }}<br><span class="text-muted">{{ vendor.phone or vendor.email or '' }}</span></td>
             <td>{{ vendor.gstin or '—' }}</td>
+            <td>{{ vendor.pan or '—' }}</td>
+            <td>
+              {% if vendor.tds_enabled %}
+              <span class="badge badge-orange">{{ vendor.tds_section or 'TDS' }}</span>
+              <div class="text-sm text-muted">{{ vendor.effective_tds_rate_percent }}%</div>
+              {% else %}
+              <span class="text-muted">Off</span>
+              {% endif %}
+            </td>
             <td>{{ vendor.payment_terms or '—' }}</td>
             <td><span class="badge {% if vendor.is_active %}badge-green{% else %}badge-orange{% endif %}">{{ 'Active' if vendor.is_active else 'Paused' }}</span></td>
           </tr>
           {% else %}
-          <tr><td colspan="5" class="text-center text-muted" style="padding:1rem">No vendors yet.</td></tr>
+          <tr>
+            <td colspan="7" class="text-center text-muted" style="padding:1rem">
+              No vendors yet.
+              {% if can_admin_manager %}
+              <a href="{{ url_for('admin.vendors', add=1) }}">Create the first vendor</a>
+              {% endif %}
+            </td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
 
+  {% if show_add_vendor %}
   <aside class="card">
     <div class="card-header">Add Vendor</div>
     <div class="card-body">
@@ -47,6 +73,30 @@
           <div class="form-group"><label class="form-label">Email</label><input class="form-control" name="email" type="email"></div>
         </div>
         <div class="form-group"><label class="form-label">GSTIN</label><input class="form-control" name="gstin" maxlength="20"></div>
+        <div class="form-group"><label class="form-label">PAN</label><input class="form-control" name="pan" maxlength="20" placeholder="Required when TDS applies"></div>
+        <div class="form-group">
+          <label class="flex gap-2 items-center"><input type="checkbox" name="tds_enabled"> Deduct TDS for qualifying payments</label>
+          <p class="text-sm text-muted" style="margin:0.35rem 0 0">Enable only after your accountant confirms turnover and vendor thresholds apply.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">TDS Payment Type</label>
+          <select class="form-control" name="tds_payment_type">
+            {% for value, label in tds_payment_type_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Custom TDS Rate %</label>
+            <input class="form-control" name="tds_rate_percent" type="number" step="0.001" min="0" placeholder="Auto">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Annual Threshold</label>
+            <input class="form-control" name="tds_threshold_amount" type="number" step="0.01" min="0" placeholder="Auto">
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label">TDS Notes</label><textarea class="form-control" name="tds_notes" rows="2" placeholder="Turnover gate, accountant note, or exemption reason"></textarea></div>
         <div class="form-group"><label class="form-label">Payment Terms</label><input class="form-control" name="payment_terms" placeholder="net 30, COD"></div>
         <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" name="address" rows="3"></textarea></div>
         <button class="btn btn-primary btn-block" type="submit">Add Vendor</button>
@@ -56,5 +106,6 @@
       {% endif %}
     </div>
   </aside>
+  {% endif %}
 </div>
 {% endblock %}

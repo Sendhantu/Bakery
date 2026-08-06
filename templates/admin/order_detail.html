@@ -6,7 +6,7 @@
 <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
   <div>
     <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Order #{{ order.order_number }}</h1>
-    <p class="text-muted">{{ order.placed_at.strftime('%d %B %Y, %I:%M %p') }} · {{ order.customer.name }}</p>
+    <p class="text-muted">{{ order.placed_at.strftime('%d %B %Y, %I:%M %p') }} · {{ order.customer.name }} · CGST ₹{{ '%.2f'|format(order.cgst_amount or ((order.gst_amount or 0) / 2)) }} · SGST ₹{{ '%.2f'|format(order.sgst_amount or ((order.gst_amount or 0) / 2)) }}</p>
   </div>
   <div class="flex gap-2 flex-wrap">
     <span class="badge badge-green">Realtime updates</span>
@@ -22,7 +22,7 @@
       <div class="card-header">Items</div>
       {% for item in items %}
       <div class="cart-item">
-        <img src="{{ item.product.image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}" class="cart-item-img" data-fallback-src="{{ item.product.fallback_image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}">
+        <img src="{{ item.product.image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}" class="cart-item-img" style="--product-image-fit: {{ item.product.image_object_fit if item.product else 'cover' }}; --product-image-position: {{ item.product.image_object_position if item.product else 'center center' }};" data-fallback-src="{{ item.product.fallback_image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}">
         <div style="flex:1">
           <div style="font-weight:600">{{ item.product_name }}</div>
           <div class="text-sm text-muted">{{ item.variant_name }} · ×{{ item.quantity }}</div>
@@ -163,12 +163,22 @@
     <div class="card">
       <div class="card-header">💳 Payment</div>
       <div class="card-body">
+        {% set taxable_amount = order.gst_taxable_amount or ((order.subtotal or 0) - (order.discount or 0) - (order.loyalty_discount or 0)) %}
+        {% set cgst_amount = order.cgst_amount or ((order.gst_amount or 0) / 2) %}
+        {% set sgst_amount = order.sgst_amount or ((order.gst_amount or 0) - cgst_amount) %}
         <div class="flex justify-between mb-1"><span class="text-muted">Subtotal</span><span>₹{{ order.subtotal|int }}</span></div>
         {% if order.discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Discount</span><span>−₹{{ order.discount|int }}</span></div>{% endif %}
         {% if order.loyalty_discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Loyalty Discount</span><span>−₹{{ order.loyalty_discount|int }}</span></div>{% endif %}
+        <div class="flex justify-between mb-1"><span class="text-muted">Taxable Value</span><span>₹{{ '%.2f'|format(taxable_amount or 0) }}</span></div>
+        <div class="flex justify-between mb-1"><span class="text-muted">CGST ({{ ((order.gst_rate or 0) / 2)|round(3) }}%)</span><span>₹{{ '%.2f'|format(cgst_amount or 0) }}</span></div>
+        <div class="flex justify-between mb-1"><span class="text-muted">SGST ({{ ((order.gst_rate or 0) / 2)|round(3) }}%)</span><span>₹{{ '%.2f'|format(sgst_amount or 0) }}</span></div>
         <div class="flex justify-between mb-1"><span class="text-muted">Delivery</span><span>{% if order.delivery_charge == 0 %}FREE{% else %}₹{{ order.delivery_charge|int }}{% endif %}</span></div>
         <div class="divider"></div>
         <div class="flex justify-between"><span style="font-weight:600">Total</span><span style="font-family:var(--font-display);font-size:1.25rem;font-weight:700;color:var(--caramel)">₹{{ order.total|int }}</span></div>
+        <p class="text-sm text-muted mt-2">Tax source: {{ order.gst_order_source_label }} · {{ order.gst_liability_label }}</p>
+        {% if order.gst_invoice_note %}
+        <p class="text-sm text-muted">{{ order.gst_invoice_note }}</p>
+        {% endif %}
         <div class="mt-2 flex gap-1 flex-wrap">
           <span class="badge {% if order.payment_status=='PAID' %}badge-green{% else %}badge-orange{% endif %}">{{ order.payment_status }}</span>
           <span class="badge badge-brown">{{ order.payment_method }}</span>
@@ -200,7 +210,7 @@
     <div class="card">
       <div class="card-header">Contact Customer</div>
       <div class="card-body" style="display:flex;flex-direction:column;gap:0.75rem">
-        <a href="{{ url_for('admin.chat_thread', customer_id=order.user_id) }}" class="btn btn-outline btn-block">💬 Open Chat</a>
+        <a href="{{ url_for('admin.chat_thread', customer_id=order.user_id) }}" class="btn btn-outline btn-block">💬 Open Support Thread</a>
         <a href="tel:{{ order.phone }}" class="btn btn-ghost btn-block">📞 Call</a>
       </div>
     </div>

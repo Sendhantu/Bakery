@@ -3,9 +3,30 @@ from datetime import datetime
 from decimal import Decimal
 import random
 
+from flask import current_app, has_app_context
+
 from domains.orders import OrderStatusUpdated
 from exceptions import ValidationError
-from models import Order, OrderItem, Payment, ProductVariant, db
+from models import (
+    GST_ECOMMERCE_OPERATOR_BY_SOURCE,
+    GST_ECOMMERCE_ORDER_SOURCES,
+    GST_LIABILITY_BAKERY,
+    GST_LIABILITY_ECOMMERCE_OPERATOR,
+    GST_ORDER_SOURCE_COUNTER_TAKEAWAY,
+    GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY,
+    GST_ORDER_SOURCE_DIRECT_WEB_PICKUP,
+    GST_ORDER_SOURCE_ECOMMERCE_SWIGGY,
+    GST_ORDER_SOURCE_ECOMMERCE_ZOMATO,
+    GST_ORDER_SOURCE_VALUES,
+    GST_RETURN_ECOMMERCE_9_5,
+    GST_RETURN_OUTWARD_SUPPLIES,
+    GST_SUPPLY_RESTAURANT_SERVICE,
+    Order,
+    OrderItem,
+    Payment,
+    ProductVariant,
+    db,
+)
 from repositories import OrderRepository
 from validators import ensure_order_status_transition
 from clock import utcnow
@@ -67,6 +88,16 @@ class OrderService:
         delivery_charge=0,
         gst_rate=5,
         gst_amount=0,
+        gst_taxable_amount=None,
+        cgst_amount=None,
+        sgst_amount=None,
+        gst_supply_type=GST_SUPPLY_RESTAURANT_SERVICE,
+        gst_order_source=None,
+        gst_liability_party=None,
+        gst_return_bucket=None,
+        gst_invoice_note=None,
+        ecommerce_operator=None,
+        ecommerce_tcs_amount=None,
         fulfillment_type="DELIVERY",
         address_line1="",
         address_line2="",
@@ -97,6 +128,26 @@ class OrderService:
         expected_versions = expected_versions or {}
         stock_update_variant_ids = []
         stock_update_material_ids = []
+        gst_context = self._normalize_gst_context(
+            subtotal=subtotal,
+            discount=discount,
+            loyalty_discount=loyalty_discount,
+            gst_rate=gst_rate,
+            gst_amount=gst_amount,
+            gst_taxable_amount=gst_taxable_amount,
+            cgst_amount=cgst_amount,
+            sgst_amount=sgst_amount,
+            gst_supply_type=gst_supply_type,
+            gst_order_source=gst_order_source,
+            gst_liability_party=gst_liability_party,
+            gst_return_bucket=gst_return_bucket,
+            gst_invoice_note=gst_invoice_note,
+            ecommerce_operator=ecommerce_operator,
+            ecommerce_tcs_amount=ecommerce_tcs_amount,
+            channel=channel,
+            source=source,
+            fulfillment_type=fulfillment_type,
+        )
 
         order = Order(
             order_number=Order.generate_order_number(),
@@ -112,7 +163,19 @@ class OrderService:
             gift_card_code=(gift_card_code or "").strip().upper() or None,
             delivery_charge=Decimal(str(delivery_charge or 0)),
             gst_rate=Decimal(str(gst_rate or 5)),
-            gst_amount=Decimal(str(gst_amount or 0)),
+            gst_amount=(
+                gst_context["cgst_amount"] + gst_context["sgst_amount"]
+            ).quantize(Decimal("0.01")),
+            gst_taxable_amount=gst_context["gst_taxable_amount"],
+            cgst_amount=gst_context["cgst_amount"],
+            sgst_amount=gst_context["sgst_amount"],
+            gst_supply_type=gst_context["gst_supply_type"],
+            gst_order_source=gst_context["gst_order_source"],
+            gst_liability_party=gst_context["gst_liability_party"],
+            gst_return_bucket=gst_context["gst_return_bucket"],
+            gst_invoice_note=gst_context["gst_invoice_note"],
+            ecommerce_operator=gst_context["ecommerce_operator"],
+            ecommerce_tcs_amount=gst_context["ecommerce_tcs_amount"],
             total=Decimal(str(total or 0)),
             fulfillment_type=(fulfillment_type or "DELIVERY").upper(),
             address_line1=address_line1,
@@ -210,6 +273,135 @@ class OrderService:
             stock_update_variant_ids=stock_update_variant_ids,
             stock_update_material_ids=stock_update_material_ids,
         )
+
+    def _normalize_gst_context(
+        self,
+        *,
+        subtotal,
+        discount,
+        loyalty_discount,
+        gst_rate,
+        gst_amount,
+        gst_taxable_amount,
+        cgst_amount,
+        sgst_amount,
+        gst_supply_type,
+        gst_order_source,
+        gst_liability_party,
+        gst_return_bucket,
+        gst_invoice_note,
+        ecommerce_operator,
+        ecommerce_tcs_amount,
+        channel,
+        source,
+        fulfillment_type,
+    ):
+        source_value = self._normalize_gst_order_source(
+            gst_order_source,
+            channel=channel,
+            source=source,
+            fulfillment_type=fulfillment_type,
+        )
+        liability_party = (
+            (gst_liability_party or "").strip().upper()
+            or (
+                GST_LIABILITY_ECOMMERCE_OPERATOR
+                if source_value in GST_ECOMMERCE_ORDER_SOURCES
+                else GST_LIABILITY_BAKERY
+            )
+        )
+        taxable = (
+            Decimal(str(gst_taxable_amount))
+            if gst_taxable_amount is not None
+            else (
+                Decimal(str(subtotal or 0))
+                - Decimal(str(discount or 0))
+                - Decimal(str(loyalty_discount or 0))
+            )
+        )
+        taxable = max(taxable, Decimal("0")).quantize(Decimal("0.01"))
+        gst_total = Decimal(str(gst_amount or 0)).quantize(Decimal("0.01"))
+        if gst_total <= 0:
+            rate = Decimal(str(gst_rate or 0))
+            gst_total = (taxable * rate / Decimal("100")).quantize(Decimal("0.01"))
+        cgst = (
+            Decimal(str(cgst_amount)).quantize(Decimal("0.01"))
+            if cgst_amount is not None
+            else (gst_total / Decimal("2")).quantize(Decimal("0.01"))
+        )
+        sgst = (
+            Decimal(str(sgst_amount)).quantize(Decimal("0.01"))
+            if sgst_amount is not None
+            else (gst_total - cgst).quantize(Decimal("0.01"))
+        )
+        return_bucket = (
+            (gst_return_bucket or "").strip().upper()
+            or (
+                GST_RETURN_ECOMMERCE_9_5
+                if liability_party == GST_LIABILITY_ECOMMERCE_OPERATOR
+                else GST_RETURN_OUTWARD_SUPPLIES
+            )
+        )
+        operator = (
+            (ecommerce_operator or "").strip().upper()
+            or GST_ECOMMERCE_OPERATOR_BY_SOURCE.get(source_value)
+        )
+        ecommerce_tcs_rate = (
+            Decimal(str(current_app.config.get("GST_ECOMMERCE_TCS_RATE", 1)))
+            if has_app_context()
+            else Decimal("1")
+        )
+        tcs_amount = (
+            Decimal(str(ecommerce_tcs_amount)).quantize(Decimal("0.01"))
+            if ecommerce_tcs_amount is not None
+            else (
+                taxable * ecommerce_tcs_rate / Decimal("100")
+                if liability_party == GST_LIABILITY_ECOMMERCE_OPERATOR
+                else Decimal("0")
+            ).quantize(Decimal("0.01"))
+        )
+        note = (gst_invoice_note or "").strip() or None
+        if not note and liability_party == GST_LIABILITY_ECOMMERCE_OPERATOR:
+            note = (
+                "Tax to be deposited by E-commerce Operator under Section 9(5) "
+                "of the CGST Act."
+            )
+        return {
+            "gst_taxable_amount": taxable,
+            "cgst_amount": cgst,
+            "sgst_amount": sgst,
+            "gst_supply_type": (
+                (gst_supply_type or GST_SUPPLY_RESTAURANT_SERVICE).strip().upper()
+            ),
+            "gst_order_source": source_value,
+            "gst_liability_party": liability_party,
+            "gst_return_bucket": return_bucket,
+            "gst_invoice_note": note,
+            "ecommerce_operator": operator,
+            "ecommerce_tcs_amount": tcs_amount,
+        }
+
+    def _normalize_gst_order_source(
+        self,
+        value=None,
+        *,
+        channel="online",
+        source=None,
+        fulfillment_type="DELIVERY",
+    ):
+        explicit = (value or "").strip().upper()
+        if explicit in GST_ORDER_SOURCE_VALUES:
+            return explicit
+        source_upper = (source or "").strip().upper()
+        if source_upper in {"SWIGGY", "ECOMMERCE_SWIGGY"}:
+            return GST_ORDER_SOURCE_ECOMMERCE_SWIGGY
+        if source_upper in {"ZOMATO", "ECOMMERCE_ZOMATO"}:
+            return GST_ORDER_SOURCE_ECOMMERCE_ZOMATO
+        if (channel or "").strip().lower() == "counter":
+            return GST_ORDER_SOURCE_COUNTER_TAKEAWAY
+        if (fulfillment_type or "").strip().upper() == "PICKUP":
+            return GST_ORDER_SOURCE_DIRECT_WEB_PICKUP
+        return GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY
 
     def build_line_from_cart_item(self, cart_item, unit_price=None):
         variant = cart_item.variant

@@ -9,6 +9,29 @@ document.addEventListener('DOMContentLoaded', () => {
     })}`;
   };
 
+  const freeDeliveryBannerHtml = ({ subtotal = 0, threshold = 500, unlocked = false, count = 0 }) => {
+    const itemCount = Number(count || 0);
+    const freeDeliveryThreshold = Number(threshold || 0);
+    if (itemCount <= 0 || freeDeliveryThreshold <= 0) return '';
+
+    const cartSubtotal = Math.max(0, Number(subtotal || 0));
+    const remaining = Math.max(0, freeDeliveryThreshold - cartSubtotal);
+    const progress = Math.min(100, Math.max(0, Math.round((cartSubtotal / freeDeliveryThreshold) * 100)));
+    const isUnlocked = Boolean(unlocked) || remaining <= 0;
+    const message = isUnlocked
+      ? `You've unlocked <strong>FREE delivery</strong> 🎁`
+      : `Add ${formatCurrency(remaining)} more for <strong>FREE delivery</strong> 🎁`;
+
+    return `
+      <div class="free-delivery-banner${isUnlocked ? ' free-delivery-banner-unlocked' : ''}" data-free-delivery-banner>
+        <p class="free-delivery-message">${message}</p>
+        <div class="free-delivery-track" aria-hidden="true">
+          <div class="free-delivery-track-fill" style="width:${progress}%"></div>
+        </div>
+      </div>
+    `;
+  };
+
   const getCsrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
   const withCsrfHeaders = (headers = {}) => {
@@ -145,7 +168,8 @@ document.addEventListener('DOMContentLoaded', () => {
       cancelTimer.dataset.cancelTimerBound = 'true';
 
       const targetTime = new Date(cancelTimer.dataset.placedAt);
-      targetTime.setMinutes(targetTime.getMinutes() + 2);
+      const windowSeconds = Number(cancelTimer.dataset.cancelWindowSeconds || 120);
+      targetTime.setSeconds(targetTime.getSeconds() + windowSeconds);
       let intervalId = null;
 
       const tick = () => {
@@ -173,18 +197,28 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const initPos = (root = document) => {
-    const form = root.querySelector?.('[data-pos-form]');
-    if (!form || form.dataset.posBound === 'true') return;
-    form.dataset.posBound = 'true';
+    const posRoot = root.querySelector?.('[data-pos-root], [data-pos-form]');
+    if (!posRoot || posRoot.dataset.posBound === 'true') return;
+    posRoot.dataset.posBound = 'true';
 
-    const cartInput = form.querySelector('[data-pos-cart-input]');
-    const linesContainer = form.querySelector('[data-pos-cart-lines]');
-    const emptyState = form.querySelector('[data-pos-empty]');
-    const totalNode = form.querySelector('[data-pos-total]');
-    const submitButton = form.querySelector('[data-pos-submit]');
-    const searchInput = form.querySelector('[data-pos-search]');
-    const productGrid = form.querySelector('[data-pos-product-grid]');
+    const saleForm = posRoot.matches('form') ? posRoot : posRoot.querySelector('[data-pos-sale-form]');
+    const cartInput = saleForm?.querySelector('[data-pos-cart-input]');
+    const linesContainer = saleForm?.querySelector('[data-pos-cart-lines]');
+    const emptyState = saleForm?.querySelector('[data-pos-empty]');
+    const subtotalNode = saleForm?.querySelector('[data-pos-subtotal]');
+    const cgstNode = saleForm?.querySelector('[data-pos-cgst]');
+    const sgstNode = saleForm?.querySelector('[data-pos-sgst]');
+    const totalNode = saleForm?.querySelector('[data-pos-total]');
+    const submitButton = saleForm?.querySelector('[data-pos-submit]');
+    const searchInput = posRoot.querySelector('[data-pos-search]');
+    const lookupInput = posRoot.querySelector('[data-pos-lookup]');
+    const lookupQuantity = posRoot.querySelector('[data-pos-lookup-qty]');
+    const lookupButton = posRoot.querySelector('[data-pos-lookup-add]');
+    const lookupStatus = posRoot.querySelector('[data-pos-lookup-status]');
+    const productGrid = posRoot.querySelector('[data-pos-product-grid]');
+    const gstRate = Number(posRoot.dataset.gstRate || saleForm?.dataset.gstRate || 5);
     const cart = new Map();
+    const allTiles = () => Array.from(posRoot.querySelectorAll('[data-pos-add]'));
 
     const renderCart = () => {
       const items = Array.from(cart.values());
@@ -221,7 +255,13 @@ document.addEventListener('DOMContentLoaded', () => {
         row.querySelector('strong').textContent = item.name;
         linesContainer.appendChild(row);
       });
-      if (totalNode) totalNode.textContent = formatCurrency(total);
+      const gstAmount = Math.round(total * gstRate) / 100;
+      const cgstAmount = Math.round((gstAmount / 2) * 100) / 100;
+      const sgstAmount = Math.round((gstAmount - cgstAmount) * 100) / 100;
+      if (subtotalNode) subtotalNode.textContent = formatCurrency(total);
+      if (cgstNode) cgstNode.textContent = formatCurrency(cgstAmount);
+      if (sgstNode) sgstNode.textContent = formatCurrency(sgstAmount);
+      if (totalNode) totalNode.textContent = formatCurrency(total + gstAmount);
     };
 
     const updateQuantity = (variantId, delta) => {
@@ -232,27 +272,89 @@ document.addEventListener('DOMContentLoaded', () => {
       renderCart();
     };
 
-    productGrid?.addEventListener('click', (event) => {
-      const tile = event.target.closest('[data-pos-add]');
-      if (!tile) return;
+    const setLookupStatus = (message, isError = false) => {
+      if (!lookupStatus) return;
+      lookupStatus.textContent = message;
+      lookupStatus.classList.toggle('text-danger', isError);
+    };
+
+    const addTileToCart = (tile, quantity = 1) => {
       const variantId = String(tile.dataset.variantId || '');
       const stock = Number(tile.dataset.stock || 0);
-      if (!variantId || stock <= 0) return;
+      const requestedQuantity = Math.max(1, Number(quantity || 1));
+      if (!variantId || stock <= 0) {
+        setLookupStatus('That item is out of stock.', true);
+        return false;
+      }
       const existing = cart.get(variantId);
       if (existing) {
-        existing.quantity = Math.min(stock, existing.quantity + 1);
+        existing.quantity = Math.min(stock, existing.quantity + requestedQuantity);
       } else {
         cart.set(variantId, {
           variantId,
           name: tile.dataset.name || 'Product',
           price: Number(tile.dataset.price || 0),
           stock,
-          quantity: 1,
+          quantity: Math.min(stock, requestedQuantity),
         });
       }
       tile.classList.add('rt-highlight');
       window.setTimeout(() => tile.classList.remove('rt-highlight'), 900);
       renderCart();
+      setLookupStatus(`Added ${tile.dataset.name || 'item'} to the order.`);
+      return true;
+    };
+
+    const normalizeLookup = (value) => (value || '').trim().toLowerCase().replace(/^#/, '');
+
+    const findTileForLookup = (value) => {
+      const query = normalizeLookup(value);
+      if (!query) return null;
+      const tiles = allTiles();
+      const exactIdentityMatch = tiles.find((tile) => (
+        normalizeLookup(tile.dataset.variantId) === query
+        || normalizeLookup(tile.dataset.productId) === query
+        || normalizeLookup(tile.dataset.sku) === query
+        || normalizeLookup(tile.dataset.barcode) === query
+      ) && Number(tile.dataset.stock || 0) > 0);
+      if (exactIdentityMatch) return exactIdentityMatch;
+
+      const exactNameMatch = tiles.find((tile) => (
+        normalizeLookup(tile.dataset.name) === query
+      ) && Number(tile.dataset.stock || 0) > 0);
+      if (exactNameMatch) return exactNameMatch;
+
+      return tiles.find((tile) => (
+        normalizeLookup(tile.dataset.search).includes(query)
+        || normalizeLookup(tile.dataset.name).includes(query)
+      ) && Number(tile.dataset.stock || 0) > 0) || null;
+    };
+
+    const quickAddFromLookup = () => {
+      const tile = findTileForLookup(lookupInput?.value);
+      if (!tile) {
+        setLookupStatus('No available item matched that ID or name.', true);
+        lookupInput?.focus();
+        return;
+      }
+      if (addTileToCart(tile, lookupQuantity?.value)) {
+        if (lookupInput) lookupInput.value = '';
+        if (lookupQuantity) lookupQuantity.value = '1';
+        lookupInput?.focus();
+      }
+    };
+
+    productGrid?.addEventListener('click', (event) => {
+      const tile = event.target.closest('[data-pos-add]');
+      if (!tile) return;
+      addTileToCart(tile, 1);
+    });
+
+    lookupButton?.addEventListener('click', quickAddFromLookup);
+    lookupInput?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      quickAddFromLookup();
     });
 
     linesContainer?.addEventListener('click', (event) => {
@@ -269,18 +371,1138 @@ document.addEventListener('DOMContentLoaded', () => {
 
     searchInput?.addEventListener('input', () => {
       const query = searchInput.value.trim().toLowerCase();
-      productGrid?.querySelectorAll('[data-pos-add]').forEach((tile) => {
-        const haystack = (tile.dataset.search || '').toLowerCase();
-        tile.hidden = Boolean(query) && !haystack.includes(query);
+      productGrid?.querySelectorAll('[data-pos-product-card], [data-pos-add]').forEach((node) => {
+        if (node.matches('[data-pos-add]') && node.closest('[data-pos-product-card]')) return;
+        const haystack = (node.dataset.search || node.querySelector?.('[data-pos-add]')?.dataset.search || '').toLowerCase();
+        node.hidden = Boolean(query) && !haystack.includes(query);
       });
     });
 
-    form.addEventListener('submit', (event) => {
+    saleForm?.addEventListener('submit', (event) => {
       renderCart();
       if (!cart.size) event.preventDefault();
     });
 
     renderCart();
+  };
+
+  const initAdminProductFormControls = (root = document) => {
+    const addVariantButton = root.querySelector?.('#add-variant-btn');
+    if (addVariantButton && addVariantButton.dataset.variantBound !== 'true') {
+      addVariantButton.dataset.variantBound = 'true';
+      addVariantButton.addEventListener('click', () => {
+        const container = document.querySelector('#variants-container');
+        const row = document.createElement('div');
+        row.className = 'variant-row flex gap-2 items-center mt-2';
+        row.innerHTML = `
+          <input type="hidden" name="variant_id[]" value="">
+          <input class="form-control" type="text" name="variant_name[]" placeholder="e.g. 1 kg" required>
+          <input class="form-control" type="number" name="variant_price[]" placeholder="Price" required>
+          <input class="form-control" type="number" name="variant_stock[]" placeholder="Stock">
+          <button type="button" class="btn btn-ghost text-muted remove-variant-btn" style="flex-shrink:0">x</button>
+        `;
+        row.querySelector('.remove-variant-btn')?.addEventListener('click', () => row.remove());
+        container?.appendChild(row);
+      });
+    }
+
+    root.querySelectorAll?.('.remove-variant-btn').forEach((button) => {
+      if (button.dataset.removeVariantBound === 'true') return;
+      button.dataset.removeVariantBound = 'true';
+      button.addEventListener('click', () => button.closest('.variant-row')?.remove());
+    });
+
+    const addMaterialButton = root.querySelector?.('#add-material-btn');
+    if (addMaterialButton && addMaterialButton.dataset.materialBound !== 'true') {
+      addMaterialButton.dataset.materialBound = 'true';
+      addMaterialButton.addEventListener('click', () => {
+        const container = document.querySelector('#materials-container');
+        const firstRow = container?.querySelector('.material-row');
+        if (!container || !firstRow) return;
+
+        const row = firstRow.cloneNode(true);
+        row.querySelectorAll('input').forEach((input) => { input.value = ''; });
+        row.querySelectorAll('select').forEach((select) => { select.selectedIndex = 0; });
+        row.querySelector('.remove-material-btn')?.addEventListener('click', () => row.remove());
+        container.appendChild(row);
+      });
+    }
+
+    root.querySelectorAll?.('.remove-material-btn').forEach((button) => {
+      if (button.dataset.removeMaterialBound === 'true') return;
+      button.dataset.removeMaterialBound = 'true';
+      button.addEventListener('click', () => button.closest('.material-row')?.remove());
+    });
+  };
+
+  const initPurchaseOrderFormControls = (root = document) => {
+    root.querySelectorAll?.('[data-purchase-order-form]').forEach((form) => {
+      if (form.dataset.purchaseOrderBound === 'true') return;
+      form.dataset.purchaseOrderBound = 'true';
+
+      const lines = form.querySelector('[data-po-lines]');
+      const addButton = form.querySelector('[data-add-po-line]');
+      const template = form.querySelector('template[data-po-line-template]');
+      const help = form.querySelector('[data-po-line-help]');
+      if (!lines || !addButton || !template) return;
+
+      const rows = () => Array.from(lines.querySelectorAll('[data-po-line]'));
+      const lineIsComplete = (row) => {
+        const material = row.querySelector('[name="raw_material_id[]"]')?.value || '';
+        const quantity = row.querySelector('[name="quantity[]"]')?.value || '';
+        const unitCost = row.querySelector('[name="unit_cost[]"]')?.value || '';
+        const quantityNumber = Number(quantity);
+        const unitCostNumber = Number(unitCost);
+        return Boolean(material)
+          && quantity.trim() !== ''
+          && Number.isFinite(quantityNumber)
+          && quantityNumber > 0
+          && unitCost.trim() !== ''
+          && Number.isFinite(unitCostNumber)
+          && unitCostNumber >= 0;
+      };
+
+      const updateControls = () => {
+        const currentRows = rows();
+        const canAdd = currentRows.length > 0 && currentRows.every(lineIsComplete);
+        addButton.disabled = !canAdd;
+        if (help) {
+          help.textContent = canAdd
+            ? 'Current material lines are complete. You can add another material.'
+            : 'Fill the current material, quantity, and unit cost before adding another line.';
+        }
+        currentRows.forEach((row) => {
+          const removeButton = row.querySelector('[data-remove-po-line]');
+          if (removeButton) removeButton.hidden = currentRows.length === 1;
+        });
+      };
+
+      const bindRow = (row) => {
+        row.querySelectorAll('select, input').forEach((field) => {
+          field.addEventListener('input', updateControls);
+          field.addEventListener('change', updateControls);
+        });
+        row.querySelector('[data-remove-po-line]')?.addEventListener('click', () => {
+          if (rows().length > 1) {
+            row.remove();
+          } else {
+            row.querySelectorAll('select').forEach((select) => { select.selectedIndex = 0; });
+            row.querySelectorAll('input').forEach((input) => { input.value = ''; });
+          }
+          updateControls();
+        });
+      };
+
+      rows().forEach(bindRow);
+      updateControls();
+
+      addButton.addEventListener('click', () => {
+        if (addButton.disabled || !rows().every(lineIsComplete)) return;
+        const fragment = template.content.cloneNode(true);
+        const row = fragment.querySelector('[data-po-line]');
+        if (!row) return;
+        lines.appendChild(row);
+        bindRow(row);
+        row.querySelector('select, input')?.focus();
+        updateControls();
+      });
+    });
+  };
+
+  const createAiProductCard = (product) => {
+    const card = document.createElement('div');
+    card.className = 'ai-product-card';
+
+    const title = document.createElement('div');
+    title.className = 'ai-product-card-title';
+    const price = Number(product?.price || 0);
+    title.textContent = `${product?.name || 'Bakery item'} — ${formatCurrency(price)}`;
+    card.appendChild(title);
+
+    const meta = document.createElement('div');
+    meta.className = 'ai-product-card-meta';
+    meta.textContent = product?.category || 'Bakery pick';
+    card.appendChild(meta);
+
+    const description = document.createElement('div');
+    description.className = 'ai-product-card-desc';
+    description.textContent = product?.description || 'A delicious bakery choice.';
+    card.appendChild(description);
+
+    if (product?.detail_url) {
+      const link = document.createElement('a');
+      link.className = 'btn btn-outline btn-sm mt-2';
+      link.href = product.detail_url;
+      link.textContent = 'View & Order';
+      card.appendChild(link);
+    }
+
+    return card;
+  };
+
+  const appendAiChatBubble = (log, role, message, {products = [], addons = [], loading = false, error = false} = {}) => {
+    if (!log) return null;
+    log.querySelectorAll('[data-ai-chat-empty]').forEach((node) => node.remove());
+
+    const bubble = document.createElement('div');
+    bubble.className = `ai-chat-bubble ai-chat-bubble--${role}`;
+    if (loading) bubble.classList.add('ai-chat-bubble--loading');
+    if (error) bubble.classList.add('ai-chat-bubble--error');
+
+    const author = document.createElement('div');
+    author.className = 'ai-chat-author';
+    author.textContent = role === 'user' ? 'You' : 'SweetCrumbs AI';
+    bubble.appendChild(author);
+
+    const text = document.createElement('div');
+    text.className = 'ai-chat-text';
+    text.textContent = message || '';
+    bubble.appendChild(text);
+
+    const productList = Array.isArray(products) ? products : [];
+    if (productList.length) {
+      const productsWrap = document.createElement('div');
+      productsWrap.className = 'ai-products';
+      productList.forEach((product) => productsWrap.appendChild(createAiProductCard(product)));
+      bubble.appendChild(productsWrap);
+    }
+
+    const addonList = Array.isArray(addons) ? addons : [];
+    if (addonList.length) {
+      const addonTitle = document.createElement('div');
+      addonTitle.className = 'ai-chat-section-title';
+      addonTitle.textContent = 'Useful add-ons';
+      bubble.appendChild(addonTitle);
+
+      const addonsWrap = document.createElement('div');
+      addonsWrap.className = 'ai-products';
+      addonList.forEach((product) => addonsWrap.appendChild(createAiProductCard(product)));
+      bubble.appendChild(addonsWrap);
+    }
+
+    const time = document.createElement('div');
+    time.className = 'msg-time';
+    time.textContent = new Date().toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    bubble.appendChild(time);
+
+    log.appendChild(bubble);
+    log.scrollTop = log.scrollHeight;
+    return bubble;
+  };
+
+  const initAiChatAssistant = (root = document) => {
+    root.querySelectorAll?.('[data-ai-chat]').forEach((panel) => {
+      if (panel.dataset.aiChatBound === 'true') return;
+      panel.dataset.aiChatBound = 'true';
+
+      const form = panel.querySelector('[data-ai-chat-form]');
+      const input = panel.querySelector('[data-ai-chat-input]');
+      const submit = panel.querySelector('[data-ai-chat-submit]');
+      const log = panel.querySelector('[data-ai-chat-log]');
+      const endpoint = panel.dataset.aiEndpoint || '/chat/ai';
+      const surface = panel.dataset.aiSurface || 'customer';
+      if (!form || !input || !log) return;
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const query = input.value.trim();
+        if (!query) {
+          appendAiChatBubble(log, 'assistant', 'Please type what you would like help with.', {error: true});
+          input.focus();
+          return;
+        }
+
+        const pageScrollY = window.scrollY;
+        appendAiChatBubble(log, 'user', query);
+        input.value = '';
+        if (submit) {
+          submit.disabled = true;
+          submit.dataset.originalText = submit.dataset.originalText || submit.textContent;
+          submit.textContent = 'Thinking...';
+        }
+        const loadingBubble = appendAiChatBubble(log, 'assistant', 'Finding the best bakery recommendations for you...', {loading: true});
+        window.requestAnimationFrame(() => window.scrollTo({top: pageScrollY, behavior: 'auto'}));
+
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: withCsrfHeaders({
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            }),
+            credentials: 'same-origin',
+            body: JSON.stringify({query, surface}),
+          });
+          const result = await response.json();
+          if (!response.ok || !result.ok) {
+            throw new Error(result.message || 'Unable to get recommendations.');
+          }
+
+          loadingBubble?.remove();
+          appendAiChatBubble(log, 'assistant', result.message || 'Here are some bakery picks for you.', {
+            products: result.products || [],
+            addons: result.checkout_addons || [],
+          });
+          window.requestAnimationFrame(() => window.scrollTo({top: pageScrollY, behavior: 'auto'}));
+        } catch (error) {
+          console.error(error);
+          loadingBubble?.remove();
+          appendAiChatBubble(log, 'assistant', error.message || 'Something went wrong while fetching recommendations. Please try again.', {
+            error: true,
+          });
+          window.requestAnimationFrame(() => window.scrollTo({top: pageScrollY, behavior: 'auto'}));
+        } finally {
+          if (submit) {
+            submit.disabled = false;
+            submit.textContent = submit.dataset.originalText || 'Ask AI';
+          }
+          input.focus({preventScroll: true});
+        }
+      });
+    });
+  };
+
+  const initShopAiWidget = (root = document) => {
+    const widget = root.querySelector('[data-ai-shop-widget]');
+    if (!widget || widget.dataset.aiShopBound === 'true') return;
+    widget.dataset.aiShopBound = 'true';
+
+    const fab = widget.querySelector('[data-ai-shop-toggle]');
+    const panel = widget.querySelector('[data-ai-shop-panel]');
+    const log = widget.querySelector('[data-ai-shop-log]');
+    const form = widget.querySelector('[data-ai-shop-form]');
+    const input = widget.querySelector('[data-ai-shop-input]');
+    const submit = widget.querySelector('[data-ai-shop-submit]');
+    const clearBtn = widget.querySelector('[data-ai-shop-clear]');
+    const minimizeBtn = widget.querySelector('[data-ai-shop-minimize]');
+    const loginPrompt = widget.querySelector('[data-ai-shop-login]');
+    if (!panel || !log || !input || !form) return;
+
+    const endpoint = widget.dataset.aiEndpoint || '/chat/ai';
+    const surface = widget.dataset.aiSurface || 'shop';
+    const cartUrl = widget.dataset.aiCartUrl || '/cart/add';
+    let authenticated = widget.dataset.aiAuthenticated === 'true';
+    const loginUrl = widget.dataset.aiLoginUrl || '';
+    const registerUrl = widget.dataset.aiRegisterUrl || '';
+
+    const storageKey = 'sweetcrumbs:shop-ai-chat:v1';
+    const welcomeMessage = 'Hi! I can help you find cakes, pastries, breads, and other bakery products. What are you looking for today?';
+    const suggestions = [
+      '🎂 Show me chocolate cakes',
+      '🌿 Suggest an eggless cake under ₹1,000',
+      '🎉 I need a birthday cake for 10 people',
+      '🚚 Show products available for delivery today',
+    ];
+
+    let open = false;
+    let pendingQuery = '';
+    let addInFlight = false;
+    let lastAddMessage = '';
+    let lastAddAt = 0;
+    let lastAssistantProducts = [];
+    let lastInteractedProductId = null;
+    let surfacedProducts = [];
+    let lastQuery = '';
+    let chatLoaded = false;
+
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;',
+    }[c]));
+
+    const loadChat = () => {
+      try {
+        const raw = window.sessionStorage?.getItem(storageKey);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (Array.isArray(saved.messages)) {
+          log.innerHTML = '';
+          saved.messages.forEach((message) => renderSavedMessage(message));
+          surfacedProducts = Array.isArray(saved.surfacedProducts) ? saved.surfacedProducts : [];
+          lastQuery = saved.lastQuery || '';
+          chatLoaded = saved.messages.some((m) => m.role === 'assistant');
+          if (saved.lastInteractedProductId) lastInteractedProductId = saved.lastInteractedProductId;
+        }
+      } catch (error) {
+        console.error('Unable to restore AI chat:', error);
+      }
+    };
+
+    const saveChat = () => {
+      try {
+        const messages = [];
+        log.querySelectorAll('[data-shop-bubble]').forEach((bubble) => {
+          let bubbleProducts = [];
+          if (bubble.dataset.shopProducts) {
+            try {
+              bubbleProducts = JSON.parse(bubble.dataset.shopProducts);
+            } catch (jsonError) {
+              bubbleProducts = [];
+            }
+          }
+          messages.push({
+            role: bubble.dataset.shopBubble,
+            text: bubble.dataset.shopText || '',
+            products: bubbleProducts,
+            error: bubble.classList.contains('ai-chat-bubble--error'),
+            isSystem: bubble.classList.contains('ai-chat-bubble--system'),
+          });
+        });
+        window.sessionStorage?.setItem(storageKey, JSON.stringify({
+          messages,
+          surfacedProducts,
+          lastQuery,
+          lastInteractedProductId,
+        }));
+      } catch (error) {
+        console.error('Unable to persist AI chat:', error);
+      }
+    };
+
+    const renderSavedMessage = (message) => {
+      if (message.isSystem) {
+        appendBubble('system', message.text, {error: message.error, persist: false});
+        return;
+      }
+      if (message.role === 'user') {
+        appendBubble('user', message.text, {persist: false});
+      } else if (message.role === 'assistant') {
+        appendBubble('assistant', message.text, {
+          products: message.products || [],
+          error: message.error,
+          persist: false,
+        });
+      }
+    };
+
+    const stars = (rating) => {
+      const value = Math.max(0, Math.round(Number(rating) || 0));
+      return '★'.repeat(value) + '☆'.repeat(5 - value);
+    };
+
+    const stockLabel = (product) => {
+      const status = product.stock_status || 'in_stock';
+      if (status === 'out_of_stock' || Number(product.stock) <= 0) {
+        return {text: 'Out of Stock', cls: 'ai-shop-stock-out'};
+      }
+      if (status === 'few_left') {
+        return {text: '⚠ Few Left', cls: 'ai-shop-stock-few'};
+      }
+      return {text: 'In Stock', cls: 'ai-shop-stock-in'};
+    };
+
+    const createProductCard = (product) => {
+      const card = document.createElement('article');
+      card.className = 'ai-shop-product-card';
+      card.dataset.shopProductId = product.id;
+      card.setAttribute('aria-label', `${product.name}, ${formatCurrency(product.price)}`);
+
+      const imgWrap = document.createElement('div');
+      imgWrap.className = 'ai-shop-product-img-wrap';
+      const img = document.createElement('img');
+      img.className = 'ai-shop-product-img';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = product.name || 'Bakery product';
+      img.src = product.image || '';
+      img.onerror = function () { this.onerror = null; this.style.visibility = 'hidden'; };
+      imgWrap.appendChild(img);
+      card.appendChild(imgWrap);
+
+      const body = document.createElement('div');
+      body.className = 'ai-shop-product-body';
+
+      const badges = document.createElement('div');
+      badges.className = 'ai-shop-product-badges';
+      const stock = stockLabel(product);
+      const stockBadge = document.createElement('span');
+      stockBadge.className = `ai-shop-badge ${stock.cls}`;
+      stockBadge.textContent = stock.text;
+      badges.appendChild(stockBadge);
+      if (product.eggless) {
+        const egg = document.createElement('span');
+        egg.className = 'ai-shop-badge ai-shop-badge-eggless';
+        egg.textContent = '🌿 Eggless';
+        badges.appendChild(egg);
+      }
+      if (product.preorder_required) {
+        const pre = document.createElement('span');
+        pre.className = 'ai-shop-badge ai-shop-badge-preorder';
+        pre.textContent = `Preorder ${product.minimum_notice_hours || 24}h`;
+        badges.appendChild(pre);
+      }
+      body.appendChild(badges);
+
+      const title = document.createElement('h4');
+      title.className = 'ai-shop-product-title';
+      title.textContent = product.name || 'Bakery item';
+      body.appendChild(title);
+
+      const priceRow = document.createElement('div');
+      priceRow.className = 'ai-shop-product-price-row';
+      const price = document.createElement('span');
+      price.className = 'ai-shop-product-price';
+      price.textContent = formatCurrency(product.current_price || product.price);
+      priceRow.appendChild(price);
+      if (Number(product.base_price) > Number(product.current_price || product.price)) {
+        const oldPrice = document.createElement('del');
+        oldPrice.className = 'ai-shop-product-old-price';
+        oldPrice.textContent = formatCurrency(product.base_price);
+        priceRow.appendChild(oldPrice);
+      }
+      body.appendChild(priceRow);
+
+      if (Number(product.rating) > 0) {
+        const ratingRow = document.createElement('div');
+        ratingRow.className = 'ai-shop-product-rating';
+        const starEl = document.createElement('span');
+        starEl.className = 'stars';
+        starEl.textContent = stars(product.rating);
+        ratingRow.appendChild(starEl);
+        const count = document.createElement('span');
+        count.className = 'ai-shop-product-reviews';
+        count.textContent = `(${Number(product.review_count) || 0})`;
+        ratingRow.appendChild(count);
+        body.appendChild(ratingRow);
+      }
+
+      if (product.description) {
+        const desc = document.createElement('p');
+        desc.className = 'ai-shop-product-desc';
+        const text = String(product.description);
+        desc.textContent = text.length > 90 ? `${text.slice(0, 90)}…` : text;
+        body.appendChild(desc);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'ai-shop-product-actions';
+      const detailLink = document.createElement('a');
+      detailLink.className = 'btn btn-outline btn-sm';
+      detailLink.href = product.detail_url || `${widget.dataset.aiDetailBase || '/product/'}${product.id}`;
+      detailLink.textContent = 'View Details';
+      detailLink.setAttribute('aria-label', `View details for ${product.name}`);
+      detailLink.addEventListener('click', () => {
+        lastInteractedProductId = product.id;
+      });
+      actions.appendChild(detailLink);
+
+      const available = stock.text !== 'Out of Stock';
+      if (available) {
+        const addButton = document.createElement('button');
+        addButton.type = 'button';
+        addButton.className = 'btn btn-primary btn-sm';
+        addButton.textContent = '🛒 Add to Cart';
+        addButton.setAttribute('aria-label', `Add ${product.name} to cart`);
+        addButton.dataset.shopAddProduct = product.id;
+        addButton.addEventListener('click', (event) => {
+          event.preventDefault();
+          lastInteractedProductId = product.id;
+          startProductFlow(product, {fromMessage: false});
+        });
+        actions.appendChild(addButton);
+      } else {
+        const sold = document.createElement('span');
+        sold.className = 'ai-shop-sold-out';
+        sold.textContent = 'Sold Out';
+        actions.appendChild(sold);
+      }
+      body.appendChild(actions);
+      card.appendChild(body);
+      return card;
+    };
+
+    const appendBubble = (role, text, {products = [], error = false, persist = true} = {}) => {
+      const bubble = document.createElement('div');
+      bubble.className = `ai-chat-bubble ai-chat-bubble--${role === 'user' ? 'user' : 'assistant'}`;
+      if (error) bubble.classList.add('ai-chat-bubble--error');
+      if (role === 'system') bubble.classList.add('ai-chat-bubble--system');
+      bubble.dataset.shopBubble = role === 'user' ? 'user' : (role === 'system' ? 'system' : 'assistant');
+      bubble.dataset.shopText = text || '';
+      bubble.dataset.shopProducts = JSON.stringify(products || []);
+
+      const author = document.createElement('div');
+      author.className = 'ai-chat-author';
+      author.textContent = role === 'user' ? 'You' : (role === 'system' ? 'Note' : 'SweetCrumbs AI');
+      bubble.appendChild(author);
+
+      const textEl = document.createElement('div');
+      textEl.className = 'ai-chat-text';
+      textEl.textContent = text || '';
+      bubble.appendChild(textEl);
+
+      if (products && products.length) {
+        const wrap = document.createElement('div');
+        wrap.className = 'ai-products ai-shop-products';
+        products.forEach((product) => wrap.appendChild(createProductCard(product)));
+        bubble.appendChild(wrap);
+      }
+
+      const time = document.createElement('div');
+      time.className = 'msg-time';
+      time.textContent = new Date().toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'});
+      bubble.appendChild(time);
+
+      log.appendChild(bubble);
+      log.scrollTop = log.scrollHeight;
+      if (persist) saveChat();
+      return bubble;
+    };
+
+    const appendActionButtons = (bubble, actions) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'ai-shop-actions';
+      actions.forEach((action) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `btn btn-sm ${action.cls || 'btn-ghost'}`;
+        button.textContent = action.label;
+        if (action.href) {
+          button.addEventListener('click', () => { window.location.href = action.href; });
+        } else if (action.onClick) {
+          button.addEventListener('click', action.onClick);
+        }
+        if (action.primary) button.classList.add('ai-shop-action-primary');
+        wrap.appendChild(button);
+      });
+      bubble.appendChild(wrap);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    const appendTyping = () => {
+      const bubble = document.createElement('div');
+      bubble.className = 'ai-chat-bubble ai-chat-bubble--assistant ai-chat-bubble--loading';
+      bubble.dataset.shopTyping = 'true';
+      const author = document.createElement('div');
+      author.className = 'ai-chat-author';
+      author.textContent = 'SweetCrumbs AI';
+      bubble.appendChild(author);
+      const text = document.createElement('div');
+      text.className = 'ai-chat-text';
+      text.innerHTML = '<span class="ai-typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+      bubble.appendChild(text);
+      log.appendChild(bubble);
+      log.scrollTop = log.scrollHeight;
+      return bubble;
+    };
+
+    const setPanelOpen = (nextOpen, {focus = false} = {}) => {
+      open = nextOpen;
+      panel.classList.toggle('is-open', nextOpen);
+      panel.setAttribute('aria-hidden', nextOpen ? 'false' : 'true');
+      if (fab) fab.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+      if (nextOpen) {
+        if (authenticated) {
+          loginPrompt?.setAttribute('hidden', '');
+          form.style.display = '';
+          renderInitialContent();
+        } else {
+          renderLoginRequired();
+        }
+        if (focus) requestAnimationFrame(() => input?.focus({preventScroll: true}));
+      } else {
+        if (focus && fab) fab.focus({preventScroll: true});
+        input?.blur();
+      }
+    };
+
+    const renderLoginRequired = () => {
+      log.innerHTML = '';
+      form.style.display = 'none';
+      if (loginPrompt) {
+        loginPrompt.removeAttribute('hidden');
+        const title = loginPrompt.querySelector('.ai-shop-login-title');
+        const textEl = loginPrompt.querySelector('.ai-shop-login-text');
+        const loginLink = loginPrompt.querySelector('.ai-shop-login-card a.btn-primary');
+        const registerLink = loginPrompt.querySelector('.ai-shop-login-card a.btn-outline');
+        if (loginLink && loginUrl) loginLink.href = loginUrl;
+        if (registerLink && registerUrl) registerLink.href = registerUrl;
+        if (loginPrompt.dataset.expired === 'true') {
+          if (title) title.textContent = 'Session Expired';
+          if (textEl) textEl.textContent = 'Your session has expired. Please log in again to keep chatting.';
+        }
+      }
+    };
+
+    const renderInitialContent = () => {
+      if (loginPrompt) loginPrompt.setAttribute('hidden', '');
+      form.style.display = '';
+      if (!chatLoaded) {
+        log.innerHTML = '';
+        appendBubble('assistant', welcomeMessage, {persist: true});
+        renderSuggestionChips();
+        chatLoaded = true;
+        saveChat();
+      }
+    };
+
+    const renderSuggestionChips = () => {
+      const existing = log.querySelector('[data-shop-suggestions]');
+      if (existing) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'ai-shop-suggestions';
+      wrap.dataset.shopSuggestions = 'true';
+      suggestions.forEach((suggestion) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'ai-shop-suggestion-chip';
+        chip.textContent = suggestion;
+        chip.addEventListener('click', () => sendUserMessage(suggestion));
+        wrap.appendChild(chip);
+      });
+      log.appendChild(wrap);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    const collectSurfacedProducts = () => {
+      if (!lastAssistantProducts.length) return [];
+      const seen = new Set();
+      const result = [];
+      lastAssistantProducts.forEach((product) => {
+        if (!seen.has(product.id)) {
+          seen.add(product.id);
+          result.push(product);
+        }
+      });
+      surfacedProducts.forEach((product) => {
+        if (!seen.has(product.id)) {
+          seen.add(product.id);
+          result.push(product);
+        }
+      });
+      return result;
+    };
+
+    const ordinalIndex = (text) => {
+      const match = String(text).toLowerCase().match(/\b(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\b/);
+      if (!match) return -1;
+      const map = {first: 0, second: 1, third: 2, fourth: 3, fifth: 4, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3, '5th': 4};
+      return map[match[1]];
+    };
+
+    const findProductByName = (text) => {
+      const lower = String(text).toLowerCase();
+      const all = collectSurfacedProducts();
+      const matches = all.filter((product) => {
+        const name = String(product.name || '').toLowerCase();
+        return name && lower.includes(name);
+      });
+      if (matches.length === 1) return matches[0];
+      if (matches.length > 1) return 'ambiguous';
+      return null;
+    };
+
+    const resolveAddToCartTarget = (message) => {
+      const index = ordinalIndex(message);
+      if (index >= 0) {
+        const all = collectSurfacedProducts();
+        return all[index] || null;
+      }
+      const lower = message.toLowerCase();
+      if (/\b(this|that|it)\b/.test(lower)) {
+        if (lastInteractedProductId) {
+          const target = collectSurfacedProducts().find((p) => p.id === lastInteractedProductId);
+          if (target) return target;
+        }
+        return lastAssistantProducts[0] || null;
+      }
+      return findProductByName(message);
+    };
+
+    const handleAddToCartIntent = (message) => {
+      const text = String(message || '').trim();
+      if (!text) return false;
+      const addToCartPattern = /\b(?:add|put|place)\b[\s\S]*\b(?:to\s+(?:my\s+|the\s+|your\s+)?(?:cart|bag)|in(?:to)?\s+(?:my\s+|the\s+|your\s+)?(?:cart|bag))\b/i;
+      const wantOrdinalPattern = /\b(?:i(?:'ll| would)?\s+(?:take|like|want)|take)\b/i;
+      const looksLikeAdd = addToCartPattern.test(text) || (wantOrdinalPattern.test(text) && ordinalIndex(text) >= 0);
+      if (!looksLikeAdd) return false;
+
+      const now = Date.now();
+      if (text === lastAddMessage && now - lastAddAt < 5000) {
+        appendBubble('assistant', 'That item is already being added. Give it a moment.', {persist: true});
+        return true;
+      }
+
+      const target = resolveAddToCartTarget(text);
+      if (target === 'ambiguous') {
+        appendBubble('assistant', 'I found a few products with that name. Which one would you like to add?', {persist: true});
+        askToChooseProducts(collectSurfacedProducts());
+        lastAddMessage = text;
+        lastAddAt = now;
+        return true;
+      }
+      if (!target) {
+        if (surfacedProducts.length) {
+          appendBubble('assistant', 'I couldn\'t tell which product you mean. Please pick one, or name the exact product.', {persist: true});
+          askToChooseProducts(collectSurfacedProducts());
+        } else {
+          appendBubble('assistant', 'I couldn\'t find that product in our conversation yet. Try searching for it first, e.g. “show me chocolate cakes”.', {persist: true});
+        }
+        lastAddMessage = text;
+        lastAddAt = now;
+        return true;
+      }
+      lastAddMessage = text;
+      lastAddAt = now;
+      startProductFlow(target, {fromMessage: true});
+      return true;
+    };
+
+    const handleProductDetailIntent = (message) => {
+      const text = String(message || '').toLowerCase();
+      const pattern = /\b(tell\s+me\s+more|more\s+about|view|show\s+me)\b/.test(text)
+        && /\b(product|one|this|that|it)\b/.test(text);
+      if (!pattern) return false;
+      let target = null;
+      const index = ordinalIndex(text);
+      if (index >= 0) {
+        target = collectSurfacedProducts()[index];
+      } else if (/\b(this|that|it)\b/.test(text)) {
+        target = lastInteractedProductId
+          ? collectSurfacedProducts().find((p) => p.id === lastInteractedProductId)
+          : lastAssistantProducts[0];
+      }
+      if (!target) return false;
+      window.location.href = target.detail_url || `${widget.dataset.aiDetailBase || '/product/'}${target.id}`;
+      return true;
+    };
+
+    const composeFollowUpQuery = (message) => {
+      const text = String(message || '').trim().toLowerCase();
+      if (!lastQuery) return null;
+      const followUp = /\b(cheap|cheaper|affordable|eggless|more|different|other|what\s+about)\b/.test(text);
+      if (!followUp) return null;
+      const parts = [lastQuery];
+      if (/\b(cheap|cheaper|affordable)\b/.test(text)) parts.push('cheaper');
+      if (/\beggless\b/.test(text)) parts.push('eggless');
+      return parts.join(' ');
+    };
+
+    const sendUserMessage = (message) => {
+      const text = String(message || '').trim();
+      if (!text) return;
+      if (!authenticated) {
+        renderLoginRequired();
+        appendBubble('assistant', 'Please log in to use our AI bakery assistant.', {persist: false});
+        return;
+      }
+
+      appendBubble('user', text, {persist: true});
+      input.value = '';
+
+      if (handleAddToCartIntent(text)) {
+        saveChat();
+        return;
+      }
+      if (handleProductDetailIntent(text)) {
+        return;
+      }
+
+      const composed = composeFollowUpQuery(text);
+      const query = composed || text;
+      if (composed) lastQuery = query;
+      pendingQuery = text;
+      sendShopQuery(query);
+    };
+
+    const sendShopQuery = async (query) => {
+      if (submit) {
+        submit.disabled = true;
+        submit.textContent = '…';
+      }
+      const typing = appendTyping();
+      const history = [];
+      log.querySelectorAll('[data-shop-bubble="user"], [data-shop-bubble="assistant"]').forEach((bubble) => {
+        const role = bubble.dataset.shopBubble;
+        const content = bubble.dataset.shopText;
+        if (content) history.push({role, content});
+      });
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: withCsrfHeaders({
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          }),
+          credentials: 'same-origin',
+          body: JSON.stringify({query, surface, history}),
+        });
+        let result = null;
+        try {
+          result = await response.json();
+        } catch (jsonError) {
+          result = null;
+        }
+
+        typing?.remove();
+
+        if (response.status === 401 || (result && result.code === 'auth_required')) {
+          authenticated = false;
+          widget.dataset.aiAuthenticated = 'false';
+          if (loginPrompt) loginPrompt.dataset.expired = 'true';
+          renderLoginRequired();
+          appendBubble('assistant', result?.message || 'Please log in again to continue.', {persist: true});
+          return;
+        }
+        if (!response.ok || !result || !result.ok) {
+          throw new Error(result?.message || 'Unable to get recommendations.');
+        }
+
+        lastQuery = query;
+        if (Array.isArray(result.products)) {
+          lastAssistantProducts = result.products;
+          surfacedProducts = collectSurfacedProducts();
+        }
+        appendBubble('assistant', result.message || 'Here are some bakery picks for you.', {
+          products: result.products || [],
+        });
+        if (!(result.products || []).length) {
+          appendActionButtons(appendBubble('system', 'No matching products were found. Try a different search or ask for something else.', {persist: true}), [
+            {label: 'Try again', cls: 'btn-outline', onClick: () => sendShopQuery(pendingQuery || lastQuery)},
+          ]);
+        }
+      } catch (error) {
+        console.error(error);
+        typing?.remove();
+        const errorBubble = appendBubble('assistant', error.message || 'Something went wrong. Please try again.', {error: true, persist: true});
+        appendActionButtons(errorBubble, [
+          {label: 'Retry', cls: 'btn-outline', primary: true, onClick: () => sendShopQuery(pendingQuery || lastQuery)},
+        ]);
+      } finally {
+        if (submit) {
+          submit.disabled = false;
+          submit.textContent = 'Send';
+        }
+        input.focus({preventScroll: true});
+      }
+    };
+
+    const askToChooseProducts = (products) => {
+      const list = (products || []).slice(0, 6);
+      if (!list.length) return;
+      const bubble = appendBubble('assistant', 'Tap a product to add it to your cart:', {persist: true});
+      const wrap = document.createElement('div');
+      wrap.className = 'ai-shop-picker';
+      list.forEach((product, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-shop-picker-option';
+        const stock = stockLabel(product);
+        button.innerHTML = `<strong>${escapeHtml(product.name)}</strong> <span>${formatCurrency(product.current_price || product.price)} · ${stock.text}</span>`;
+        if (stock.text === 'Out of Stock') button.disabled = true;
+        button.setAttribute('aria-label', `Add ${product.name} to cart`);
+        button.addEventListener('click', () => {
+          lastInteractedProductId = product.id;
+          startProductFlow(product, {fromMessage: false});
+        });
+        wrap.appendChild(button);
+      });
+      bubble.appendChild(wrap);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    const startProductFlow = (product, {fromMessage = false}) => {
+      if (addInFlight) {
+        appendBubble('assistant', 'One moment — I\'m still finishing the previous cart update.', {persist: true});
+        return;
+      }
+      const stock = stockLabel(product);
+      if (stock.text === 'Out of Stock') {
+        const bubble = appendBubble('assistant', `${product.name} is currently out of stock, so I can't add it. Here are some alternatives:`, {persist: true});
+        const alternatives = (collectSurfacedProducts() || []).filter((p) => p.id !== product.id && stockLabel(p).text !== 'Out of Stock').slice(0, 3);
+        if (alternatives.length) {
+          const wrap = document.createElement('div');
+          wrap.className = 'ai-shop-picker';
+          alternatives.forEach((alt) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'ai-shop-picker-option';
+            button.innerHTML = `<strong>${escapeHtml(alt.name)}</strong> <span>${formatCurrency(alt.current_price || alt.price)}</span>`;
+            button.addEventListener('click', () => {
+              lastInteractedProductId = alt.id;
+              startProductFlow(alt, {fromMessage: false});
+            });
+            wrap.appendChild(button);
+          });
+          bubble.appendChild(wrap);
+        } else {
+          bubble.querySelector('.ai-chat-text').textContent += ' Ask me to search for something similar.';
+        }
+        log.scrollTop = log.scrollHeight;
+        return;
+      }
+
+      const variants = (product.variants || []).filter((variant) => Number(variant.stock) > 0);
+      if (!variants.length) {
+        appendBubble('assistant', `${product.name} has no available options in stock right now. Please pick something else.`, {persist: true});
+        return;
+      }
+      if (variants.length === 1) {
+        startQuantityFlow(product, variants[0]);
+        return;
+      }
+      const bubble = appendBubble('assistant', `${product.name} is available in these options. Which size would you like?`, {persist: true});
+      const wrap = document.createElement('div');
+      wrap.className = 'ai-shop-picker';
+      variants.forEach((variant) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ai-shop-picker-option';
+        button.innerHTML = `<strong>${escapeHtml(variant.name)}</strong> <span>${formatCurrency(variant.price)}</span>`;
+        button.setAttribute('aria-label', `Choose ${variant.name} for ${product.name}`);
+        button.addEventListener('click', () => startQuantityFlow(product, variant));
+        wrap.appendChild(button);
+      });
+      bubble.appendChild(wrap);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    const startQuantityFlow = (product, variant) => {
+      const bubble = appendBubble('assistant', `How many ${product.name} (${variant.name}) would you like?`, {persist: true});
+      const wrap = document.createElement('div');
+      wrap.className = 'ai-shop-picker ai-shop-quantity';
+      [1, 2, 3, 5].forEach((quantity) => {
+        if (Number(variant.stock) >= quantity) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'ai-shop-picker-option';
+          button.textContent = String(quantity);
+          button.setAttribute('aria-label', `Add ${quantity} of ${product.name}`);
+          button.addEventListener('click', () => submitAddToCart(product, variant, quantity));
+          wrap.appendChild(button);
+        }
+      });
+      bubble.appendChild(wrap);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    const submitAddToCart = async (product, variant, quantity) => {
+      if (addInFlight) return;
+      addInFlight = true;
+      if (submit) submit.disabled = true;
+
+      const typing = appendTyping();
+      try {
+        const body = new FormData();
+        body.set('product_id', product.id);
+        body.set('variant_id', variant.id);
+        body.set('quantity', String(quantity));
+
+        const response = await fetch(cartUrl, {
+          method: 'POST',
+          headers: withCsrfHeaders({
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+          }),
+          credentials: 'same-origin',
+          body,
+        });
+        typing?.remove();
+        let data = null;
+        try {
+          data = await response.json();
+        } catch (jsonError) {
+          data = null;
+        }
+
+        if (response.status === 401 || (data && data.code === 'auth_required')) {
+          authenticated = false;
+          widget.dataset.aiAuthenticated = 'false';
+          if (loginPrompt) loginPrompt.dataset.expired = 'true';
+          renderLoginRequired();
+          appendBubble('assistant', 'Please log in again to add items to your cart.', {persist: true});
+          return;
+        }
+        if (!response.ok || !data || !data.ok) {
+          throw new Error(data?.message || 'Unable to add the product to cart.');
+        }
+
+        if (typeof setCartBadge === 'function') setCartBadge(data.count || 0);
+        if (typeof renderMiniCart === 'function') renderMiniCart(data);
+
+        const confirm = appendBubble('assistant', `${product.name} has been added to your cart.`, {persist: true});
+        const details = document.createElement('div');
+        details.className = 'ai-shop-add-details';
+        details.textContent = `${variant.name} · Qty ${quantity} · ${formatCurrency(Number(variant.price || 0) * quantity)}`;
+        confirm.appendChild(details);
+        const updated = document.createElement('div');
+        updated.className = 'ai-shop-add-count';
+        updated.textContent = `Your bag now has ${data.count || 0} item${data.count === 1 ? '' : 's'}.`;
+        confirm.appendChild(updated);
+        if (product.preorder_required) {
+          const note = document.createElement('div');
+          note.className = 'ai-shop-add-note';
+          note.textContent = `Preorder item — pick a delivery date at checkout.`;
+          confirm.appendChild(note);
+        }
+        appendActionButtons(confirm, [
+          {label: 'View Cart', cls: 'btn-outline', href: data.cart_url},
+          {label: 'Checkout', cls: 'btn-primary', href: data.checkout_url, primary: true},
+        ]);
+      } catch (error) {
+        console.error(error);
+        typing?.remove();
+        const errorBubble = appendBubble('assistant', error.message || 'Something went wrong while adding to cart.', {error: true, persist: true});
+        appendActionButtons(errorBubble, [
+          {label: 'Retry', cls: 'btn-outline', primary: true, onClick: () => submitAddToCart(product, variant, quantity)},
+        ]);
+      } finally {
+        addInFlight = false;
+        if (submit) submit.disabled = false;
+        input.focus({preventScroll: true});
+      }
+    };
+
+    const clearChat = () => {
+      const confirmed = window.confirm('Clear this AI chat? This will start a fresh conversation.');
+      if (!confirmed) return;
+      try {
+        window.sessionStorage?.removeItem(storageKey);
+      } catch (error) {
+        console.error(error);
+      }
+      log.innerHTML = '';
+      chatLoaded = false;
+      lastQuery = '';
+      pendingQuery = '';
+      lastAssistantProducts = [];
+      lastInteractedProductId = null;
+      surfacedProducts = [];
+      renderInitialContent();
+    };
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const query = input.value.trim();
+      if (!query) return;
+      sendUserMessage(query);
+    });
+
+    fab?.addEventListener('click', () => {
+      setPanelOpen(!open, {focus: true});
+    });
+
+    minimizeBtn?.addEventListener('click', () => setPanelOpen(false, {focus: true}));
+    clearBtn?.addEventListener('click', clearChat);
+
+    panel.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        setPanelOpen(false, {focus: true});
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && open) {
+        setPanelOpen(false, {focus: true});
+      }
+    });
+
+    loadChat();
+    if (open) {
+      setPanelOpen(true);
+    }
   };
 
   const initializeUiBindings = (root = document) => {
@@ -291,6 +1513,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initMapToggles(root);
     initCancelTimers(root);
     initPos(root);
+    initAdminProductFormControls(root);
+    initPurchaseOrderFormControls(root);
+    initAiChatAssistant(root);
+    initShopAiWidget(root);
     if (root === document) {
       initPaymentOptions();
     }
@@ -299,7 +1525,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const body = document.body;
   const isAuthenticated = body.dataset.authenticated === 'true';
   const isAdminPage = body.dataset.pageRole === 'admin' || Boolean(document.querySelector('.admin-layout'));
+  const authStateStorageKey = 'sweetcrumbs:auth-state';
   const adminScrollStorageKey = 'sweetcrumbs:admin-scroll-state';
+  let refreshLiveSections = async () => {};
+  let liveRefreshTimer = null;
+
+  const syncAuthStateAcrossTabs = () => {
+    if (!window.localStorage) return;
+
+    if (isAuthenticated) {
+      localStorage.setItem(authStateStorageKey, `authenticated:${Date.now()}`);
+      return;
+    }
+
+    window.addEventListener('storage', (event) => {
+      if (event.key !== authStateStorageKey || !event.newValue?.startsWith('authenticated:')) return;
+      window.location.reload();
+    });
+    window.addEventListener('focus', () => {
+      const authState = localStorage.getItem(authStateStorageKey) || '';
+      if (authState.startsWith('authenticated:')) {
+        window.location.reload();
+      }
+    });
+  };
 
   const saveAdminScrollState = () => {
     if (!isAdminPage) return;
@@ -336,8 +1585,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  const hasActiveEditor = () => {
+    const activeElement = document.activeElement;
+    if (!activeElement) return false;
+    return ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElement.tagName) || activeElement.isContentEditable;
+  };
+
   window.addEventListener('load', restoreAdminScrollState, { once: true });
   initializeUiBindings(document);
+  syncAuthStateAcrossTabs();
 
   if ('serviceWorker' in navigator && document.body.dataset.serviceWorkerUrl) {
     navigator.serviceWorker.register(document.body.dataset.serviceWorkerUrl).catch((error) => {
@@ -380,13 +1636,17 @@ document.addEventListener('DOMContentLoaded', () => {
   initConnectivityBanner();
 
   // ─── Flash Messages ─────────────────────────────
-  const flashes = document.querySelectorAll('.flash-msg');
-  flashes.forEach(f => {
-    setTimeout(() => {
-      f.style.animation = 'slideIn 0.3s ease reverse';
-      setTimeout(() => f.remove(), 300);
-    }, 4500);
-  });
+  const scheduleFlashDismissal = (root = document) => {
+    root.querySelectorAll?.('.flash-msg').forEach((flash) => {
+      if (flash.dataset.dismissBound === 'true') return;
+      flash.dataset.dismissBound = 'true';
+      setTimeout(() => {
+        flash.style.animation = 'slideIn 0.3s ease reverse';
+        setTimeout(() => flash.remove(), 300);
+      }, 4500);
+    });
+  };
+  scheduleFlashDismissal(document);
 
   // ─── Hamburger Menu ──────────────────────────────
   const ham = document.querySelector('.hamburger');
@@ -413,6 +1673,205 @@ document.addEventListener('DOMContentLoaded', () => {
   adminToggle?.addEventListener('click', () => {
     adminSidebar?.classList.toggle('open');
   });
+
+  const adminScriptCache = new Set();
+
+  const getAdminMain = () => document.querySelector('#admin-main, .admin-main');
+
+  const isAdminNavigationLink = (event, link) => {
+    if (!isAdminPage || !link) return false;
+    if (event.defaultPrevented || event.button !== 0) return false;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
+    if (link.target === '_blank' || link.hasAttribute('download')) return false;
+    if (!link.closest('.admin-sidebar, .navbar--admin')) return false;
+
+    const href = link.getAttribute('href');
+    if (!href || href.startsWith('#')) return false;
+
+    try {
+      const url = new URL(href, window.location.href);
+      return url.origin === window.location.origin && url.pathname.startsWith('/admin');
+    } catch (error) {
+      console.error('Unable to parse admin navigation URL.', error);
+      return false;
+    }
+  };
+
+  const loadExternalAdminScript = (script) => new Promise((resolve, reject) => {
+    const src = script.src;
+    if (!src || adminScriptCache.has(src)) {
+      resolve();
+      return;
+    }
+
+    const clone = document.createElement('script');
+    clone.src = src;
+    clone.async = false;
+    if (script.type) clone.type = script.type;
+    clone.onload = () => {
+      adminScriptCache.add(src);
+      resolve();
+    };
+    clone.onerror = () => reject(new Error(`Unable to load admin page script: ${src}`));
+    document.body.appendChild(clone);
+  });
+
+  const runInlineAdminScript = (script) => {
+    const code = script.textContent || '';
+    if (!code.trim()) return;
+    try {
+      Function(code)();
+    } catch (error) {
+      console.error('Unable to run admin page script.', error);
+    }
+  };
+
+  const executeAdminPageScripts = async (nextDocument, nextMain) => {
+    const scripts = [
+      ...nextMain.querySelectorAll('script'),
+      ...nextDocument.querySelectorAll('#admin-page-scripts script'),
+    ];
+
+    for (const script of scripts) {
+      if (script.src) {
+        try {
+          await loadExternalAdminScript(script);
+        } catch (error) {
+          console.error(error);
+        }
+      } else {
+        runInlineAdminScript(script);
+      }
+    }
+  };
+
+  const stopAdminPageMedia = () => {
+    getAdminMain()?.querySelectorAll('video').forEach((video) => {
+      const stream = video.srcObject;
+      if (!stream?.getTracks) return;
+      stream.getTracks().forEach((track) => track.stop());
+      video.srcObject = null;
+    });
+  };
+
+  const updateAdminShellFromDocument = (nextDocument, targetUrl) => {
+    const currentMain = getAdminMain();
+    const nextMain = nextDocument.querySelector('#admin-main, .admin-main');
+    if (!currentMain || !nextMain) return false;
+
+    const nextTitle = nextDocument.querySelector('title')?.textContent;
+    if (nextTitle) document.title = nextTitle;
+
+    const currentFlash = document.querySelector('#flash-container');
+    const nextFlash = nextDocument.querySelector('#flash-container');
+    if (currentFlash && nextFlash) {
+      currentFlash.innerHTML = nextFlash.innerHTML;
+      scheduleFlashDismissal(currentFlash);
+    }
+
+    const currentNav = document.querySelector('.admin-nav');
+    const nextNav = nextDocument.querySelector('.admin-nav');
+    if (currentNav && nextNav) {
+      currentNav.innerHTML = nextNav.innerHTML;
+    }
+
+    stopAdminPageMedia();
+    currentMain.innerHTML = nextMain.innerHTML;
+    currentMain.querySelectorAll('script').forEach((script) => script.remove());
+    currentMain.dataset.currentUrl = targetUrl.toString();
+    initializeUiBindings(currentMain);
+    initCharts();
+    setupLiveRefresh();
+    scheduleFlashDismissal(currentMain);
+    return true;
+  };
+
+  const loadAdminPage = async (href, {push = true, focusMain = true} = {}) => {
+    const targetUrl = new URL(href, window.location.href);
+    const currentUrl = new URL(window.location.href);
+    const currentPath = `${currentUrl.pathname}${currentUrl.search}`;
+    const targetPath = `${targetUrl.pathname}${targetUrl.search}`;
+    const adminMain = getAdminMain();
+
+    if (!adminMain) {
+      window.location.href = targetUrl.toString();
+      return;
+    }
+
+    if (targetUrl.origin !== window.location.origin || !targetUrl.pathname.startsWith('/admin')) {
+      window.location.href = targetUrl.toString();
+      return;
+    }
+
+    if (push && targetPath === currentPath) {
+      adminSidebar?.classList.remove('open');
+      if (focusMain) adminMain.focus({ preventScroll: true });
+      return;
+    }
+
+    adminMain.classList.add('is-loading');
+    adminMain.setAttribute('aria-busy', 'true');
+
+    try {
+      const response = await fetch(targetUrl.toString(), {
+        headers: {
+          'Accept': 'text/html',
+          'X-Admin-Navigation': 'partial',
+        },
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error(`Admin navigation failed with status ${response.status}`);
+
+      const html = await response.text();
+      const nextDocument = new DOMParser().parseFromString(html, 'text/html');
+      const nextMain = nextDocument.querySelector('#admin-main, .admin-main');
+      if (!nextMain) {
+        window.location.href = targetUrl.toString();
+        return;
+      }
+
+      const swapped = updateAdminShellFromDocument(nextDocument, targetUrl);
+      if (!swapped) {
+        window.location.href = targetUrl.toString();
+        return;
+      }
+
+      await executeAdminPageScripts(nextDocument, nextMain);
+      document.dispatchEvent(new CustomEvent('sweetcrumbs:admin-page-loaded', {
+        detail: { root: getAdminMain(), url: targetUrl.toString() },
+      }));
+      if (push) window.history.pushState({ adminPage: true }, '', targetUrl.toString());
+      adminSidebar?.classList.remove('open');
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      const updatedMain = getAdminMain();
+      if (focusMain) updatedMain?.focus({ preventScroll: true });
+    } catch (error) {
+      console.error('Unable to load admin page without refresh.', error);
+      window.location.href = targetUrl.toString();
+    } finally {
+      const updatedMain = getAdminMain();
+      updatedMain?.classList.remove('is-loading');
+      updatedMain?.removeAttribute('aria-busy');
+    }
+  };
+
+  const initAdminPartialNavigation = () => {
+    if (!isAdminPage || !window.fetch || !window.DOMParser || !window.history?.pushState) return;
+
+    window.history.replaceState({ adminPage: true }, '', window.location.href);
+    document.addEventListener('click', (event) => {
+      const link = event.target.closest?.('a[href]');
+      if (!isAdminNavigationLink(event, link)) return;
+      event.preventDefault();
+      loadAdminPage(link.href);
+    });
+
+    window.addEventListener('popstate', () => {
+      loadAdminPage(window.location.href, { push: false, focusMain: false });
+    });
+  };
+  initAdminPartialNavigation();
 
   if (isAdminPage) {
     document.querySelectorAll('.admin-main form[method="POST"], .admin-main form[method="post"]').forEach((form) => {
@@ -493,13 +1952,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (totalEl) totalEl.textContent = formatCurrency(data.grand_total || 0);
 
     if (freeDeliveryNote) {
-      const remainingForFreeDelivery = Math.max(0, Number(data.delivery_threshold || 500) - Number(data.subtotal || 0));
-      if (remainingForFreeDelivery <= 0) {
-        freeDeliveryNote.style.display = 'none';
-      } else {
-        freeDeliveryNote.style.display = 'block';
-        freeDeliveryNote.innerHTML = `Add ${formatCurrency(remainingForFreeDelivery)} more for <strong style="color:var(--sage)">FREE delivery</strong> 🎁`;
-      }
+      freeDeliveryNote.innerHTML = freeDeliveryBannerHtml({
+        subtotal: data.subtotal,
+        threshold: data.delivery_threshold,
+        unlocked: data.free_delivery_unlocked,
+        count: data.count,
+      });
     }
   };
 
@@ -626,10 +2084,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const renderCheckoutPricing = () => {
     if (!checkoutTotalEl) return;
 
-    const baseTotal = parseFloat(checkoutTotalEl.dataset.baseTotal || 0);
+    const subtotal = parseFloat(checkoutTotalEl.dataset.subtotal || 0);
+    const memberDiscount = parseFloat(checkoutTotalEl.dataset.memberDiscount || 0);
     const deliveryCharge = parseFloat(checkoutTotalEl.dataset.deliveryCharge || 0);
-    const effectiveBaseTotal = baseTotal - (pricingState.fulfillmentType === 'PICKUP' ? deliveryCharge : 0);
-    const total = Math.max(0, effectiveBaseTotal - pricingState.couponDiscount - pricingState.loyaltyDiscount);
+    const gstRate = parseFloat(checkoutTotalEl.dataset.gstRate || 0);
+    const fulfillmentCharge = pricingState.fulfillmentType === 'PICKUP' ? 0 : deliveryCharge;
+    const taxableAmount = Math.max(0, subtotal - memberDiscount - pricingState.couponDiscount - pricingState.loyaltyDiscount);
+    const taxAmount = Math.round((taxableAmount * gstRate / 100) * 100) / 100;
+    const total = Math.max(0, taxableAmount + taxAmount + fulfillmentCharge);
 
     const couponRow = document.querySelector('#coupon-discount-row');
     const couponVal = document.querySelector('#coupon-discount-val');
@@ -645,23 +2107,42 @@ document.addEventListener('DOMContentLoaded', () => {
       loyaltyVal.textContent = `−${formatCurrency(pricingState.loyaltyDiscount)}`;
     }
 
+    const taxValue = document.querySelector('#checkout-tax-value');
+    const taxNote = document.querySelector('#checkout-tax-note');
+    if (taxValue) {
+      taxValue.textContent = formatCurrency(taxAmount);
+      taxValue.dataset.gstAmount = String(taxAmount);
+    }
+    if (taxNote) {
+      taxNote.textContent = `Calculated on taxable product value ${formatCurrency(taxableAmount)} before delivery and after product discounts.`;
+    }
+
     const fulfillmentChargeLabel = document.querySelector('#checkout-fulfillment-charge-label');
     const fulfillmentChargeValue = document.querySelector('#checkout-fulfillment-charge-value');
-    const fulfillmentChargeNote = document.querySelector('#checkout-fulfillment-charge-note');
-    if (fulfillmentChargeLabel && fulfillmentChargeValue && fulfillmentChargeNote) {
-      if (!fulfillmentChargeNote.dataset.deliveryNote) {
-        fulfillmentChargeNote.dataset.deliveryNote = fulfillmentChargeNote.textContent.trim();
-      }
+    if (fulfillmentChargeLabel && fulfillmentChargeValue) {
       if (pricingState.fulfillmentType === 'PICKUP') {
         fulfillmentChargeLabel.textContent = 'Pickup';
         fulfillmentChargeValue.innerHTML = '<span style="color:var(--sage)">FREE</span>';
-        fulfillmentChargeNote.textContent = 'Pickup orders do not include a delivery charge.';
       } else {
         fulfillmentChargeLabel.textContent = 'Delivery';
         fulfillmentChargeValue.innerHTML = deliveryCharge > 0
           ? formatCurrency(deliveryCharge)
           : '<span style="color:var(--sage)">FREE</span>';
-        fulfillmentChargeNote.textContent = fulfillmentChargeNote.dataset.deliveryNote;
+      }
+    }
+
+    const checkoutFreeDelivery = document.querySelector('#checkout-free-delivery-note');
+    if (checkoutFreeDelivery) {
+      if (pricingState.fulfillmentType === 'PICKUP') {
+        checkoutFreeDelivery.innerHTML = '';
+      } else {
+        const deliveryThreshold = parseFloat(checkoutTotalEl.dataset.deliveryThreshold || 500);
+        checkoutFreeDelivery.innerHTML = freeDeliveryBannerHtml({
+          subtotal,
+          threshold: deliveryThreshold,
+          unlocked: subtotal >= deliveryThreshold,
+          count: 1,
+        });
       }
     }
 
@@ -860,6 +2341,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const miniCartList = document.querySelector('#mini-cart-list');
   const miniCartCount = document.querySelector('#mini-cart-count');
   const miniCartSubtotal = document.querySelector('#mini-cart-subtotal');
+  const miniCartFreeDelivery = document.querySelector('#mini-cart-free-delivery');
   const miniCartCheckout = document.querySelector('#mini-cart-checkout');
 
   const renderMiniCartEntry = (item) => `
@@ -893,6 +2375,14 @@ document.addEventListener('DOMContentLoaded', () => {
     miniCartList.innerHTML = (data.items || []).map(renderMiniCartEntry).join('');
     miniCartCount.textContent = data.count || 0;
     miniCartSubtotal.textContent = formatCurrency(data.subtotal || 0);
+    if (miniCartFreeDelivery) {
+      miniCartFreeDelivery.innerHTML = freeDeliveryBannerHtml({
+        subtotal: data.subtotal,
+        threshold: data.delivery_threshold,
+        unlocked: data.free_delivery_unlocked,
+        count: data.count,
+      });
+    }
     if (miniCartCheckout && data.checkout_url) {
       miniCartCheckout.href = data.checkout_url;
     }
@@ -948,55 +2438,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ─── Image preview for admin ─────────────────────
-  const imgInput = document.querySelector('#product-image-input');
-  const imgPreview = document.querySelector('#image-preview');
-  imgInput?.addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (file && imgPreview) {
-      const reader = new FileReader();
-      reader.onload = ev => { imgPreview.src = ev.target.result; imgPreview.style.display = 'block'; };
-      reader.readAsDataURL(file);
-    }
-  });
-
-  // ─── Add Variant Row ─────────────────────────────
-  document.querySelector('#add-variant-btn')?.addEventListener('click', () => {
-    const container = document.querySelector('#variants-container');
-    const row = document.createElement('div');
-    row.className = 'variant-row flex gap-2 items-center mt-2';
-    row.innerHTML = `
-      <input type="hidden" name="variant_id[]" value="">
-      <input class="form-control" type="text" name="variant_name[]" placeholder="e.g. 1 kg" required>
-      <input class="form-control" type="number" name="variant_price[]" placeholder="Price" required>
-      <input class="form-control" type="number" name="variant_stock[]" placeholder="Stock">
-      <button type="button" class="btn btn-ghost text-muted remove-variant-btn" style="flex-shrink:0">✕</button>
-    `;
-    row.querySelector('.remove-variant-btn').addEventListener('click', () => row.remove());
-    container?.appendChild(row);
-  });
-
-  document.querySelectorAll('.remove-variant-btn').forEach(btn => {
-    btn.addEventListener('click', () => btn.closest('.variant-row')?.remove());
-  });
-
-  // ─── Add Recipe Material Row ────────────────────
-  document.querySelector('#add-material-btn')?.addEventListener('click', () => {
-    const container = document.querySelector('#materials-container');
-    const firstRow = container?.querySelector('.material-row');
-    if (!container || !firstRow) return;
-
-    const row = firstRow.cloneNode(true);
-    row.querySelectorAll('input').forEach(input => { input.value = ''; });
-    row.querySelectorAll('select').forEach(select => { select.selectedIndex = 0; });
-    row.querySelector('.remove-material-btn')?.addEventListener('click', () => row.remove());
-    container.appendChild(row);
-  });
-
-  document.querySelectorAll('.remove-material-btn').forEach(btn => {
-    btn.addEventListener('click', () => btn.closest('.material-row')?.remove());
-  });
-
   // ─── Charts (Admin) ──────────────────────────────
   initCharts();
 
@@ -1004,13 +2445,45 @@ document.addEventListener('DOMContentLoaded', () => {
   const deliveryDate = document.querySelector('#delivery_date');
   const pickupDate = document.querySelector('#pickup_date');
   if (deliveryDate) {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    deliveryDate.min = tomorrow.toISOString().split('T')[0];
+    deliveryDate.min = new Date().toISOString().split('T')[0];
   }
   if (pickupDate) {
     pickupDate.min = new Date().toISOString().split('T')[0];
   }
+
+  const refreshDeliverySlots = () => {
+    const deliverySlot = document.querySelector('#delivery_time_slot');
+    if (!deliveryDate || !deliverySlot) return;
+
+    const selectedDate = deliveryDate.value;
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    let firstAvailableValue = '';
+
+    deliverySlot.querySelectorAll('option').forEach((option) => {
+      if (!option.value) return;
+      let disabled = false;
+      if (selectedDate === today) {
+        const [hour, minute] = (option.dataset.slotStart || '').split(':').map(Number);
+        if (Number.isFinite(hour) && Number.isFinite(minute)) {
+          const slotStart = new Date(now);
+          slotStart.setHours(hour, minute, 0, 0);
+          disabled = slotStart <= now;
+        }
+      }
+      option.disabled = disabled;
+      option.hidden = disabled;
+      if (!disabled && !firstAvailableValue) firstAvailableValue = option.value;
+    });
+
+    const selectedOption = deliverySlot.selectedOptions[0];
+    if (selectedOption?.disabled) {
+      deliverySlot.value = firstAvailableValue;
+    }
+  };
+
+  deliveryDate?.addEventListener('change', refreshDeliverySlots);
+  refreshDeliverySlots();
 
   const initCheckoutFulfillment = () => {
     const deliverySection = document.querySelector('#delivery-schedule-fields');
@@ -1058,6 +2531,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Checkout Saved Addresses ───────────────────
   const addressCards = document.querySelectorAll('.saved-address-card');
+  const newAddressFields = document.querySelector('#checkout-new-address-fields');
   const addressInputs = {
     label: document.querySelector('#checkout-address-label'),
     addressLine1: document.querySelector('#checkout-address-line1'),
@@ -1075,9 +2549,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const checkoutMapToggle = document.querySelector('#checkout-address-map-toggle');
     const checkoutLocationStatus = document.querySelector('#checkout-location-status');
     const checkoutUseLocationButton = document.querySelector('#checkout-use-location');
+    let selectedAddressCard = null;
     let suppressExactLocationReset = false;
 
+    const isNewAddressCard = (card) => {
+      const radio = card?.querySelector('input[type="radio"]');
+      return !radio || !radio.value;
+    };
+
+    const setManualAddressFieldsEnabled = (enabled) => {
+      newAddressFields?.classList.toggle('hidden', !enabled);
+      Object.values(addressInputs).forEach((input) => {
+        if (!input) return;
+        input.disabled = !enabled;
+      });
+      newAddressFields?.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        input.disabled = !enabled;
+        if (!enabled) input.checked = false;
+      });
+      if (checkoutUseLocationButton) checkoutUseLocationButton.disabled = !enabled;
+      newAddressFields?.querySelectorAll('[data-required-for-new-address="true"]').forEach((input) => {
+        input.required = enabled;
+      });
+    };
+
+    const clearManualAddressFields = () => {
+      Object.values(addressInputs).forEach((input) => {
+        if (input) input.value = '';
+      });
+    };
+
     const buildAddressQuery = () => {
+      if (selectedAddressCard && !isNewAddressCard(selectedAddressCard)) {
+        const parts = [
+          selectedAddressCard.dataset.addressLine1 || '',
+          selectedAddressCard.dataset.addressLine2 || '',
+          selectedAddressCard.dataset.city || '',
+          selectedAddressCard.dataset.pincode || '',
+        ].map((part) => part.trim()).filter(Boolean);
+        return parts.join(', ');
+      }
       const parts = [
         addressInputs.addressLine1?.value || '',
         addressInputs.addressLine2?.value || '',
@@ -1088,6 +2599,18 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const getExactLocation = () => {
+      if (selectedAddressCard && !isNewAddressCard(selectedAddressCard)) {
+        const rawLatitude = selectedAddressCard.dataset.latitude || '';
+        const rawLongitude = selectedAddressCard.dataset.longitude || '';
+        if (!rawLatitude || !rawLongitude) return null;
+        const latitude = Number(rawLatitude);
+        const longitude = Number(rawLongitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+        return {
+          latitude: Number(latitude.toFixed(7)),
+          longitude: Number(longitude.toFixed(7)),
+        };
+      }
       const rawLatitude = addressInputs.latitude?.value?.trim() || '';
       const rawLongitude = addressInputs.longitude?.value?.trim() || '';
       if (!rawLatitude || !rawLongitude) return null;
@@ -1178,6 +2701,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const applyAddressCard = (card) => {
       if (!card) return;
+      const manualAddress = isNewAddressCard(card);
+      selectedAddressCard = card;
+      setManualAddressFieldsEnabled(manualAddress);
+      if (!manualAddress) {
+        clearManualAddressFields();
+        updateCheckoutAddressMap();
+        return;
+      }
+
       suppressExactLocationReset = true;
       if (addressInputs.label) addressInputs.label.value = card.dataset.label || '';
       if (addressInputs.addressLine1) addressInputs.addressLine1.value = card.dataset.addressLine1 || '';
@@ -1349,9 +2881,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const updateVisibleOrderStatus = (orderId, status) => {
     if (!orderId || !status) return;
+    const normalizedStatus = String(status).toUpperCase();
     document.querySelectorAll(`[data-order-status="${orderId}"]`).forEach((badge) => {
-      setOrderStatusBadge(badge, status);
+      setOrderStatusBadge(badge, normalizedStatus);
+      pulseRealtimeElement(badge);
     });
+    document.querySelectorAll(`[data-order-id="${orderId}"]`).forEach((element) => {
+      pulseRealtimeElement(element);
+    });
+    document.querySelectorAll('[data-tracker-status]').forEach((step) => {
+      const trackerStatus = (step.dataset.trackerStatus || '').toUpperCase();
+      const sequence = ['PLACED', 'PREPARING', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
+      const currentIndex = sequence.indexOf(normalizedStatus);
+      const stepIndex = sequence.indexOf(trackerStatus);
+      step.classList.toggle('active', trackerStatus === normalizedStatus);
+      step.classList.toggle(
+        'completed',
+        currentIndex >= 0 && stepIndex >= 0 && stepIndex < currentIndex
+      );
+    });
+    document.dispatchEvent(new CustomEvent('sweetcrumbs:order-status-updated', {
+      detail: { orderId, status: normalizedStatus },
+    }));
   };
 
   const incrementRealtimeCounter = (name) => {
@@ -1389,6 +2940,41 @@ document.addEventListener('DOMContentLoaded', () => {
     link.textContent = text;
     if (className) link.className = className;
     return link;
+  };
+
+  const appendSupportMessage = (payload) => {
+    if (!payload?.customer_id || !payload?.message_id) return;
+    document.querySelectorAll('[data-support-message-list]').forEach((list) => {
+      if (String(list.dataset.supportCustomerId || '') !== String(payload.customer_id)) return;
+      if (list.querySelector(`[data-support-message-id="${payload.message_id}"]`)) return;
+
+      list.querySelectorAll('.support-empty-state').forEach((state) => state.remove());
+      const currentUserId = String(list.dataset.currentUserId || '');
+      const isSent = String(payload.sender_id || '') === currentUserId;
+      const wrapper = document.createElement('div');
+      wrapper.dataset.supportMessageId = payload.message_id;
+
+      const bubble = document.createElement('div');
+      bubble.className = `msg-bubble ${isSent ? 'sent' : 'received'}`;
+      if (!isSent) {
+        bubble.appendChild(makeTextElement('div', payload.sender_name || 'Support', 'support-message-author'));
+      }
+      bubble.appendChild(document.createTextNode(payload.content || ''));
+      const sentAt = payload.sent_at ? new Date(payload.sent_at) : new Date();
+      bubble.appendChild(makeTextElement(
+        'div',
+        sentAt.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+        'msg-time',
+      ));
+      wrapper.appendChild(bubble);
+      list.appendChild(wrapper);
+      list.scrollTop = list.scrollHeight;
+      pulseRealtimeElement(wrapper);
+    });
+
+    document.querySelectorAll(`[data-support-thread="${payload.customer_id}"]`).forEach((thread) => {
+      pulseRealtimeElement(thread);
+    });
   };
 
   const prependAdminOrder = (payload) => {
@@ -1542,6 +3128,20 @@ document.addEventListener('DOMContentLoaded', () => {
       input.value = String(newStock);
     });
 
+    document.querySelectorAll(`[data-pos-stock-label="${variantId}"]`).forEach((label) => {
+      label.className = 'pos-product-stock';
+      label.textContent = newStock <= 0
+        ? 'Out of Stock'
+        : newStock <= 5 ? `Only ${newStock} left` : `${newStock} in stock`;
+    });
+
+    document.querySelectorAll(`[data-pos-add][data-variant-id="${variantId}"]`).forEach((button) => {
+      button.dataset.stock = String(newStock);
+      button.disabled = newStock <= 0;
+      button.setAttribute('aria-disabled', newStock <= 0 ? 'true' : 'false');
+      button.closest('[data-pos-product-card]')?.classList.toggle('is-out-of-stock', newStock <= 0);
+    });
+
     document.querySelectorAll(`.variant-btn[data-variant-id="${variantId}"]`).forEach((button) => {
       button.dataset.stock = String(newStock);
       button.disabled = newStock <= 0;
@@ -1560,19 +3160,20 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // ─── Live refresh for order/admin pages ─────────
-  const liveRefreshTarget = document.querySelector('[data-live-refresh]');
-  let refreshLiveSections = async () => {};
-  if (liveRefreshTarget) {
+  const setupLiveRefresh = () => {
+    if (liveRefreshTimer) {
+      window.clearInterval(liveRefreshTimer);
+      liveRefreshTimer = null;
+    }
+
+    refreshLiveSections = async () => {};
+    const liveRefreshTarget = document.querySelector('[data-live-refresh]');
+    if (!liveRefreshTarget) return;
+
     const intervalMs = Number(liveRefreshTarget.dataset.liveRefresh || 15000);
     const liveRefreshSource = liveRefreshTarget.dataset.liveRefreshSource || '';
     let isReloading = false;
     let isFetching = false;
-
-    const hasActiveEditor = () => {
-      const activeElement = document.activeElement;
-      if (!activeElement) return false;
-      return ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElement.tagName) || activeElement.isContentEditable;
-    };
 
     if (liveRefreshSource) {
       refreshLiveSections = async ({respectEditors = false} = {}) => {
@@ -1604,18 +3205,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       };
 
-      window.setInterval(async () => {
+      liveRefreshTimer = window.setInterval(async () => {
         refreshLiveSections({respectEditors: true});
       }, intervalMs);
-    } else {
-      window.setInterval(() => {
-        if (document.hidden || hasActiveEditor() || isReloading) return;
-        isReloading = true;
-        saveAdminScrollState();
-        window.location.reload();
-      }, intervalMs);
+      return;
     }
-  }
+
+    liveRefreshTimer = window.setInterval(() => {
+      if (document.hidden || hasActiveEditor() || isReloading) return;
+      isReloading = true;
+      saveAdminScrollState();
+
+      if (isAdminPage) {
+        loadAdminPage(window.location.href, { push: false, focusMain: false })
+          .finally(() => { isReloading = false; });
+        return;
+      }
+
+      window.location.reload();
+    }, intervalMs);
+  };
+  setupLiveRefresh();
 
   const initRealtimeSocket = () => {
     const portal = document.body.dataset.pageRole;
@@ -1651,7 +3261,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('order_status_updated', (payload) => {
-      updateVisibleOrderStatus(payload?.order_id, payload?.new_status);
+      updateVisibleOrderStatus(payload?.order_id, payload?.new_status || payload?.status);
       if (document.querySelector('[data-socket-room="kds"]')) {
         window.location.reload();
         return;
@@ -1660,6 +3270,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('stock_updated', updateStockIndicators);
+    socket.on('support_message', appendSupportMessage);
     socket.on('kds_refresh', () => {
       if (document.querySelector('[data-socket-room="kds"]')) window.location.reload();
     });

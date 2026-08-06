@@ -2,14 +2,24 @@
 {% block title %}Reviews — Admin{% endblock %}
 
 {% block content %}
-<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1.5rem">⭐ Customer Reviews</h1>
-<p class="text-muted text-sm" style="margin-bottom:1.5rem">Generate a draft reply with AI, edit it, then post when ready. Replies are never published automatically.</p>
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.25rem">⭐ Customer Reviews</h1>
+    <p class="text-muted text-sm" style="margin:0">Generate a draft reply with AI, edit it, then post when ready. Replies are never published automatically.</p>
+    {% if branch_filter %}
+    <span class="badge badge-brown mt-1">Branch: {{ branch_filter.name }}</span>
+    {% endif %}
+  </div>
+  {% if branch_filter %}
+  <a href="{{ url_for('admin.reviews') }}" class="btn btn-ghost btn-sm">All reviews</a>
+  {% endif %}
+</div>
 
 {% if reviews %}
 <div style="display:flex;flex-direction:column;gap:1rem">
   {% for review in reviews %}
   {% set attention = attention_by_id.get(review.id, {}) %}
-  <div class="card review-card" data-review-id="{{ review.id }}" {% if attention.needs_attention %}style="border:2px solid #C62828"{% endif %}>
+  <div id="review-{{ review.id }}" class="card review-card" data-review-id="{{ review.id }}" {% if attention.needs_attention %}style="border:2px solid #C62828"{% endif %}>
     <div class="card-body">
       <div class="flex justify-between items-start mb-2 flex-wrap gap-2">
         <div>
@@ -73,10 +83,12 @@
 
 {% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', () => {
+(() => {
   const getCsrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
   document.querySelectorAll('.generate-reply-draft').forEach((button) => {
+    if (button.dataset.generateReplyBound === 'true') return;
+    button.dataset.generateReplyBound = 'true';
     button.addEventListener('click', async () => {
       const reviewId = button.dataset.reviewId;
       const url = button.dataset.generateUrl;
@@ -122,6 +134,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
-});
+})();
 </script>
 {% endblock %}

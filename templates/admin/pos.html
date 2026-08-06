@@ -1,94 +1,185 @@
 {% extends 'admin/base_admin.html' %}
-{% block title %}Counter POS - Admin{% endblock %}
+{% block title %}Walk-in Orders - Admin{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-4">
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
   <div>
-    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Counter POS</h1>
-    <p class="text-muted">Quick walk-in sales using the same order, stock, and finance pipeline as online checkout.</p>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Walk-in Orders</h1>
+    <p class="text-muted">Take counter orders, add items by ID or name, then collect payment before the bill is generated.</p>
+  </div>
+  <div class="flex gap-2 flex-wrap items-center">
+    {% if can_admin_manager %}
+    <button type="button" class="btn btn-outline btn-sm" data-toggle-target="#pos-gift-card-form" data-toggle-hide-self>Issue Gift Card</button>
+    {% endif %}
+    <span class="badge badge-brown">{{ 'Order screen login' if is_order_screen_user else 'Kitchen team enabled' }}</span>
   </div>
 </div>
 
-<form method="POST" action="{{ url_for('admin.pos') }}" data-pos-form>
-  <input type="hidden" name="cart_items" data-pos-cart-input value="[]">
-  <div class="pos-layout">
-    <section>
-      <div class="pos-toolbar">
-        <input class="form-control" type="search" placeholder="Search product, SKU, or barcode" data-pos-search>
+<div class="pos-layout" data-pos-root data-gst-rate="{{ gst_rate or 5 }}">
+  <section>
+    <div class="pos-toolbar">
+      <div class="pos-quick-add">
+        <div>
+          <label class="form-label" for="pos-lookup">Quick Add Item</label>
+          <input class="form-control" id="pos-lookup" type="search" placeholder="Product ID, item ID, name, SKU, or barcode" data-pos-lookup autocomplete="off">
+          <p class="text-sm text-muted mt-1" data-pos-lookup-status>Example: type 10, Classic Apple Pie, SKU, or barcode.</p>
+        </div>
+        <div>
+          <label class="form-label" for="pos-lookup-quantity">Qty</label>
+          <input class="form-control" id="pos-lookup-quantity" type="number" min="1" step="1" value="1" data-pos-lookup-qty>
+        </div>
+        <button type="button" class="btn btn-primary" data-pos-lookup-add>Add Item</button>
       </div>
-      <div class="pos-product-grid" data-pos-product-grid>
-        {% for variant in variants %}
+      <input class="form-control" type="search" placeholder="Filter product tiles by name, ID, SKU, barcode, or category" data-pos-search>
+    </div>
+    <div class="pos-product-grid" data-pos-product-grid>
+      {% for variant in variants %}
+      {% set product = variant.product %}
+      {% set stock = variant.stock or 0 %}
+      <article
+        class="pos-product-card {% if stock <= 0 %}is-out-of-stock{% endif %}"
+        data-pos-product-card
+        data-search="{{ product.id }} {{ variant.id }} {{ product.name }} {{ variant.name }} {{ product.category.name if product.category else '' }} {{ variant.sku or '' }} {{ variant.barcode or '' }}"
+      >
         <button
           type="button"
           class="pos-product-tile"
           data-pos-add
+          data-search="{{ product.id }} {{ variant.id }} {{ product.name }} {{ variant.name }} {{ product.category.name if product.category else '' }} {{ variant.sku or '' }} {{ variant.barcode or '' }}"
+          data-product-id="{{ product.id }}"
           data-variant-id="{{ variant.id }}"
-          data-name="{{ variant.product.name }}{% if variant.name %} - {{ variant.name }}{% endif %}"
+          data-sku="{{ variant.sku or '' }}"
+          data-barcode="{{ variant.barcode or '' }}"
+          data-name="{{ product.name }}{% if variant.name %} - {{ variant.name }}{% endif %}"
           data-price="{{ variant.price }}"
-          data-stock="{{ variant.stock or 0 }}"
-          data-search="{{ variant.product.name }} {{ variant.name }} {{ variant.sku or '' }} {{ variant.barcode or '' }}"
+          data-stock="{{ stock }}"
+          {% if stock <= 0 %}disabled aria-disabled="true"{% endif %}
         >
-          <span class="pos-product-name">{{ variant.product.name }}</span>
-          <span class="pos-product-meta">{{ variant.name }} · ₹{{ '%.2f'|format(variant.price or 0) }}</span>
-          <span class="pos-product-stock">{{ variant.stock or 0 }} in stock</span>
+          <span class="pos-product-name">{{ product.name }}</span>
+          <span class="pos-product-meta">
+            {{ variant.name }} · ₹{{ '%.2f'|format(variant.price or 0) }}
+            {% if product.category %} · {{ product.category.name }}{% endif %}
+          </span>
+          <span class="pos-product-ids">Product ID #{{ product.id }} · Item ID #{{ variant.id }}</span>
+          <span class="pos-product-stock" data-pos-stock-label="{{ variant.id }}" data-stock-status="{{ variant.id }}">
+            {% if stock <= 0 %}Out of Stock{% elif stock <= 5 %}Only {{ stock }} left{% else %}{{ stock }} in stock{% endif %}
+          </span>
+          {% if product.preparation %}
+          <span class="pos-product-note">{{ product.preparation }}</span>
+          {% endif %}
         </button>
-        <input type="hidden" name="expected_version_{{ variant.id }}" value="{{ variant.version or 0 }}">
-        {% else %}
-        <p class="text-center text-muted" style="padding:1rem">No POS products available.</p>
-        {% endfor %}
+
+        {% if can_update_walkin_availability %}
+        <details class="pos-product-controls">
+          <summary>Update availability / details</summary>
+          <form method="POST" action="{{ url_for('admin.update_pos_variant_availability', variant_id=variant.id) }}" class="pos-availability-form">
+            <input type="hidden" name="expected_version" value="{{ variant.version or 0 }}">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Stock</label>
+                <input class="form-control" type="number" name="stock" value="{{ stock }}" min="0" data-stock-input="{{ variant.id }}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">SKU</label>
+                <input class="form-control" value="{{ variant.sku or 'Not set' }}" readonly>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Kitchen Prep Note</label>
+              <textarea class="form-control" name="preparation" rows="2" placeholder="Short prep or availability note">{{ product.preparation or '' }}</textarea>
+            </div>
+            <button type="submit" class="btn btn-outline btn-sm">Save Kitchen Update</button>
+          </form>
+        </details>
+        {% endif %}
+      </article>
+      {% else %}
+      <p class="text-center text-muted" style="padding:1rem">No walk-in products available.</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  <form method="POST" action="{{ url_for('admin.pos') }}" class="pos-cart-panel" data-pos-sale-form>
+    <input type="hidden" name="cart_items" data-pos-cart-input value="[]">
+    {% for variant in variants %}
+    <input type="hidden" name="expected_version_{{ variant.id }}" value="{{ variant.version or 0 }}">
+    {% endfor %}
+    <div class="card-header">Current Walk-in Order</div>
+    <div class="card-body">
+      <div class="pos-cart-lines" data-pos-cart-lines>
+        <p class="text-muted text-sm" data-pos-empty>Tap available products to add them here.</p>
       </div>
-    </section>
 
-    <aside class="pos-cart-panel">
-      <div class="card-header">Current Sale</div>
-      <div class="card-body">
-        <div class="pos-cart-lines" data-pos-cart-lines>
-          <p class="text-muted text-sm" data-pos-empty>Tap products to add them here.</p>
-        </div>
-
-        <div class="pos-total-row">
-          <span>Total</span>
-          <strong data-pos-total>₹0.00</strong>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Customer Name</label>
-          <input class="form-control" name="customer_name" placeholder="Optional">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Customer Phone</label>
-          <input class="form-control" name="customer_phone" placeholder="Optional, links existing customer">
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Payment</label>
-            <select class="form-control" name="payment_mode">
-              <option value="CASH">Cash</option>
-              <option value="CARD">Card - recorded manually</option>
-              <option value="UPI">UPI - recorded manually</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Sale Status</label>
-            <select class="form-control" name="sale_status">
-              <option value="DELIVERED">Completed</option>
-              <option value="PREPARING">Preparing</option>
-              <option value="READY_FOR_PICKUP">Ready for pickup</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Note</label>
-          <input class="form-control" name="special_note" placeholder="Optional">
-        </div>
-        <button class="btn btn-primary btn-block" type="submit" data-pos-submit disabled>Complete Sale</button>
+      <div class="pos-total-row">
+        <span>Base Amount</span>
+        <strong data-pos-subtotal>₹0.00</strong>
       </div>
-    </aside>
-  </div>
-</form>
+      <div class="pos-total-row">
+        <span>CGST <small data-pos-cgst-rate>{{ '%.3f'|format((gst_rate or 5) / 2) }}%</small></span>
+        <strong data-pos-cgst>₹0.00</strong>
+      </div>
+      <div class="pos-total-row">
+        <span>SGST <small data-pos-sgst-rate>{{ '%.3f'|format((gst_rate or 5) / 2) }}%</small></span>
+        <strong data-pos-sgst>₹0.00</strong>
+      </div>
+      <div class="pos-total-row">
+        <span>Total Payable</span>
+        <strong data-pos-total>₹0.00</strong>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Customer Name</label>
+        <input class="form-control" name="customer_name" placeholder="Optional">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Customer Phone</label>
+        <input class="form-control" name="customer_phone" placeholder="Optional, links existing customer">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">GST Order Source</label>
+          <select class="form-control" name="gst_order_source">
+            {% for value, label in gst_order_source_choices %}
+            <option value="{{ value }}" {% if value == default_gst_order_source %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Payment Method</label>
+          <select class="form-control" name="payment_mode">
+            <option value="CASH">Cash</option>
+            <option value="CARD">Card - recorded manually</option>
+            <option value="UPI">UPI - recorded manually</option>
+            <option value="SWIGGY">Swiggy payout</option>
+            <option value="ZOMATO">Zomato payout</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">After Payment Status</label>
+          <select class="form-control" name="sale_status">
+            <option value="DELIVERED">Completed now</option>
+            <option value="PREPARING">Send to kitchen queue</option>
+            <option value="READY_FOR_PICKUP">Ready for pickup</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Kitchen / Order Note</label>
+        <input class="form-control" name="special_note" placeholder="Optional note for kitchen display">
+      </div>
+      <p class="text-sm text-muted">This creates a pending bill. The receipt opens only after Amount Received is confirmed.</p>
+      <button class="btn btn-primary btn-block" type="submit" data-pos-submit disabled>Create Bill & Collect Payment</button>
+    </div>
+  </form>
+</div>
 
 {% if can_admin_manager %}
-<div class="card mt-4">
-  <div class="card-header">Issue Gift Card</div>
+<div id="pos-gift-card-form" class="card mt-4 hidden">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+    <span>Issue Gift Card</span>
+    <button type="button" class="btn btn-ghost btn-sm" data-hide-target="#pos-gift-card-form">Cancel</button>
+  </div>
   <div class="card-body">
     <form method="POST" action="{{ url_for('admin.pos_gift_card') }}" class="form-grid">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

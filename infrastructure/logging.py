@@ -101,6 +101,12 @@ def register_error_handlers(app):
             return jsonify({"ok": False, "message": "Not found"}), 404
         return exc
 
+    @app.errorhandler(403)
+    def handle_forbidden(exc):
+        if request.accept_mimetypes.best == "application/json":
+            return jsonify({"ok": False, "message": "Forbidden"}), 403
+        return "You do not have permission to access this resource.", 403
+
     @app.errorhandler(Exception)
     def handle_exception(exc):
         app.logger.exception("unhandled_exception")

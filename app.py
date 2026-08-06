@@ -87,6 +87,12 @@ DEMO_PORTAL_CREDENTIALS = {
     },
 }
 
+ORDER_SCREEN_CREDENTIALS = {
+    "email": "order@bakery.com",
+    "password": "screen",
+    "label": "Walk-in Order Screen",
+}
+
 
 @socketio.on("connect")
 def handle_socket_connect():
@@ -129,11 +135,44 @@ def vercel_deployment_url():
     return deployment_url.rstrip("/")
 
 
+def render_deployment_url():
+    deployment_url = (os.environ.get("RENDER_EXTERNAL_URL") or "").strip()
+    if not deployment_url:
+        return ""
+    if not deployment_url.startswith(("http://", "https://")):
+        deployment_url = f"https://{deployment_url}"
+    return deployment_url.rstrip("/")
+
+
+def is_render_runtime():
+    return bool(
+        (os.environ.get("RENDER") or "").strip()
+        or (os.environ.get("RENDER_SERVICE_ID") or "").strip()
+        or render_deployment_url()
+    )
+
+
+def development_credentials_enabled(app=None):
+    target_app = app or current_app
+    if os.environ.get("PYTEST_CURRENT_TEST") or target_app.testing:
+        return False
+    if target_app.config.get("ENV") == "production" or is_render_runtime():
+        return False
+    return bool(
+        target_app.config.get("SHOW_DEMO_ACCOUNTS", False)
+        and target_app.config.get("DEVELOPMENT_CREDENTIALS_ENABLED", False)
+    )
+
+
 def configured_portal_url(role, config_name):
     env_key = f"{role.upper()}_PORTAL_URL"
     configured = (os.environ.get(env_key) or "").strip().rstrip("/")
     if configured:
         return configured
+    if config_name == "production" and role == resolve_portal_role():
+        deployment_url = render_deployment_url() or vercel_deployment_url()
+        if deployment_url:
+            return deployment_url
     if config_name == "production" and role == "customer":
         deployment_url = vercel_deployment_url()
         if deployment_url:
@@ -187,11 +226,7 @@ def save_recorded_development_credentials(payload):
 
 
 def record_development_credential(role, email, password, label="", source="manual"):
-    if (
-        os.environ.get("PYTEST_CURRENT_TEST")
-        or current_app.testing
-        or not current_app.config.get("SHOW_DEMO_ACCOUNTS", False)
-    ):
+    if not development_credentials_enabled():
         return
 
     email = (email or "").strip().lower()
@@ -241,9 +276,7 @@ def get_available_development_credentials():
 
 def print_development_startup_banner(app):
     if (
-        app.testing
-        or app.config.get("ENV") == "production"
-        or not app.config.get("SHOW_DEMO_ACCOUNTS", False)
+        not development_credentials_enabled(app)
         or os.environ.get("PORTAL_LAUNCHER_CHILD") == "1"
     ):
         return
@@ -282,6 +315,10 @@ def configure_app(app, config_name="default", portal_role=None):
         config_name = "default"
 
     app.config.from_object(config[config_name])
+    show_demo_override = env_flag("SHOW_DEMO_ACCOUNTS")
+    if app.config.get("ENV") == "production" and show_demo_override:
+        raise RuntimeError("SHOW_DEMO_ACCOUNTS cannot be enabled in production")
+
     if hasattr(config[config_name], "init_app"):
         config[config_name].init_app(app)
     app.config.setdefault(
@@ -298,8 +335,10 @@ def configure_app(app, config_name="default", portal_role=None):
     app.config["OFFLINE_SYNC_DB_PATH"] = app.config.get(
         "OFFLINE_SYNC_DB_TEMPLATE", ""
     ).format(portal_role=current_role)
-    show_demo_override = env_flag("SHOW_DEMO_ACCOUNTS")
-    if show_demo_override is not None:
+    if app.config.get("ENV") == "production":
+        app.config["SHOW_DEMO_ACCOUNTS"] = False
+        app.config["DEVELOPMENT_CREDENTIALS_ENABLED"] = False
+    elif show_demo_override is not None:
         app.config["SHOW_DEMO_ACCOUNTS"] = show_demo_override
 
     auto_init_override = env_flag("AUTO_INIT_DB")
@@ -396,10 +435,6 @@ def setup_extensions(app):
         "LOGIN_SESSION_PROTECTION", "basic"
     )
     login_manager.login_view = "auth.login"
-    if app.config.get("PORTAL_ROLE") == "admin":
-        login_manager.login_view = "admin.admin_login"
-    elif app.config.get("PORTAL_ROLE") == "delivery":
-        login_manager.login_view = "delivery.delivery_login"
     login_manager.login_message_category = "info"
 
     @app.before_request
@@ -407,9 +442,37 @@ def setup_extensions(app):
         if should_force_https(app, request):
             return redirect(request.url.replace("http://", "https://", 1), code=301)
 
+    @app.before_request
+    def enforce_required_password_change():
+        if not getattr(current_user, "is_authenticated", False):
+            return None
+        if not getattr(current_user, "must_change_password", False):
+            return None
+
+        endpoint = request.endpoint or ""
+        if (
+            endpoint in {"auth.force_password_change", "auth.logout", "static"}
+            or request.path.startswith("/static/")
+        ):
+            return None
+
+        from routes.auth import forced_password_change_url
+
+        return redirect(forced_password_change_url(current_user))
+
     @login_manager.user_loader
     def load_user(user_id):
-        return db.session.get(User, int(user_id))
+        user = db.session.get(User, int(user_id))
+        if user is None:
+            return None
+        try:
+            from bootstrap import get_container
+
+            if get_container().customer_risk_service.should_block_session(user):
+                return None
+        except Exception:
+            pass
+        return user
 
 
 def setup_security(app):
@@ -522,11 +585,18 @@ def register_core_routes(app):
 
     @app.route("/livez")
     def livez():
-        return jsonify({"status": "ok", "service": "bakery"})
+        return jsonify(
+            {
+                "status": "ok",
+                "service": "bakery",
+                "environment": app.config.get("ENV"),
+                "portal_role": app.config.get("PORTAL_ROLE"),
+            }
+        )
 
-    @app.route("/healthz")
-    def healthz():
+    def build_readiness_payload():
         database_state = "ok"
+        migrations_state = "not_checked"
         redis_state = "ok"
         celery_state = "ok"
         storage_state = "ok"
@@ -534,10 +604,23 @@ def register_core_routes(app):
         redis_required = bool(app.config.get("REDIS_REQUIRED", False))
         celery_required = bool(app.config.get("CELERY_REQUIRED", False))
         storage_required = bool(app.config.get("STORAGE_REQUIRED", False))
+        migrations_required = bool(
+            app.config.get("ENV") == "production"
+            and app.config.get("MIGRATIONS_ENABLED", True)
+        )
         try:
             db.session.execute(text("SELECT 1"))
+            if migrations_required:
+                version = db.session.execute(
+                    text("SELECT version_num FROM alembic_version LIMIT 1")
+                ).scalar()
+                migrations_state = "ok" if version else "missing"
+                if not version:
+                    status_code = 503
         except Exception:
             database_state = "unhealthy"
+            if migrations_required:
+                migrations_state = "unhealthy"
             status_code = 503
         try:
             redis_url = app.config.get("REDIS_URL")
@@ -585,16 +668,31 @@ def register_core_routes(app):
         elif storage_state != "ok":
             status_code = 503
 
-        return (
-            jsonify(
-                status="ok" if status_code == 200 else "error",
-                database=database_state,
-                redis=redis_state,
-                celery=celery_state,
-                storage=storage_state,
-            ),
-            status_code,
-        )
+        payload = {
+            "status": "ok" if status_code == 200 else "error",
+            "service": "bakery",
+            "environment": app.config.get("ENV"),
+            "portal_role": app.config.get("PORTAL_ROLE"),
+            "database": database_state,
+            "migrations": migrations_state,
+            "redis": redis_state,
+            "celery": celery_state,
+            "storage": storage_state,
+            "requirements": {
+                "redis": redis_required,
+                "celery": celery_required,
+                "storage": storage_required,
+                "migrations": migrations_required,
+            },
+        }
+        return payload, status_code
+
+    @app.route("/healthz")
+    @app.route("/readyz")
+    @app.route("/api/health")
+    def healthz():
+        payload, status_code = build_readiness_payload()
+        return jsonify(payload), status_code
 
     @app.route("/internal/trigger_offline_sync", methods=["POST"])
     @csrf.exempt
@@ -669,6 +767,23 @@ def register_context_processors(app):
                 portal_urls[role] = configured or current_root
             return portal_urls
 
+        def format_inr(amount):
+            try:
+                value = Decimal(str(amount))
+            except Exception:
+                value = Decimal("0")
+            return f"₹{value:,.0f}"
+
+        def default_page_url(page_number, endpoint=None, **overrides):
+            args = request.args.to_dict(flat=True)
+            args.update({key: value for key, value in overrides.items() if value is not None})
+            args["page"] = page_number
+            target_endpoint = endpoint or request.endpoint
+            if not target_endpoint:
+                query = "&".join(f"{key}={value}" for key, value in args.items())
+                return f"{request.path}?{query}" if query else request.path
+            return url_for(target_endpoint, **args)
+
         categories = []
         unread_count = 0
         try:
@@ -705,6 +820,8 @@ def register_context_processors(app):
             address_query=address_query,
             map_link_url=map_link_url,
             map_embed_url=map_embed_url,
+            format_inr=format_inr,
+            page_url=default_page_url,
         )
 
 
@@ -877,6 +994,9 @@ def seed_data(app):
         admin.admin_tier = "owner"
         admin.phone = "9999999999"
         admin.is_active = True
+        admin.email_locked = True
+        admin.rbac_enabled = True
+        admin.employee_status = "active"
         admin.set_password(DEMO_PORTAL_CREDENTIALS["admin"]["password"])
         record_development_credential(
             "admin",
@@ -885,6 +1005,32 @@ def seed_data(app):
             label=DEMO_PORTAL_CREDENTIALS["admin"]["label"],
             source="seeded",
         )
+
+        # Seed default RBAC roles and approval workflows.
+        from bootstrap import get_container
+
+        get_container().rbac_service.ensure_default_roles(commit=False)
+        get_container().rbac_service.ensure_default_approval_workflows(commit=False)
+
+        # Dedicated walk-in order-taking login for the POS/order screen.
+        order_screen_user = User.query.filter_by(
+            email=ORDER_SCREEN_CREDENTIALS["email"]
+        ).first()
+        if not order_screen_user:
+            order_screen_user = User(
+                name="Order Taking Screen",
+                email=ORDER_SCREEN_CREDENTIALS["email"],
+                role="cashier",
+                phone="6666666666",
+            )
+            db.session.add(order_screen_user)
+        order_screen_user.name = "Order Taking Screen"
+        order_screen_user.role = "cashier"
+        order_screen_user.admin_tier = "staff"
+        order_screen_user.phone = "6666666666"
+        order_screen_user.is_active = True
+        order_screen_user.email_locked = True
+        order_screen_user.set_password(ORDER_SCREEN_CREDENTIALS["password"])
 
         # Delivery user
         duser = User.query.filter_by(
@@ -903,6 +1049,7 @@ def seed_data(app):
         duser.role = "delivery"
         duser.phone = "8888888888"
         duser.is_active = True
+        duser.email_locked = True
         duser.set_password(DEMO_PORTAL_CREDENTIALS["delivery"]["password"])
         agent = DeliveryAgent.query.filter_by(user_id=duser.id).first()
         if not agent:
@@ -953,6 +1100,7 @@ def seed_data(app):
             ("Breads", "🍞"),
             ("Cupcakes", "🧁"),
             ("Pies", "🥧"),
+            ("Party Add-ons", "🎉"),
         ]
         categories = {}
         for cname, icon in cats_data:
@@ -1155,4 +1303,11 @@ if __name__ == "__main__":
             flask_app,
             seed=flask_app.config.get("SHOW_DEMO_ACCOUNTS", False),
         )
-    flask_app.run(debug=False, use_reloader=False, host="0.0.0.0", port=port)
+    socketio.run(
+        flask_app,
+        debug=False,
+        use_reloader=False,
+        host="0.0.0.0",
+        port=port,
+        allow_unsafe_werkzeug=True,
+    )

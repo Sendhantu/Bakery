@@ -1,10 +1,21 @@
 {% extends 'admin/base_admin.html' %}
 {% block title %}Tax Rates — Finance{% endblock %}
 {% block content %}
-<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1rem">Tax Rates</h1>
-<p class="text-sm text-muted" style="margin-bottom:1rem">Configure GST rates with your accountant. Rates vary by product category and change over time — do not rely on defaults for filing.</p>
-<div class="card" style="margin-bottom:1rem">
-  <div class="card-header">Add Tax Rate</div>
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.25rem">Tax Rates</h1>
+    <p class="text-sm text-muted" style="margin:0">Configure GST rates with your accountant. Rates vary by product category and change over time — do not rely on defaults for filing.</p>
+  </div>
+  <div class="flex gap-2 flex-wrap">
+    <button type="button" class="btn btn-primary btn-sm" data-toggle-target="#add-tax-rate-form" data-toggle-hide-self>Add Tax Rate</button>
+    <a href="{{ url_for('admin.finance_dashboard') }}" class="btn btn-ghost btn-sm">← Back to Finance</a>
+  </div>
+</div>
+<div id="add-tax-rate-form" class="card hidden" style="margin-bottom:1rem">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+    <span>Add Tax Rate</span>
+    <button type="button" class="btn btn-ghost btn-sm" data-hide-target="#add-tax-rate-form">Cancel</button>
+  </div>
   <div class="card-body">
     <form method="POST" action="{{ url_for('admin.finance_add_tax_rate') }}" class="flex gap-2 flex-wrap items-end">
       <div class="form-group" style="margin:0"><label class="form-label">Name</label><input class="form-control" name="name" placeholder="Bakery GST 5%"></div>

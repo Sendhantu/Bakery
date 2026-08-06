@@ -1,122 +1,285 @@
 {% extends 'admin/base_admin.html' %}
-{% block title %}Raw Materials — Admin{% endblock %}
+{% block title %}Raw Materials - Admin{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-4">
-  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">🧂 Raw Materials</h1>
-  <a href="{{ url_for('admin.inventory') }}" class="btn btn-ghost">← Product Inventory</a>
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Raw Materials</h1>
+    <p class="text-muted">View stock, batches, purchases, and expiry status for every raw material.</p>
+  </div>
+  <div class="flex gap-2 flex-wrap">
+    {% if can_admin_manager %}
+    <button type="button"
+            class="btn btn-primary"
+            data-toggle-target="#new-raw-material-form"
+            data-toggle-hide-self>
+      Create New Raw Material
+    </button>
+    {% endif %}
+    <a href="{{ url_for('admin.inventory') }}" class="btn btn-ghost">Product Inventory</a>
+  </div>
 </div>
-<form method="GET" action="{{ url_for('admin.raw_materials') }}" class="admin-toolbar-search" style="margin-bottom:1rem">
-  <input class="form-control" type="search" name="q" value="{{ search or '' }}" placeholder="Search materials">
-  <button type="submit" class="btn btn-outline btn-sm">Search</button>
-</form>
 
+{% if summary_cards %}
 <div class="stat-grid" style="margin-bottom:1.5rem">
-  <div class="stat-card brown"><span class="stat-icon">🧾</span><div class="stat-value">{{ pagination.total }}</div><div class="stat-label">Total Materials</div></div>
-  <div class="stat-card rose"><span class="stat-icon">⚠️</span><div class="stat-value">{{ low_stock_count }}</div><div class="stat-label">Low Stock</div></div>
-  <div class="stat-card orange"><span class="stat-icon">📭</span><div class="stat-value">{{ out_of_stock_count }}</div><div class="stat-label">Out of Stock</div></div>
+  {% for card in summary_cards %}
+  <a href="{{ card.url }}" class="stat-card {{ {'default': 'brown', 'warning': 'rose', 'danger': 'orange', 'info': 'blue', 'success': 'green'}.get(card.tone, 'brown') }}" style="text-decoration:none;display:block">
+    <div class="stat-icon">{{ {'total': '🧾', 'low': '⚠️', 'out': '📭', 'expiring': '⏳', 'value': '💰'}.get(card.key, '📦') }}</div>
+    <div class="stat-value">
+      {% if card.value_format == 'currency' %}₹{{ '{:,.2f}'.format(card.value) }}{% else %}{{ card.value }}{% endif %}
+    </div>
+    <div class="stat-label">{{ card.label }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card raw-material-filter-card" style="margin-bottom:1.5rem">
+  <div class="card-header">Search &amp; Filter</div>
+  <div class="card-body">
+    <form method="GET" action="{{ url_for('admin.raw_materials') }}" class="raw-material-filter-grid">
+      <div class="form-group">
+        <label class="form-label" for="rm-search">Search</label>
+        <input class="form-control" id="rm-search" type="search" name="q" value="{{ search or '' }}" placeholder="Name, SKU, supplier, batch, invoice">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="rm-category">Category</label>
+        <select class="form-control" id="rm-category" name="category">
+          <option value="">All categories</option>
+          {% for option in category_options %}
+          <option value="{{ option }}" {% if category == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="rm-status">Stock Status</label>
+        <select class="form-control" id="rm-status" name="status">
+          {% for value, label in stock_status_options %}
+          <option value="{{ value }}" {% if stock_status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="rm-expiry">Expiry</label>
+        <select class="form-control" id="rm-expiry" name="expiry">
+          {% for value, label in expiry_options %}
+          <option value="{{ value }}" {% if expiry_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="rm-supplier">Supplier</label>
+        <select class="form-control" id="rm-supplier" name="supplier_id">
+          <option value="">All suppliers</option>
+          {% for option in supplier_options %}
+          <option value="{{ option.id }}" {% if supplier_id == option.id %}selected{% endif %}>{{ option.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="rm-location">Location</label>
+        <select class="form-control" id="rm-location" name="location">
+          <option value="">All locations</option>
+          {% for option in location_options %}
+          <option value="{{ option }}" {% if location == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="rm-last-purchase">Last Purchase</label>
+        <select class="form-control" id="rm-last-purchase" name="last_purchase">
+          {% for value, label in last_purchase_options %}
+          <option value="{{ value }}" {% if last_purchase_days == value|int %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="rm-sort">Sort By</label>
+        <select class="form-control" id="rm-sort" name="sort">
+          <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
+          <option value="stock" {% if sort_by == 'stock' %}selected{% endif %}>Available Quantity</option>
+          <option value="last_purchase" {% if sort_by == 'last_purchase' %}selected{% endif %}>Last Purchase</option>
+          <option value="expiry" {% if sort_by == 'expiry' %}selected{% endif %}>Expiry Date</option>
+          <option value="value" {% if sort_by == 'value' %}selected{% endif %}>Inventory Value</option>
+        </select>
+      </div>
+      <div class="raw-material-filter-actions">
+        <button type="submit" class="btn btn-outline">Apply Filters</button>
+        <a href="{{ url_for('admin.raw_materials') }}" class="btn btn-ghost">Clear</a>
+      </div>
+    </form>
+  </div>
 </div>
 
-<div style="display:grid;grid-template-columns:360px 1fr;gap:1.5rem;align-items:start">
-  <div class="card" style="position:sticky;top:90px">
-    <div class="card-header">Add Raw Material</div>
-    <div class="card-body">
-      <form method="POST" action="{{ url_for('admin.add_raw_material') }}">
+<div id="new-raw-material-form" class="card raw-material-create-card{% if not show_add_material %} hidden{% endif %}">
+  <div class="card-header raw-material-create-header">
+    <span>Create New Raw Material</span>
+    <button type="button" class="btn btn-ghost btn-sm" data-hide-target="#new-raw-material-form">Cancel</button>
+  </div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('admin.add_raw_material') }}">
+      <div class="raw-material-create-grid">
         <div class="form-group">
           <label class="form-label">Material Name *</label>
           <input class="form-control" name="name" required placeholder="Flour, Cocoa Powder, Butter">
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Unit *</label>
-            <input class="form-control" name="unit" value="kg" required placeholder="kg, litre, pack">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Current Stock</label>
-            <input class="form-control" type="number" step="0.01" min="0" name="stock" value="0">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Reorder Level</label>
-            <input class="form-control" type="number" step="0.01" min="0" name="reorder_level" value="0">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Cost / Unit</label>
-            <input class="form-control" type="number" step="0.01" min="0" name="cost_per_unit" value="0">
-          </div>
+        <div class="form-group">
+          <label class="form-label">SKU</label>
+          <input class="form-control" name="sku" placeholder="Optional SKU code">
         </div>
         <div class="form-group">
-          <label class="form-label">Supplier</label>
+          <label class="form-label">Category</label>
+          <input class="form-control" name="category" placeholder="e.g. Bakery, Dairy, Packaging">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Unit *</label>
+          <input class="form-control" name="unit" value="kg" required placeholder="kg, litre, pack">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Opening Stock</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="opening_stock" value="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Reorder Level</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="reorder_level" value="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Min Stock</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="min_stock">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Max Stock</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="max_stock">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Cost / Unit</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="cost_per_unit" value="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Preferred Supplier</label>
+          <select class="form-control" name="preferred_supplier_id">
+            <option value="">No preferred supplier</option>
+            {% for option in supplier_options %}
+            <option value="{{ option.id }}">{{ option.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Supplier (free text)</label>
           <input class="form-control" name="supplier" placeholder="Optional supplier name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Storage Location</label>
+          <input class="form-control" name="storage_location" placeholder="e.g. Dry store, Chiller">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Shelf Life (days)</label>
+          <input class="form-control" type="number" min="0" name="shelf_life_days">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tax Rate (%)</label>
+          <input class="form-control" type="number" step="0.001" min="0" name="tax_rate_percent">
         </div>
         <div class="form-group">
           <label class="form-label">Notes</label>
           <textarea class="form-control" name="notes" placeholder="Storage notes, brand preference, reorder notes"></textarea>
         </div>
-        <button type="submit" class="btn btn-primary btn-block">Add Material</button>
-      </form>
-    </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Add Material</button>
+    </form>
   </div>
+</div>
 
-  <div class="card">
-    <div class="card-header">Manage Materials</div>
-    <div class="card-body" style="padding:0">
-      {% for material in materials %}
-      <form method="POST" action="{{ url_for('admin.update_raw_material', material_id=material.id) }}" style="padding:1rem 1.25rem;border-bottom:1px solid var(--border)">
-        <div style="display:grid;grid-template-columns:1.3fr 0.7fr 0.8fr 0.8fr 0.9fr auto;gap:0.75rem;align-items:end">
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Name</label>
-            <input class="form-control" name="name" value="{{ material.name }}" required>
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Unit</label>
-            <input class="form-control" name="unit" value="{{ material.unit }}" required>
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Stock</label>
-            <input class="form-control" type="number" step="0.01" min="0" name="stock" value="{{ material.stock }}">
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Reorder</label>
-            <input class="form-control" type="number" step="0.01" min="0" name="reorder_level" value="{{ material.reorder_level }}">
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Cost / Unit</label>
-            <input class="form-control" type="number" step="0.01" min="0" name="cost_per_unit" value="{{ material.cost_per_unit or 0 }}">
-          </div>
-          <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-            <button type="submit" class="btn btn-primary btn-sm">Save</button>
-            <button type="submit"
-                    formaction="{{ url_for('admin.toggle_raw_material_status', material_id=material.id) }}"
-                    class="btn btn-ghost btn-sm"
-                    style="color:{% if material.is_active %}var(--dusty-rose){% else %}var(--sage){% endif %}">
-              {% if material.is_active %}Pause{% else %}Enable{% endif %}
-            </button>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1.2fr auto;gap:0.75rem;align-items:center;margin-top:0.75rem">
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Supplier</label>
-            <input class="form-control" name="supplier" value="{{ material.supplier or '' }}" placeholder="Optional supplier">
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Notes</label>
-            <input class="form-control" name="notes" value="{{ material.notes or '' }}" placeholder="Optional notes">
-          </div>
-          <div style="text-align:right">
-            <span class="badge {% if material.stock_status == 'out_of_stock' %}badge-red{% elif material.stock_status == 'low_stock' %}badge-orange{% else %}badge-green{% endif %}">
-              {% if material.stock_status == 'out_of_stock' %}Out of Stock{% elif material.stock_status == 'low_stock' %}Low Stock{% else %}In Stock{% endif %}
-            </span>
-            <span class="badge {% if material.is_active %}badge-blue{% else %}badge-brown{% endif %}" style="margin-left:0.35rem">
-              {% if material.is_active %}Active{% else %}Inactive{% endif %}
-            </span>
-          </div>
-        </div>
-      </form>
-      {% else %}
-      <div class="text-center text-muted" style="padding:2rem">No raw materials yet. Add your first one from the form.</div>
-      {% endfor %}
+<div class="card">
+  <div class="card-header">
+    {% if stock_status %}Filtered: {{ dict(stock_status_options).get(stock_status, stock_status) }}{% elif search %}Search Results{% else %}All Raw Materials{% endif %}
+    <span class="text-muted">· {{ pagination.total }} total</span>
+  </div>
+  <div class="raw-material-list">
+    <div class="raw-material-list-head">
+      <div>Material</div>
+      <div>Available</div>
+      <div>Status</div>
+      <div>Expiry</div>
+      <div>Last Purchase</div>
+      <div></div>
     </div>
+    {% for material in materials %}
+    <div class="raw-material-list-row">
+      <div>
+        <a href="{{ url_for('admin.material_detail', material_id=material.id) }}" style="color:var(--brown);font-weight:600">{{ material.name }}</a>
+        {% if material.sku %}<div class="text-muted text-sm">{{ material.sku }}</div>{% endif %}
+        {% if material.category %}<div class="text-muted text-sm">{{ material.category }}</div>{% endif %}
+      </div>
+      <div>
+        <strong>{{ material.usable_quantity }}</strong> {{ material.unit }}
+        {% if material.reserved_quantity %}<div class="text-muted text-sm">{{ material.reserved_quantity }} reserved</div>{% endif %}
+      </div>
+      <div>
+        {% if material.stock_status == 'out_of_stock' %}
+        <span class="badge badge-red">Out of Stock</span>
+        {% elif material.stock_status == 'low_stock' %}
+        <span class="badge badge-orange">Low Stock</span>
+        {% else %}
+        <span class="badge badge-green">In Stock</span>
+        {% endif %}
+        {% if material.reorder_required and material.stock_status != 'out_of_stock' %}
+        <span class="badge badge-orange">Reorder</span>
+        {% endif %}
+        {% if not material.is_active %}
+        <span class="badge badge-brown">Paused</span>
+        {% endif %}
+      </div>
+      <div>
+        {% if material.expiry_summary and material.expiry_summary.status == 'expired' %}
+        <span class="badge badge-red">Expired</span>
+        {% elif material.expiry_summary and material.expiry_summary.status == 'expiring_soon' %}
+        <span class="badge badge-orange">Expires {{ material.expiry_summary.nearest.strftime('%d %b %Y') }}</span>
+        {% elif material.expiry_summary and material.expiry_summary.status == 'ok' %}
+        <span class="badge badge-green">{{ material.expiry_summary.nearest.strftime('%d %b %Y') }}</span>
+        {% else %}
+        <span class="text-muted text-sm">—</span>
+        {% endif %}
+      </div>
+      <div>
+        {% if material.last_purchased_at %}
+        <div>{{ material.last_purchased_at.strftime('%d %b %Y') }}</div>
+        <div class="text-muted text-sm">{{ material.last_purchase_quantity }} {{ material.unit }} @ ₹{{ material.last_purchase_unit_price }}</div>
+        {% else %}
+        <span class="text-muted text-sm">Never purchased</span>
+        {% endif %}
+      </div>
+      <div class="raw-material-list-actions">
+        <a href="{{ url_for('admin.material_detail', material_id=material.id) }}" class="btn btn-outline btn-sm">View</a>
+        {% if can_admin_manager %}
+        <button type="button" class="btn btn-ghost btn-sm" data-toggle-target="#inline-stock-{{ material.id }}" data-toggle-hide-text="Close">Stock</button>
+        {% endif %}
+      </div>
+    </div>
+    {% if can_admin_manager %}
+    <div id="inline-stock-{{ material.id }}" class="raw-material-inline-stock hidden">
+      <form method="POST" action="{{ url_for('admin.record_material_stock_action', material_id=material.id) }}" class="raw-material-stock-form">
+        <input type="hidden" name="action" value="add">
+        <div class="form-group">
+          <label class="form-label">Add Stock</label>
+          <input class="form-control" type="number" step="0.01" min="0" name="quantity" required placeholder="Quantity">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Notes</label>
+          <input class="form-control" name="notes" placeholder="Optional note">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+      </form>
+      <a href="{{ url_for('admin.material_detail', material_id=material.id) }}#stock-actions" class="btn btn-ghost btn-sm">All stock actions</a>
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="text-center text-muted" style="padding:2rem">
+      No raw materials found.
+      {% if can_admin_manager %}
+      <button type="button" class="btn btn-primary btn-sm mt-2" data-toggle-target="#new-raw-material-form">Create New Raw Material</button>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
 </div>
 {% include 'includes/pagination.html' %}

@@ -124,7 +124,11 @@ def notify_order_status_change(order, new_status, old_status=None):
         url_for("customer.order_detail", order_id=order.id),
     )
 
-    if new_status == "DELIVERED" and (old_status or "").strip().upper() != "DELIVERED":
+    if (
+        new_status == "DELIVERED"
+        and (old_status or "").strip().upper() != "DELIVERED"
+        and (order.payment_status or "").strip().upper() == "PAID"
+    ):
         existing_reward = LoyaltyLedger.query.filter_by(
             user_id=order.user_id,
             order_id=order.id,
@@ -138,7 +142,7 @@ def notify_order_status_change(order, new_status, old_status=None):
                     "🎉 Loyalty Points Earned!",
                     f"You earned {pts} points for order #{order.order_number}.",
                     "loyalty",
-                    url_for("customer.loyalty"),
+                    url_for("auth.profile"),
                 )
 
     db.session.commit()

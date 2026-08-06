@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
 import uuid
 
 from clock import utcnow
@@ -46,6 +47,46 @@ ORDER_STATUS_TRANSITIONS = {
     "CANCELLED": [],
     "REFUNDED": [],
 }
+ORDER_CUSTOMER_CANCEL_WINDOW = timedelta(minutes=2)
+ORDER_CUSTOMER_CANCEL_WINDOW_SECONDS = int(
+    ORDER_CUSTOMER_CANCEL_WINDOW.total_seconds()
+)
+
+GST_SUPPLY_RESTAURANT_SERVICE = "RESTAURANT_SERVICE"
+GST_LIABILITY_BAKERY = "PAYABLE_BY_BAKERY"
+GST_LIABILITY_ECOMMERCE_OPERATOR = "PAID_BY_ECOMMERCE_OPERATOR"
+GST_RETURN_OUTWARD_SUPPLIES = "GSTR1_OUTWARD_SUPPLIES"
+GST_RETURN_ECOMMERCE_9_5 = "GSTR1_TABLE_14_9_5"
+
+GST_ORDER_SOURCE_COUNTER_DINE_IN = "COUNTER_DINE_IN"
+GST_ORDER_SOURCE_COUNTER_TAKEAWAY = "COUNTER_TAKEAWAY"
+GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY = "DIRECT_WEB_DELIVERY"
+GST_ORDER_SOURCE_DIRECT_WEB_PICKUP = "DIRECT_WEB_PICKUP"
+GST_ORDER_SOURCE_ECOMMERCE_SWIGGY = "ECOMMERCE_SWIGGY"
+GST_ORDER_SOURCE_ECOMMERCE_ZOMATO = "ECOMMERCE_ZOMATO"
+
+GST_ORDER_SOURCE_CHOICES = [
+    (GST_ORDER_SOURCE_COUNTER_DINE_IN, "Counter dine-in"),
+    (GST_ORDER_SOURCE_COUNTER_TAKEAWAY, "Counter takeaway"),
+    (GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY, "Direct web delivery"),
+    (GST_ORDER_SOURCE_DIRECT_WEB_PICKUP, "Direct web pickup"),
+    (GST_ORDER_SOURCE_ECOMMERCE_SWIGGY, "Swiggy - Section 9(5)"),
+    (GST_ORDER_SOURCE_ECOMMERCE_ZOMATO, "Zomato - Section 9(5)"),
+]
+GST_ORDER_SOURCE_LABELS = dict(GST_ORDER_SOURCE_CHOICES)
+GST_ORDER_SOURCE_VALUES = {value for value, _label in GST_ORDER_SOURCE_CHOICES}
+GST_ECOMMERCE_ORDER_SOURCES = {
+    GST_ORDER_SOURCE_ECOMMERCE_SWIGGY,
+    GST_ORDER_SOURCE_ECOMMERCE_ZOMATO,
+}
+GST_ECOMMERCE_OPERATOR_BY_SOURCE = {
+    GST_ORDER_SOURCE_ECOMMERCE_SWIGGY: "SWIGGY",
+    GST_ORDER_SOURCE_ECOMMERCE_ZOMATO: "ZOMATO",
+}
+GST_LIABILITY_LABELS = {
+    GST_LIABILITY_BAKERY: "Payable by Bakery",
+    GST_LIABILITY_ECOMMERCE_OPERATOR: "Paid by Aggregator",
+}
 
 
 def get_allowed_order_statuses(current_status, actor="admin"):
@@ -85,6 +126,24 @@ class Order(db.Model):
     delivery_charge = db.Column(db.Numeric(10, 2), default=0)
     gst_rate = db.Column(db.Numeric(5, 2), default=5)
     gst_amount = db.Column(db.Numeric(10, 2), default=0)
+    gst_taxable_amount = db.Column(db.Numeric(10, 2), default=0)
+    cgst_amount = db.Column(db.Numeric(10, 2), default=0)
+    sgst_amount = db.Column(db.Numeric(10, 2), default=0)
+    gst_supply_type = db.Column(
+        db.String(40), default=GST_SUPPLY_RESTAURANT_SERVICE, nullable=False
+    )
+    gst_order_source = db.Column(
+        db.String(40), default=GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY, nullable=False
+    )
+    gst_liability_party = db.Column(
+        db.String(40), default=GST_LIABILITY_BAKERY, nullable=False
+    )
+    gst_return_bucket = db.Column(
+        db.String(40), default=GST_RETURN_OUTWARD_SUPPLIES, nullable=False
+    )
+    gst_invoice_note = db.Column(db.String(255))
+    ecommerce_operator = db.Column(db.String(40))
+    ecommerce_tcs_amount = db.Column(db.Numeric(10, 2), default=0)
     total = db.Column(db.Numeric(10, 2), default=0)
 
     address_line1 = db.Column(db.String(255))
@@ -156,10 +215,54 @@ class Order(db.Model):
     )
 
     def can_cancel(self):
-        if self.status not in ["PLACED"]:
+        if (self.status or "").upper() != "PLACED" or not self.placed_at:
             return False
-        window = self.placed_at + timedelta(minutes=2)
-        return utcnow() <= window
+        return utcnow() <= self.customer_cancel_deadline()
+
+    def customer_cancel_deadline(self):
+        if not self.placed_at:
+            return None
+        return self.placed_at + ORDER_CUSTOMER_CANCEL_WINDOW
+
+    def customer_cancel_seconds_remaining(self):
+        deadline = self.customer_cancel_deadline()
+        if deadline is None:
+            return 0
+        return max(0, int((deadline - utcnow()).total_seconds()))
+
+    def customer_cancel_window_seconds(self):
+        return ORDER_CUSTOMER_CANCEL_WINDOW_SECONDS
+
+    @property
+    def gst_order_source_label(self):
+        return GST_ORDER_SOURCE_LABELS.get(
+            self.gst_order_source or GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY,
+            self.gst_order_source or "Direct sale",
+        )
+
+    @property
+    def gst_liability_label(self):
+        return GST_LIABILITY_LABELS.get(
+            self.gst_liability_party or GST_LIABILITY_BAKERY,
+            self.gst_liability_party or "Payable by Bakery",
+        )
+
+    @property
+    def gst_paid_by_ecommerce_operator(self):
+        return (
+            (self.gst_liability_party or "").upper()
+            == GST_LIABILITY_ECOMMERCE_OPERATOR
+        )
+
+    @property
+    def gst_payable_by_bakery(self):
+        return not self.gst_paid_by_ecommerce_operator
+
+    @property
+    def ecommerce_tcs_due(self):
+        return Decimal(str(self.ecommerce_tcs_amount or 0)).quantize(
+            Decimal("0.01")
+        )
 
     def can_modify(self):
         return self.status in ["PLACED"] and not self.is_locked

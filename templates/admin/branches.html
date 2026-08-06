@@ -1,52 +1,251 @@
 {% extends 'admin/base_admin.html' %}
 {% block title %}Branches — Admin{% endblock %}
 {% block content %}
-<div class="flex justify-between items-center mb-4">
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
   <div>
-    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">🏬 Branches</h1>
-    <p class="text-muted text-sm">Manage branch locations, contacts, and active store status.</p>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Branches</h1>
+    <p class="text-muted text-sm">Manage branch locations, contacts, sales, employees, and customer feedback.</p>
   </div>
+  <button type="button" class="btn btn-primary" data-toggle-target="#add-branch-form" data-toggle-hide-self>Add Branch</button>
 </div>
-<div style="display:grid;grid-template-columns:360px 1fr;gap:1.5rem;align-items:start">
-  <div class="card" style="position:sticky;top:90px">
-    <div class="card-header">Add Branch</div>
-    <div class="card-body">
-      <form method="POST" action="{{ url_for('admin.add_branch') }}">
+
+<div id="add-branch-form" class="card mb-4 hidden">
+  <div class="card-header">Add Branch</div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('admin.add_branch') }}">
+      <div class="form-row">
         <div class="form-group"><label class="form-label">Branch Name *</label><input class="form-control" name="name" required></div>
         <div class="form-group"><label class="form-label">Manager</label><input class="form-control" name="manager_name"></div>
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
-        </div>
-        <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" name="address"></textarea></div>
-        <button type="submit" class="btn btn-primary btn-block">Add Branch</button>
-      </form>
-    </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
+        <div class="form-group"><label class="form-label">Address</label><input class="form-control" name="address"></div>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <button type="submit" class="btn btn-primary">Add Branch</button>
+        <button type="button" class="btn btn-outline" data-hide-target="#add-branch-form">Cancel</button>
+      </div>
+    </form>
   </div>
-  <div class="card">
-    <div class="card-header">Branch Network</div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Branch</th><th>Manager</th><th>Contact</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>
-          {% for branch in branches %}
-          <tr>
-            <td><strong>{{ branch.name }}</strong><br><span class="text-muted text-sm">{{ branch.address or 'Address not set' }}</span></td>
-            <td>{{ branch.manager_name or '—' }}</td>
-            <td>{{ branch.phone or '—' }}</td>
-            <td><span class="badge {% if branch.is_active %}badge-green{% else %}badge-red{% endif %}">{{ branch.status }}</span></td>
-            <td>
-              <form method="POST" action="{{ url_for('admin.toggle_branch_status', branch_id=branch.id) }}">
+</div>
+
+<div class="card">
+  <div class="card-header">Branch Network</div>
+  <div class="card-body">
+    <div class="admin-detail-list">
+      {% for branch in branches %}
+      {% set detail = branch.detail_summary %}
+      <details id="branch-{{ branch.id }}" class="category-detail-card admin-record-detail">
+        <summary class="category-summary">
+          <span class="category-summary-main">
+            <span class="category-name">{{ branch.name }}</span>
+            <span class="text-muted text-sm">{{ branch.address or 'Address not set' }}</span>
+          </span>
+          <span class="badge {% if branch.is_active %}badge-green{% else %}badge-red{% endif %}">{{ branch.status }}</span>
+          <span class="text-sm text-muted">Click for branch details</span>
+        </summary>
+        <div class="admin-detail-panel">
+          <div class="stat-grid" style="margin-bottom:1rem">
+            <div class="stat-card brown"><div class="stat-value">₹{{ detail.total_sales|int }}</div><div class="stat-label">Total Sales</div></div>
+            <div class="stat-card green"><div class="stat-value">₹{{ detail.recent_sales|int }}</div><div class="stat-label">Last 30 Days</div></div>
+            <div class="stat-card orange"><div class="stat-value">{{ detail.order_count }}</div><div class="stat-label">Orders</div></div>
+            <div class="stat-card rose"><div class="stat-value">{{ detail.customer_count }}</div><div class="stat-label">Customers</div></div>
+          </div>
+
+          <div class="admin-detail-grid">
+            <section class="admin-detail-box">
+              <h3>Branch Details</h3>
+              <p><strong>Manager:</strong> {{ branch.manager_name or 'Not assigned' }}</p>
+              <p><strong>Phone:</strong> {{ branch.phone or 'Not set' }}</p>
+              <p><strong>Average Order:</strong> ₹{{ detail.avg_order|int }}</p>
+              <p><strong>Raw Materials:</strong> {{ detail.raw_material_count }}</p>
+              <p><strong>Open Deliveries:</strong> {{ detail.open_delivery_count }}</p>
+              <form method="POST" action="{{ url_for('admin.toggle_branch_status', branch_id=branch.id) }}" class="mt-2">
                 <button type="submit" class="btn btn-ghost btn-sm">
-                  {% if branch.is_active %}Close{% else %}Open{% endif %}
+                  {% if branch.is_active %}Close Branch{% else %}Open Branch{% endif %}
                 </button>
               </form>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="5" class="text-center text-muted" style="padding:1.5rem">No branches defined yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+            </section>
+
+            <section class="admin-detail-box">
+              <div class="branch-detail-heading">
+                <h3>Employees</h3>
+                <button type="button" class="btn btn-primary btn-sm" data-toggle-target="#branch-employee-add-{{ branch.id }}" data-toggle-hide-self>Add Employee</button>
+              </div>
+              <form id="branch-employee-add-{{ branch.id }}" method="POST" action="{{ url_for('admin.add_branch_employee', branch_id=branch.id) }}" class="branch-employee-form hidden">
+                <div class="form-row">
+                  <div class="form-group"><label class="form-label">Name *</label><input class="form-control" name="name" required></div>
+                  <div class="form-group">
+                    <label class="form-label">Email *</label>
+                    <input class="form-control" type="email" name="email" required>
+                    <p class="text-sm text-muted">Locked after creation.</p>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group"><label class="form-label">Phone</label><input class="form-control" name="phone"></div>
+                  <div class="form-group">
+                    <label class="form-label">Role *</label>
+                    <select class="form-control" name="role" required>
+                      {% for value, label in branch_employee_role_choices %}
+                      <option value="{{ value }}">{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group"><label class="form-label">Date of Joining</label><input class="form-control" type="date" name="date_of_joining"></div>
+                  <div class="form-group"><label class="form-label">Designation</label><input class="form-control" name="designation" placeholder="Counter lead, baker, manager"></div>
+                </div>
+                <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" name="staff_address" rows="2"></textarea></div>
+                <div class="form-group"><label class="form-label">Emergency Contact</label><input class="form-control" name="emergency_contact"></div>
+                <div class="form-group">
+                  <label class="form-label">Portal Access</label>
+                  <div class="admin-checkbox-grid">
+                    {% for value, label in staff_access_choices %}
+                    <label class="checkbox-line"><input type="checkbox" name="portal_access" value="{{ value }}"> <span>{{ label }}</span></label>
+                    {% endfor %}
+                  </div>
+                  <p class="text-sm text-muted">Leave unchecked to use the selected role's default access.</p>
+                </div>
+                <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" name="staff_notes" rows="2"></textarea></div>
+                <div class="form-group"><label class="form-label">Temporary Password *</label><input class="form-control" type="text" name="password" required minlength="8" placeholder="At least 8 characters"></div>
+                <div class="flex gap-2 flex-wrap">
+                  <button type="submit" class="btn btn-primary btn-sm">Save Employee</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-hide-target="#branch-employee-add-{{ branch.id }}">Cancel</button>
+                </div>
+              </form>
+              {% for employee in detail.employees %}
+              <div class="branch-employee-record">
+                <div class="branch-employee-summary">
+                  <div>
+                    <strong>{{ employee.name }}</strong>
+                    <div class="text-muted text-sm">{{ branch_employee_role_labels.get(employee.role, employee.role|replace('_', ' ')|title) }} · {{ employee.email }}</div>
+                    {% if employee.phone %}<div class="text-muted text-sm">{{ employee.phone }}</div>{% endif %}
+                    {% if employee.designation %}<div class="text-muted text-sm">{{ employee.designation }}</div>{% endif %}
+                    {% if employee.date_of_joining %}<div class="text-muted text-sm">Joined {{ employee.date_of_joining.strftime('%d %b %Y') }}</div>{% endif %}
+                    {% if employee.staff_address %}<div class="text-muted text-sm">{{ employee.staff_address }}</div>{% endif %}
+                    {% if employee.emergency_contact %}<div class="text-muted text-sm">Emergency: {{ employee.emergency_contact }}</div>{% endif %}
+                    <div class="flex gap-1 flex-wrap" style="margin-top:0.35rem">
+                      {% for label in employee.portal_access_labels[:3] %}
+                      <span class="badge badge-blue">{{ label }}</span>
+                      {% endfor %}
+                      {% if employee.portal_access_labels|length > 3 %}
+                      <span class="badge badge-orange">+{{ employee.portal_access_labels|length - 3 }} more</span>
+                      {% endif %}
+                    </div>
+                    {% if employee.must_change_password %}<div style="margin-top:0.35rem"><span class="badge badge-orange">Temporary password</span></div>{% endif %}
+                  </div>
+                  <div class="flex gap-2 flex-wrap items-center">
+                    <span class="badge {% if employee.is_active %}badge-green{% else %}badge-red{% endif %}">{{ 'Active' if employee.is_active else 'Inactive' }}</span>
+                    {% if employee.role in ['branch_manager', 'cashier', 'kitchen_staff'] and (can_assign_branch_managers or employee.role in ['cashier', 'kitchen_staff']) %}
+                    <button type="button" class="btn btn-ghost btn-sm" data-toggle-target="#branch-employee-edit-{{ branch.id }}-{{ employee.id }}">Edit</button>
+                    {% else %}
+                    <span class="text-muted text-sm">Owner-only edit</span>
+                    {% endif %}
+                  </div>
+                </div>
+                {% if employee.role in ['branch_manager', 'cashier', 'kitchen_staff'] and (can_assign_branch_managers or employee.role in ['cashier', 'kitchen_staff']) %}
+                <form id="branch-employee-edit-{{ branch.id }}-{{ employee.id }}" method="POST" action="{{ url_for('admin.edit_branch_employee', branch_id=branch.id, user_id=employee.id) }}" class="branch-employee-form hidden">
+                  <div class="form-row">
+                    <div class="form-group"><label class="form-label">Name *</label><input class="form-control" name="name" value="{{ employee.name }}" required></div>
+                    <div class="form-group">
+                      <label class="form-label">Email *</label>
+                      <input class="form-control" type="email" name="email" value="{{ employee.email }}" readonly required>
+                      <p class="text-sm text-muted">Email is locked after creation.</p>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group"><label class="form-label">Phone</label><input class="form-control" name="phone" value="{{ employee.phone or '' }}"></div>
+                    <div class="form-group">
+                      <label class="form-label">Role *</label>
+                      <select class="form-control" name="role" required>
+                        {% for value, label in branch_employee_role_choices %}
+                        <option value="{{ value }}" {% if employee.role == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group"><label class="form-label">Date of Joining</label><input class="form-control" type="date" name="date_of_joining" value="{{ employee.date_of_joining.isoformat() if employee.date_of_joining else '' }}"></div>
+                    <div class="form-group"><label class="form-label">Designation</label><input class="form-control" name="designation" value="{{ employee.designation or '' }}"></div>
+                  </div>
+                  <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" name="staff_address" rows="2">{{ employee.staff_address or '' }}</textarea></div>
+                  <div class="form-group"><label class="form-label">Emergency Contact</label><input class="form-control" name="emergency_contact" value="{{ employee.emergency_contact or '' }}"></div>
+                  <div class="form-group">
+                    <label class="form-label">Portal Access</label>
+                    <div class="admin-checkbox-grid">
+                      {% for value, label in staff_access_choices %}
+                      <label class="checkbox-line"><input type="checkbox" name="portal_access" value="{{ value }}" {% if value in employee.portal_access_values %}checked{% endif %}> <span>{{ label }}</span></label>
+                      {% endfor %}
+                    </div>
+                  </div>
+                  <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" name="staff_notes" rows="2">{{ employee.staff_notes or '' }}</textarea></div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="form-label">Access</label>
+                      <select class="form-control" name="access_status">
+                        <option value="active" {% if employee.is_active %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if not employee.is_active %}selected{% endif %}>Inactive</option>
+                      </select>
+                    </div>
+                    <div class="form-group"><label class="form-label">New Temporary Password</label><input class="form-control" type="text" name="password" minlength="8" placeholder="Optional reset"></div>
+                  </div>
+                  <div class="flex gap-2 flex-wrap">
+                    <button type="submit" class="btn btn-primary btn-sm">Save Employee</button>
+                    <button type="button" class="btn btn-outline btn-sm" data-hide-target="#branch-employee-edit-{{ branch.id }}-{{ employee.id }}">Cancel</button>
+                  </div>
+                </form>
+                {% endif %}
+              </div>
+              {% else %}
+              <p class="text-muted">No staff assigned to this branch.</p>
+              {% endfor %}
+              {% if detail.delivery_agents %}
+              <h4 class="mt-2">Delivery Agents</h4>
+              {% for agent in detail.delivery_agents %}
+              <p><strong>{{ agent.name }}</strong><br><span class="text-muted text-sm">{{ agent.phone or 'No phone' }} · {% if agent.availability %}Available{% else %}Busy{% endif %}</span></p>
+              {% endfor %}
+              {% endif %}
+            </section>
+
+            <section class="admin-detail-box">
+              <div class="branch-detail-heading">
+                <h3>Recent Sales</h3>
+                <a href="{{ url_for('admin.orders', branch_id=branch.id) }}" class="btn btn-ghost btn-sm">View All Sales</a>
+              </div>
+              <div class="branch-sales-periods">
+                {% for label, amount in detail.sales_periods %}
+                <div>
+                  <span>{{ label }}</span>
+                  <strong>₹{{ amount|int }}</strong>
+                </div>
+                {% endfor %}
+              </div>
+              {% for order in detail.recent_orders %}
+              <p><a href="{{ url_for('admin.order_detail', order_id=order.id) }}"><strong>#{{ order.order_number }}</strong></a> · ₹{{ order.total|int }}<br><span class="text-muted text-sm">{{ order.customer.name if order.customer else 'Walk-in' }} · {{ order.placed_at.strftime('%d %b %Y') }}</span></p>
+              {% else %}
+              <p class="text-muted">No orders recorded for this branch yet.</p>
+              {% endfor %}
+            </section>
+
+            <section class="admin-detail-box">
+              <div class="branch-detail-heading">
+                <h3>Customer Reviews</h3>
+                <a href="{{ url_for('admin.reviews', branch_id=branch.id) }}" class="btn btn-ghost btn-sm">View Reviews</a>
+              </div>
+              <p><strong>{{ detail.review_count }}</strong> reviews{% if detail.average_rating %} · Average {{ '%.1f'|format(detail.average_rating) }}/5{% endif %}</p>
+              {% for review in detail.recent_reviews %}
+              <p><a href="{{ url_for('admin.reviews', branch_id=branch.id) }}#review-{{ review.id }}"><strong>{{ review.rating }}/5</strong> {{ review.product.name if review.product else 'Product' }}</a><br><span class="text-muted text-sm">{{ review.comment or 'No comment' }}</span></p>
+              {% else %}
+              <p class="text-muted">No reviews from this branch's customers yet.</p>
+              {% endfor %}
+            </section>
+          </div>
+        </div>
+      </details>
+      {% else %}
+      <p class="text-center text-muted" style="padding:1.5rem">No branches defined yet.</p>
+      {% endfor %}
     </div>
   </div>
 </div>

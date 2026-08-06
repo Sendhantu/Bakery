@@ -5,6 +5,12 @@ from decimal import Decimal
 from models import (
     FinancialCategory,
     FinancialTransaction,
+    GST_LIABILITY_BAKERY,
+    GST_LIABILITY_ECOMMERCE_OPERATOR,
+    GST_ORDER_SOURCE_COUNTER_TAKEAWAY,
+    GST_ORDER_SOURCE_ECOMMERCE_ZOMATO,
+    GST_RETURN_ECOMMERCE_9_5,
+    GST_RETURN_OUTWARD_SUPPLIES,
     Order,
     Payment,
     Product,
@@ -29,9 +35,31 @@ def test_finance_dashboard_requires_admin_role(admin_client):
     response = admin_client.get("/admin/finance")
     assert response.status_code == 200
     assert b"Finance Command Center" in response.data
+    assert b"finance-custom-range" in response.data
+    assert b"Custom date range" in response.data
     assert b"Record-keeping aid only" in response.data
     assert b"Sales Performance" in response.data
     assert b"Financial Health at a Glance" in response.data
+
+
+def test_gst_summary_page_renders_channel_reporting(admin_client):
+    sign_in(admin_client, "admin@bakery.com", "Admin@bakery")
+    response = admin_client.get("/admin/finance/gst?period=month")
+    assert response.status_code == 200
+    assert b"GST Summary" in response.data
+    assert b"GSTR-1 Mapping" in response.data
+    assert b"Order-wise GST Export Preview" in response.data
+    assert b"GST Payable by Bakery" in response.data
+
+
+def test_tax_rates_page_has_finance_back_action(admin_client):
+    sign_in(admin_client, "admin@bakery.com", "Admin@bakery")
+    response = admin_client.get("/admin/finance/tax-rates")
+    assert response.status_code == 200
+    assert b"Back to Finance" in response.data
+    assert b'href="/admin/finance"' in response.data
+    assert b'data-toggle-target="#add-tax-rate-form"' in response.data
+    assert b'id="add-tax-rate-form" class="card hidden"' in response.data
 
 
 def test_cashier_cannot_access_finance(admin_client):
@@ -156,6 +184,85 @@ def test_finance_dashboard_exports_unified_sections(admin_client):
     assert sales_csv.status_code == 200
     assert sales_csv.mimetype == "text/csv"
     assert b"Units Sold" in sales_csv.data
+
+    gst_csv = admin_client.get("/admin/finance/export/gst/csv?period=month")
+    assert gst_csv.status_code == 200
+    assert gst_csv.mimetype == "text/csv"
+    assert b"Order Date,Invoice Number,Order Source,Base Taxable Value" in gst_csv.data
+
+
+def test_gst_summary_splits_bakery_and_ecommerce_liability(admin_client):
+    with admin_client.application.app_context():
+        customer = User.query.filter_by(email="customer@test.com").first()
+        counter_order = Order(
+            order_number=Order.generate_order_number(),
+            invoice_number="INV-COUNTER-GST",
+            user_id=customer.id,
+            status="DELIVERED",
+            payment_status="PAID",
+            channel="counter",
+            source="POS",
+            subtotal=Decimal("100"),
+            gst_taxable_amount=Decimal("100"),
+            gst_rate=Decimal("5"),
+            cgst_amount=Decimal("2.50"),
+            sgst_amount=Decimal("2.50"),
+            gst_amount=Decimal("5"),
+            total=Decimal("105"),
+            gst_order_source=GST_ORDER_SOURCE_COUNTER_TAKEAWAY,
+            gst_liability_party=GST_LIABILITY_BAKERY,
+            gst_return_bucket=GST_RETURN_OUTWARD_SUPPLIES,
+            address_line1="1 Test Lane",
+            city="Coimbatore",
+            pincode="641002",
+            phone="9999999999",
+            delivery_slot="Walk-in",
+        )
+        ecommerce_order = Order(
+            order_number=Order.generate_order_number(),
+            invoice_number="INV-ZOMATO-GST",
+            user_id=customer.id,
+            status="DELIVERED",
+            payment_status="PAID",
+            channel="counter",
+            source="ZOMATO",
+            subtotal=Decimal("200"),
+            gst_taxable_amount=Decimal("200"),
+            gst_rate=Decimal("5"),
+            cgst_amount=Decimal("5"),
+            sgst_amount=Decimal("5"),
+            gst_amount=Decimal("10"),
+            total=Decimal("210"),
+            gst_order_source=GST_ORDER_SOURCE_ECOMMERCE_ZOMATO,
+            gst_liability_party=GST_LIABILITY_ECOMMERCE_OPERATOR,
+            gst_return_bucket=GST_RETURN_ECOMMERCE_9_5,
+            ecommerce_operator="ZOMATO",
+            ecommerce_tcs_amount=Decimal("2"),
+            gst_invoice_note="Tax to be deposited by E-commerce Operator under Section 9(5) of the CGST Act.",
+            address_line1="1 Test Lane",
+            city="Coimbatore",
+            pincode="641002",
+            phone="9999999999",
+            delivery_slot="Aggregator",
+        )
+        db.session.add_all([counter_order, ecommerce_order])
+        db.session.commit()
+
+        today = counter_order.placed_at.date()
+        summary = FinanceService().gst_summary(start_date=today, end_date=today)
+
+    assert summary["regular_outward_taxable"] == Decimal("100.00")
+    assert summary["gst_collected"] == Decimal("5.00")
+    assert summary["ecommerce_taxable"] == Decimal("200.00")
+    assert summary["ecommerce_operator_gst"] == Decimal("10.00")
+    assert summary["ecommerce_tcs"] == Decimal("2.00")
+    assert summary["net_gst_liability"] == Decimal("5.00")
+    assert {
+        row["invoice_number"]: row["tax_liability_flag"] for row in summary["rows"]
+    } == {
+        "INV-COUNTER-GST": "Payable by Bakery",
+        "INV-ZOMATO-GST": "Paid by Aggregator",
+    }
 
 
 def test_finance_consistency_check_flags_missing_sale_transaction(admin_client):

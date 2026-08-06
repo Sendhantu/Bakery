@@ -97,6 +97,14 @@ class GiftCardService:
         return {"gift_card": card, "amount": amount}
 
     def redeem(self, code, order, payable_amount, *, actor_id=None):
+        if order is not None and order.user_id:
+            from bootstrap import get_container
+
+            error = get_container().customer_risk_service.gift_card_redemption_error(
+                order.customer
+            )
+            if error:
+                raise ValidationError(error)
         preview = self.preview_redemption(code, payable_amount, lock=True)
         card = preview["gift_card"]
         amount = preview["amount"]

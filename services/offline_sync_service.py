@@ -25,9 +25,10 @@ from clock import utcnow
 
 
 class OfflineSyncService:
-    def __init__(self, app, audit_service):
+    def __init__(self, app, audit_service, cash_service=None):
         self.app = app
         self.audit_service = audit_service
+        self.cash_service = cash_service
         self.enabled = bool(
             app.config.get("OFFLINE_SYNC_ENABLED", False)
             and app.config.get("PORTAL_ROLE") in {"admin", "delivery"}
@@ -456,6 +457,7 @@ class OfflineSyncService:
             order.id,
             new_status,
             actor_id=actor_id,
+            agent_id=order.delivery.agent_id if order.delivery else None,
             expected_version=order.version,
             snapshot_payload={
                 "id": order.id,
@@ -480,6 +482,7 @@ class OfflineSyncService:
         new_status,
         *,
         actor_id=None,
+        agent_id=None,
         expected_version=None,
         snapshot_payload=None,
     ):
@@ -585,6 +588,7 @@ class OfflineSyncService:
                 "amount": float(amount),
                 "payment_mode": payment_mode,
                 "actor_id": actor_id,
+                "agent_id": agent_id,
             },
             expected_version=expected_version,
         )
@@ -849,6 +853,15 @@ class OfflineSyncService:
         payment.transition_to(
             "PAID", actor_id=payload.get("actor_id"), reason="offline_cod_sync"
         )
+        agent_id = payload.get("agent_id") or (order.delivery.agent_id if order.delivery else None)
+        if self.cash_service is not None and agent_id:
+            self.cash_service.record_cod_collection(
+                agent_id=agent_id,
+                order_id=order.id,
+                amount=payload["amount"],
+                payment_mode=payload.get("payment_mode", "CASH"),
+                actor_id=payload.get("actor_id"),
+            )
         order.mark_status_change()
         self.audit_service.record(
             "offline_cod_collection_sync",

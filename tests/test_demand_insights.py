@@ -23,6 +23,8 @@ def test_demand_insights_page_gracefully_handles_missing_weather_key(admin_clien
     assert b"Demand Insights" in response.data
     assert b"Set OPENWEATHER_API_KEY" in response.data
     assert b"Advisory" in response.data
+    assert b'data-toggle-target="#add-local-event-form"' in response.data
+    assert b'id="add-local-event-form" class="card hidden"' in response.data
 
 
 def test_admin_can_add_local_event_for_demand_insights(admin_client):

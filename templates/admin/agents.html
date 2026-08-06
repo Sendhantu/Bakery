@@ -2,10 +2,13 @@
 {% block title %}Delivery Agents — Admin{% endblock %}
 {% block content %}
 <section class="admin-page-intro">
-  <div>
+  <div class="flex justify-between items-start gap-2 flex-wrap">
+    <div>
     <span class="portal-auth-kicker">Delivery Management</span>
-    <h1 class="section-title">🚚 Delivery Team</h1>
+    <h1 class="section-title">Delivery Team</h1>
     <p class="section-subtitle" style="margin-bottom:0">Create rider accounts, reset credentials, and control access from one screen.</p>
+    </div>
+    <button type="button" class="btn btn-primary" data-toggle-target="#add-agent-form" data-toggle-hide-self>Create Delivery Account</button>
   </div>
 </section>
 
@@ -28,7 +31,7 @@
   </div>
 </div>
 
-<div class="card mb-4">
+<div class="card mb-4 hidden" id="add-agent-form">
   <div class="card-header">Create Delivery Login</div>
   <div class="card-body">
     <form method="POST" action="{{ url_for('admin.add_agent') }}" class="ops-form-grid">
@@ -50,6 +53,7 @@
       </div>
       <div class="ops-form-actions">
         <button type="submit" class="btn btn-primary">Create Rider Account</button>
+        <button type="button" class="btn btn-outline" data-hide-target="#add-agent-form">Cancel</button>
       </div>
     </form>
     <p class="text-sm text-muted mt-2">Share the temporary password with the rider and ask them to change it after signing in.</p>
@@ -66,6 +70,7 @@
           <th>Login</th>
           <th>Access</th>
           <th>Workload</th>
+          <th>Cash</th>
           <th>Reset Password</th>
           <th>Actions</th>
         </tr>
@@ -102,6 +107,11 @@
             <div class="text-sm text-muted">{{ agent.completed_delivery_count }} completed</div>
           </td>
           <td>
+            <a href="{{ url_for('admin.delivery_cash_ledger', agent_id=agent.id) }}" class="badge {% if agent.cash_balance > 0 %}badge-orange{% else %}badge-green{% endif %}">
+              ₹{{ agent.cash_balance|int }}
+            </a>
+          </td>
+          <td>
             {% if agent.user %}
             <form method="POST" action="{{ url_for('admin.reset_agent_password', agent_id=agent.id) }}" class="ops-password-form">
               <input class="form-control" type="text" name="password" minlength="8" required placeholder="New password">
@@ -125,7 +135,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="6" class="text-center text-muted">No rider accounts yet.</td>
+          <td colspan="7" class="text-center text-muted">No rider accounts yet.</td>
         </tr>
         {% endfor %}
       </tbody>

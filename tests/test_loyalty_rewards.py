@@ -5,7 +5,17 @@ import pytest
 
 from bootstrap import get_container
 from clock import utcnow
-from models import AuditLog, Cart, LoyaltyLedger, ProductVariant, User, db
+from models import (
+    AuditLog,
+    Cart,
+    LoyaltyLedger,
+    Notification,
+    Product,
+    ProductVariant,
+    User,
+    db,
+)
+from utils.notifications import notify_order_status_change
 
 
 def sign_in(test_client, email, password):
@@ -52,17 +62,48 @@ def test_paid_delivered_order_earns_points_once(app, db_session, order_factory):
     )
 
 
+def test_loyalty_notification_links_to_customer_profile(app, db_session, order_factory):
+    order = order_factory(
+        status="DELIVERED",
+        payment_status="PAID",
+        total=Decimal("120"),
+    )
+    db_session.commit()
+
+    with app.test_request_context("/admin/orders/test"):
+        notify_order_status_change(order, "DELIVERED", old_status="OUT_FOR_DELIVERY")
+
+    loyalty_notification = Notification.query.filter_by(
+        user_id=order.user_id,
+        type="loyalty",
+    ).first()
+    assert loyalty_notification is not None
+    assert loyalty_notification.link == "/auth/profile"
+
+
 def test_checkout_redemption_reduces_points_and_applies_discount(client):
     sign_in(client, "customer@test.com", "customer123")
     with client.application.app_context():
         customer = User.query.filter_by(email="customer@test.com").first()
-        variant = ProductVariant.query.filter(ProductVariant.stock > 0).first()
         assert customer is not None
-        assert variant is not None
+        product = Product(
+            name="Small Loyalty Tart",
+            base_price=100,
+            is_active=True,
+        )
+        db.session.add(product)
+        db.session.flush()
+        variant = ProductVariant(
+            product_id=product.id,
+            name="Standard",
+            price=100,
+            stock=5,
+        )
+        db.session.add(variant)
         db.session.add(
             LoyaltyLedger(
                 user_id=customer.id,
-                points=200,
+                points=20,
                 reason="manual_adjustment",
             )
         )
@@ -86,7 +127,7 @@ def test_checkout_redemption_reduces_points_and_applies_discount(client):
             "pickup_slot": "09:00 - 11:00",
             "pickup_phone": "9999999999",
             "payment_method": "COD",
-            "loyalty_points": "100",
+            "loyalty_points": "10",
         },
         follow_redirects=True,
     )
@@ -99,9 +140,109 @@ def test_checkout_redemption_reduces_points_and_applies_discount(client):
             reason="redeemed",
         ).first()
         assert redeemed is not None
-        assert redeemed.points == -100
+        assert redeemed.points == -10
         assert redeemed.order.loyalty_discount == Decimal("10.00")
-        assert db.session.get(User, customer_id).loyalty_points == 100
+        assert db.session.get(User, customer_id).loyalty_points == 10
+
+
+def test_checkout_points_section_shows_available_points_and_redeem_rules(client):
+    sign_in(client, "customer@test.com", "customer123")
+    with client.application.app_context():
+        customer = User.query.filter_by(email="customer@test.com").first()
+        product = Product(
+            name="Large Loyalty Cake",
+            base_price=600,
+            is_active=True,
+        )
+        db.session.add(product)
+        db.session.flush()
+        variant = ProductVariant(
+            product_id=product.id,
+            name="Standard",
+            price=600,
+            stock=5,
+        )
+        db.session.add(variant)
+        db.session.add(
+            LoyaltyLedger(
+                user_id=customer.id,
+                points=120,
+                reason="manual_adjustment",
+            )
+        )
+        db.session.add(
+            Cart(
+                user_id=customer.id,
+                product_id=product.id,
+                variant_id=variant.id,
+                quantity=1,
+            )
+        )
+        db.session.commit()
+
+    response = client.get("/checkout")
+
+    assert response.status_code == 200
+    assert b"Available:" in response.data
+    assert b"120" in response.data
+    assert b"Redeem in 10-point steps" in response.data
+    assert b"at least 60 points" in response.data
+
+
+def test_loyalty_preview_requires_ten_point_steps(client):
+    sign_in(client, "customer@test.com", "customer123")
+    with client.application.app_context():
+        customer = User.query.filter_by(email="customer@test.com").first()
+        db.session.add(
+            LoyaltyLedger(
+                user_id=customer.id,
+                points=100,
+                reason="manual_adjustment",
+            )
+        )
+        db.session.commit()
+
+    response = client.post(
+        "/api/loyalty/validate-redeem",
+        json={"points": 15, "subtotal": 400},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["valid"] is False
+    assert "multiples of 10" in payload["message"]
+
+
+def test_loyalty_preview_requires_minimum_redemption_for_large_orders(client):
+    sign_in(client, "customer@test.com", "customer123")
+    with client.application.app_context():
+        customer = User.query.filter_by(email="customer@test.com").first()
+        db.session.add(
+            LoyaltyLedger(
+                user_id=customer.id,
+                points=500,
+                reason="manual_adjustment",
+            )
+        )
+        db.session.commit()
+
+    low_response = client.post(
+        "/api/loyalty/validate-redeem",
+        json={"points": 50, "subtotal": 600},
+    )
+    valid_response = client.post(
+        "/api/loyalty/validate-redeem",
+        json={"points": 60, "subtotal": 600},
+    )
+
+    low_payload = low_response.get_json()
+    valid_payload = valid_response.get_json()
+    assert low_payload["valid"] is False
+    assert low_payload["min_points_required"] == 60
+    assert "at least 60 points" in low_payload["message"]
+    assert valid_payload["valid"] is True
+    assert valid_payload["points_applied"] == 60
+    assert valid_payload["discount"] == 60
 
 
 def test_loyalty_service_blocks_negative_manual_adjustment(db_session, user_factory):

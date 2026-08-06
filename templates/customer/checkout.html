@@ -76,47 +76,49 @@
             </div>
           </div>
           {% endif %}
+          <div id="checkout-new-address-fields"{% if selected_address_id %} class="hidden"{% endif %}>
           <div class="form-group">
             <label class="form-label">Address Label</label>
-            <input class="form-control" id="checkout-address-label" name="address_label" value="{{ checkout_address.label or '' }}" placeholder="Home, Office, Parents">
+            <input class="form-control" id="checkout-address-label" name="address_label" value="{{ '' if selected_address_id else (checkout_address.label or '') }}" placeholder="Home, Office, Parents"{% if selected_address_id %} disabled{% endif %}>
           </div>
           <div class="form-group">
             <label class="form-label">Address Line 1 *</label>
-            <input class="form-control" id="checkout-address-line1" name="address_line1" required placeholder="House/Flat No., Street" value="{{ checkout_address.address_line1 or '' }}">
+            <input class="form-control" id="checkout-address-line1" name="address_line1" data-required-for-new-address="true"{% if not selected_address_id %} required{% endif %} placeholder="House/Flat No., Street" value="{{ '' if selected_address_id else (checkout_address.address_line1 or '') }}"{% if selected_address_id %} disabled{% endif %}>
           </div>
           <div class="form-group">
             <label class="form-label">Address Line 2</label>
-            <input class="form-control" id="checkout-address-line2" name="address_line2" placeholder="Landmark, Area" value="{{ checkout_address.address_line2 or '' }}">
+            <input class="form-control" id="checkout-address-line2" name="address_line2" placeholder="Landmark, Area" value="{{ '' if selected_address_id else (checkout_address.address_line2 or '') }}"{% if selected_address_id %} disabled{% endif %}>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">City *</label>
-              <input class="form-control" id="checkout-city" name="city" required placeholder="City" value="{{ checkout_address.city or '' }}">
+              <input class="form-control" id="checkout-city" name="city" data-required-for-new-address="true"{% if not selected_address_id %} required{% endif %} placeholder="City" value="{{ '' if selected_address_id else (checkout_address.city or '') }}"{% if selected_address_id %} disabled{% endif %}>
             </div>
             <div class="form-group">
               <label class="form-label">PIN Code *</label>
-              <input class="form-control" id="checkout-pincode" name="pincode" required placeholder="6-digit PIN" maxlength="6" value="{{ checkout_address.pincode or '' }}">
+              <input class="form-control" id="checkout-pincode" name="pincode" data-required-for-new-address="true"{% if not selected_address_id %} required{% endif %} placeholder="6-digit PIN" maxlength="6" value="{{ '' if selected_address_id else (checkout_address.pincode or '') }}"{% if selected_address_id %} disabled{% endif %}>
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">Contact Phone *</label>
-            <input class="form-control" id="checkout-phone" name="phone" required value="{{ checkout_address.phone or current_user.phone or '' }}" placeholder="+91 9999999999">
+            <input class="form-control" id="checkout-phone" name="phone" data-required-for-new-address="true"{% if not selected_address_id %} required{% endif %} value="{{ '' if selected_address_id else (checkout_address.phone or current_user.phone or '') }}" placeholder="+91 9999999999"{% if selected_address_id %} disabled{% endif %}>
           </div>
           <div style="display:flex;flex-direction:column;gap:0.6rem">
             <label style="display:flex;align-items:center;gap:0.55rem;font-size:0.9rem;color:var(--text-muted)">
-              <input type="checkbox" name="save_address_for_future" style="accent-color:var(--brown)">
+              <input type="checkbox" name="save_address_for_future" style="accent-color:var(--brown)"{% if selected_address_id %} disabled{% endif %}>
               Save this address for future orders
             </label>
             <label style="display:flex;align-items:center;gap:0.55rem;font-size:0.9rem;color:var(--text-muted)">
-              <input type="checkbox" name="make_default" style="accent-color:var(--brown)">
+              <input type="checkbox" name="make_default" style="accent-color:var(--brown)"{% if selected_address_id %} disabled{% endif %}>
               Make this my default address
             </label>
           </div>
-          <input type="hidden" id="checkout-latitude" name="latitude" value="{{ checkout_address.latitude or '' }}">
-          <input type="hidden" id="checkout-longitude" name="longitude" value="{{ checkout_address.longitude or '' }}">
+          <input type="hidden" id="checkout-latitude" name="latitude" value="{{ '' if selected_address_id else (checkout_address.latitude or '') }}"{% if selected_address_id %} disabled{% endif %}>
+          <input type="hidden" id="checkout-longitude" name="longitude" value="{{ '' if selected_address_id else (checkout_address.longitude or '') }}"{% if selected_address_id %} disabled{% endif %}>
           <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-top:1rem">
-            <button type="button" class="btn btn-outline btn-sm" id="checkout-use-location">Use Exact Location</button>
+            <button type="button" class="btn btn-outline btn-sm" id="checkout-use-location"{% if selected_address_id %} disabled{% endif %}>Use Exact Location</button>
             <span class="text-sm text-muted" id="checkout-location-status">Share your live location to place the map pin exactly on your address.</span>
+          </div>
           </div>
           {% set customer_map_query = address_query(checkout_address.address_line1, checkout_address.address_line2, checkout_address.city, checkout_address.pincode) %}
           <div class="address-map" id="checkout-address-map"
@@ -164,16 +166,17 @@
               <div class="form-group">
                 <label class="form-label">Delivery Date *</label>
                 <input class="form-control" type="date" name="delivery_date" id="delivery_date" required min="{{ earliest_delivery_date }}">
-                <p class="text-sm text-muted mt-1">Earliest delivery is tomorrow. Available slots are confirmed at checkout.</p>
+                <p class="text-sm text-muted mt-1">Same-day delivery is available when a future slot is still open.</p>
               </div>
               <div class="form-group">
                 <label class="form-label">Time Slot *</label>
                 <select class="form-control" name="time_slot" required id="delivery_time_slot">
                   <option value="">— Select Slot —</option>
                   {% for slot in time_slots %}
-                  <option value="{{ slot }}">{{ slot }}</option>
+                  <option value="{{ slot }}" data-slot-start="{{ slot.split(' - ')[0] if ' - ' in slot else slot }}">{{ slot }}</option>
                   {% endfor %}
                 </select>
+                <p class="text-sm text-muted mt-1">For today, choose the next available slot after the order time.</p>
               </div>
             </div>
           </div>
@@ -245,6 +248,7 @@
       <div class="card">
         <div class="card-header">📦 Order Summary</div>
         <div class="card-body" style="padding-bottom:0">
+          <p class="text-sm text-muted" style="margin-bottom:0.85rem">Product prices are shown before GST. Tax is calculated separately at checkout.</p>
           {% for item in cart_items %}
           {% set price = item.variant.current_price if item.variant else item.product.current_price %}
           <div class="flex justify-between items-center mb-2">
@@ -256,6 +260,26 @@
             <span style="font-weight:600">₹{{ (price * item.quantity)|int }}</span>
           </div>
           {% endfor %}
+          {% if checkout_addons %}
+          <div class="checkout-addons">
+            <div class="checkout-addons-header">
+              <span>Recommended add-ons</span>
+              <small>Optional party extras</small>
+            </div>
+            {% for addon in checkout_addons %}
+            <label class="checkout-addon-option">
+              <input type="checkbox" name="checkout_addon_product_id" value="{{ addon.id }}">
+              <span class="checkout-addon-main">
+                <span class="checkout-addon-name">{{ addon.name }}</span>
+                <span class="text-sm text-muted">{{ addon.category.name if addon.category else 'Party Add-on' }}</span>
+              </span>
+              <span class="checkout-addon-price">₹{{ addon.current_price|int }}</span>
+              <input type="hidden" name="checkout_addon_quantity_{{ addon.id }}" value="1">
+            </label>
+            {% endfor %}
+            <p class="text-sm text-muted" style="margin:0.75rem 0 0">Selected add-ons are included before GST and final order total are calculated.</p>
+          </div>
+          {% endif %}
         </div>
         <div class="divider" style="margin:0"></div>
         <div class="card-body">
@@ -273,12 +297,17 @@
           <div class="form-group">
             <label class="form-label">Use Loyalty Points</label>
             <div class="flex gap-2">
-              <input class="form-control" type="number" id="checkout-loyalty-input" name="loyalty_points" min="0" step="{{ loyalty_rules.LOYALTY_REDEEM_PER }}" placeholder="Enter points in multiples of {{ loyalty_rules.LOYALTY_REDEEM_PER }}">
+              <input class="form-control" type="number" id="checkout-loyalty-input" name="loyalty_points" min="0" max="{{ loyalty_balance }}" step="{{ loyalty_rules.LOYALTY_REDEEM_PER }}" placeholder="Use {{ loyalty_rules.LOYALTY_REDEEM_PER }}, {{ loyalty_rules.LOYALTY_REDEEM_PER * 2 }}, {{ loyalty_rules.LOYALTY_REDEEM_PER * 3 }}...">
               <button type="button" id="preview-loyalty-btn" class="btn btn-outline" style="flex-shrink:0">Preview</button>
             </div>
             <div class="text-sm text-muted mt-1">
-              You have <strong>{{ loyalty_balance }}</strong> points.
-              {{ loyalty_rules.LOYALTY_REDEEM_PER }} points = ₹{{ loyalty_rules.LOYALTY_REDEEM_RATE }} off, capped at 20% of subtotal.
+              Available: <strong>{{ loyalty_balance }}</strong> points.
+              Redeem in {{ loyalty_rules.LOYALTY_REDEEM_PER }}-point steps:
+              {{ loyalty_rules.LOYALTY_REDEEM_PER }} points = ₹{{ loyalty_rules.LOYALTY_REDEEM_RATE }} off.
+              Maximum redemption is {{ loyalty_rules.LOYALTY_REDEEM_MAX_PERCENT }}% of the order value.
+              {% if subtotal > loyalty_rules.LOYALTY_MIN_REDEEM_ORDER_VALUE %}
+                This order is above ₹{{ loyalty_rules.LOYALTY_MIN_REDEEM_ORDER_VALUE }}, so redeem at least {{ loyalty_preview.min_points_required }} points (₹{{ loyalty_preview.min_required_discount|round(2) }}) if you use points.
+              {% endif %}
             </div>
             <div id="loyalty-msg" class="text-sm mt-1"></div>
             <div id="loyalty-points-summary" class="text-sm text-muted mt-1"></div>
@@ -292,7 +321,7 @@
 
           <div class="divider"></div>
           <div class="flex justify-between mb-2">
-            <span class="text-muted">Subtotal</span>
+            <span class="text-muted">Product Subtotal</span>
             <span id="subtotal-value" data-value="{{ subtotal }}">₹{{ subtotal|int }}</span>
           </div>
           {% if discount > 0 %}
@@ -314,23 +343,32 @@
             <span>Applied on submit</span>
           </div>
           <div class="flex justify-between mb-2">
+            <span class="text-muted">GST <small id="checkout-tax-rate-label">({{ gst_rate|round(3) }}%)</small></span>
+            <span id="checkout-tax-value" data-gst-rate="{{ gst_rate }}" data-gst-amount="{{ gst_amount }}">₹{{ gst_amount|int }}</span>
+          </div>
+          <p class="text-sm text-muted" id="checkout-tax-note" style="margin-bottom:0.75rem">
+            Calculated on taxable product value ₹{{ taxable_amount|int }} before delivery and after product discounts.
+          </p>
+          <div class="flex justify-between mb-2">
             <span class="text-muted" id="checkout-fulfillment-charge-label">Delivery</span>
             <span id="checkout-fulfillment-charge-value">{% if delivery_charge == 0 %}<span style="color:var(--sage)">FREE</span>{% else %}₹{{ delivery_charge|int }}{% endif %}</span>
           </div>
-          <p class="text-sm text-muted" style="margin-bottom:0.75rem" id="checkout-fulfillment-charge-note">
-            {% if delivery_charge == 0 %}
-            Free delivery unlocked on this order.
-            {% else %}
-            Add ₹{{ (delivery_threshold - subtotal)|int }} more next time to unlock free delivery.
-            {% endif %}
-          </p>
           <div class="divider"></div>
           <div class="flex justify-between mb-3">
             <span style="font-weight:600;font-size:1rem">Total</span>
-            <span id="order-total" data-base-total="{{ total }}" data-delivery-charge="{{ delivery_charge }}" style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--caramel)">
+            <span id="order-total"
+                  data-base-total="{{ total }}"
+                  data-subtotal="{{ subtotal }}"
+                  data-member-discount="{{ discount }}"
+                  data-delivery-charge="{{ delivery_charge }}"
+                  data-delivery-threshold="{{ delivery_threshold }}"
+                  data-gst-rate="{{ gst_rate }}"
+                  style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--caramel)">
               ₹{{ total|int }}
             </span>
           </div>
+          {% set free_delivery_banner_id = 'checkout-free-delivery-note' %}
+          {% include 'customer/_free_delivery_banner.html' %}
           <div class="checkout-payable-note">
             Order of operations: membership, coupon, and loyalty discounts apply first; gift card balance is deducted from the remaining payable when you place the order.
           </div>

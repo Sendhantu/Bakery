@@ -15,8 +15,8 @@
 
 <div class="card" style="margin-bottom:1rem">
   <div class="card-body">
-    <form method="GET" class="flex gap-2 items-end flex-wrap" data-finance-period-form>
-      <div class="form-group" style="margin:0">
+    <form method="GET" class="finance-period-form" data-finance-period-form>
+      <div class="form-group finance-period-select">
         <label class="form-label">Period</label>
         <select class="form-control" name="period" data-finance-period-select>
           <option value="day" {% if period == 'day' %}selected{% endif %}>Today</option>
@@ -27,16 +27,24 @@
           <option value="custom" {% if period == 'custom' %}selected{% endif %}>Custom Range</option>
         </select>
       </div>
-      <div class="form-group" style="margin:0" data-finance-custom-date>
-        <label class="form-label">From</label>
-        <input class="form-control" type="date" name="start_date" value="{{ start_date }}">
+      <div class="finance-custom-range" data-finance-custom-range>
+        <div class="finance-custom-range-copy">
+          <strong>Custom date range</strong>
+          <span>Pick exact start and end dates for exports, tax review, and ledgers.</span>
+        </div>
+        <div class="form-group" data-finance-custom-date>
+          <label class="form-label">From</label>
+          <input class="form-control" type="date" name="start_date" value="{{ start_date }}">
+        </div>
+        <div class="form-group" data-finance-custom-date>
+          <label class="form-label">To</label>
+          <input class="form-control" type="date" name="end_date" value="{{ end_date }}">
+        </div>
       </div>
-      <div class="form-group" style="margin:0" data-finance-custom-date>
-        <label class="form-label">To</label>
-        <input class="form-control" type="date" name="end_date" value="{{ end_date }}">
+      <div class="finance-period-actions">
+        <button type="submit" class="btn btn-primary btn-sm">Apply Period</button>
+        <span class="badge badge-brown">{{ selected_period.label }}: {{ start_date }} to {{ end_date }}</span>
       </div>
-      <button type="submit" class="btn btn-primary btn-sm">Apply</button>
-      <span class="badge badge-brown">{{ selected_period.label }}: {{ start_date }} to {{ end_date }}</span>
     </form>
     <p class="text-sm text-muted" style="margin-top:0.75rem;margin-bottom:0">Record-keeping aid only — financial year in India runs from 1 April to 31 March. Review all figures with your accountant before filing GST or ITR.</p>
   </div>
@@ -106,8 +114,10 @@
   <section class="card">
     <div class="card-header">Tax Summary</div>
     <div class="card-body">
-      <div class="flex justify-between mb-2"><span class="text-muted">GST collected</span><strong>₹{{ gst.gst_collected|int }}</strong></div>
-      <div class="flex justify-between mb-2"><span class="text-muted">GST paid</span><strong>₹{{ gst.gst_paid|int }}</strong></div>
+      <div class="flex justify-between mb-2"><span class="text-muted">GST payable by bakery</span><strong>₹{{ gst.gst_collected|int }}</strong></div>
+      <div class="flex justify-between mb-2"><span class="text-muted">GST paid by aggregators</span><strong>₹{{ gst.ecommerce_operator_gst|int }}</strong></div>
+      <div class="flex justify-between mb-2"><span class="text-muted">Supplier GST recorded</span><strong>₹{{ gst.input_gst_recorded|int }}</strong></div>
+      <div class="flex justify-between mb-2"><span class="text-muted">Blocked input GST</span><strong>₹{{ gst.non_creditable_input_gst|int }}</strong></div>
       <div class="flex justify-between mb-2"><span class="text-muted">Net GST liability</span><strong>₹{{ gst.net_gst_liability|int }}</strong></div>
       <div class="flex justify-between"><span class="text-muted">TDS withheld</span><strong>₹{{ dashboard.tds.tds_withheld|int }}</strong></div>
     </div>
@@ -118,7 +128,7 @@
   <div class="card-header">Vendor Spend</div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Vendor</th><th>Purchases</th><th>Total Spend</th><th>GST Paid</th><th>ITC</th></tr></thead>
+      <thead><tr><th>Vendor</th><th>Purchases</th><th>Total Spend</th><th>GST Paid</th><th>TDS</th><th>ITC</th></tr></thead>
       <tbody>
         {% for row in dashboard.vendor_spend %}
         <tr>
@@ -126,10 +136,11 @@
           <td>{{ row.transaction_count }}</td>
           <td>₹{{ row.total_spend|int }}</td>
           <td>₹{{ row.gst_paid|int }}</td>
-          <td><span class="badge {% if row.input_tax_credit_eligible %}badge-green{% else %}badge-orange{% endif %}">{{ 'Eligible' if row.input_tax_credit_eligible else 'No GSTIN' }}</span></td>
+          <td>₹{{ '%.2f'|format(row.tds_withheld or 0) }}</td>
+          <td><span class="badge {% if row.input_tax_credit_eligible %}badge-green{% else %}badge-orange{% endif %}">{% if row.input_tax_credit_eligible %}Eligible{% elif row.input_tax_credit_blocked %}No ITC - 5% restaurant{% else %}No GSTIN{% endif %}</span></td>
         </tr>
         {% else %}
-        <tr><td colspan="5" class="text-center text-muted">No vendor-linked purchases in this period.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted">No vendor-linked purchases in this period.</td></tr>
         {% endfor %}
       </tbody>
     </table>

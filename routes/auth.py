@@ -11,6 +11,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from bootstrap import get_container
 from models import db, User, LoginHistory, SavedAddress, limiter
 from datetime import datetime, timedelta
+from clock import utcnow
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from utils import (
     ADMIN_PORTAL_ROLES,
@@ -18,6 +19,7 @@ from utils import (
     has_role,
     save_address_for_customer,
     get_saved_addresses_for_user,
+    is_order_screen_user,
     send_email,
     validate_password,
 )
@@ -57,13 +59,15 @@ def role_portal(user):
     return "customer"
 
 
-def portal_dashboard_url(role):
+def portal_dashboard_url(role, user=None):
     role = role if role in {"customer", "admin", "delivery"} else "customer"
     endpoint = {
         "customer": "customer.home",
         "admin": "admin.dashboard",
         "delivery": "delivery.dashboard",
     }[role]
+    if role == "admin" and is_order_screen_user(user):
+        endpoint = "admin.pos"
     path = url_for(endpoint)
     if current_portal_role() == role:
         return path
@@ -79,7 +83,15 @@ def portal_login_url(role):
 
 
 def role_home(user):
-    return portal_dashboard_url(role_portal(user))
+    return portal_dashboard_url(role_portal(user), user=user)
+
+
+def forced_password_change_url(user):
+    target_portal = role_portal(user)
+    path = url_for("auth.force_password_change")
+    if current_portal_role() == target_portal:
+        return path
+    return portal_url_for_role(target_portal, path)
 
 
 def password_reset_serializer():
@@ -94,6 +106,19 @@ def build_password_reset_link(token):
 
 def record_login(user, status="success"):
     get_container().auth_service.record_login(user, request, status=status)
+
+
+def _establish_user_session(user):
+    """Create a server-side session record so sessions can be listed/revoked."""
+    try:
+        record, token = get_container().rbac_service.create_session(user)
+        db.session.flush()
+        from flask import session as flask_session
+
+        flask_session["user_session_id"] = record.id
+        flask_session["user_session_token"] = token
+    except Exception:
+        db.session.rollback()
 
 
 def get_login_lockout_window():
@@ -114,6 +139,8 @@ def is_user_locked_out(user):
 @limiter.limit("10 per minute", methods=["POST"])
 def login():
     if current_user.is_authenticated:
+        if getattr(current_user, "must_change_password", False):
+            return redirect(forced_password_change_url(current_user))
         return redirect(role_home(current_user))
 
     if request.method == "POST":
@@ -134,8 +161,21 @@ def login():
                 return render_template("auth/login.html")
 
         if user and password_ok and user.is_active:
+            try:
+                blocked_message = (
+                    get_container().customer_risk_service.login_blocked_message(user)
+                )
+            except Exception:
+                blocked_message = None
+            if blocked_message:
+                record_login(user, "blocked")
+                db.session.commit()
+                flash(blocked_message, "warning")
+                return render_template("auth/login.html")
+
             expected_portal = role_portal(user)
             login_user(user, remember=remember)
+            _establish_user_session(user)
             from routes.customer import merge_guest_cart_into_user
 
             merged_items = (
@@ -143,6 +183,12 @@ def login():
             )
             record_login(user, "success")
             db.session.commit()
+            if getattr(user, "must_change_password", False):
+                flash(
+                    "Please change your temporary password before continuing.",
+                    "warning",
+                )
+                return redirect(forced_password_change_url(user))
             if current_portal_role() != expected_portal:
                 flash(
                     f"Signed in successfully. Redirecting you to the {expected_portal} portal.",
@@ -177,6 +223,99 @@ def login():
             flash("Invalid email or password.", "danger")
 
     return render_template("auth/login.html")
+
+
+@auth_bp.route("/accept-invite/<token>", methods=["GET", "POST"])
+def accept_invite(token):
+    if current_user.is_authenticated:
+        logout_user()
+
+    user = User.query.filter_by(invite_token=token).first()
+    if user is None:
+        flash("That invitation is invalid or was cancelled.", "danger")
+        return redirect(url_for("auth.login"))
+    if user.invite_accepted_at is not None:
+        flash("That invitation has already been used.", "warning")
+        return redirect(url_for("auth.login"))
+    if user.invite_token_expires_at and user.invite_token_expires_at < utcnow():
+        flash("That invitation has expired. Ask your administrator to resend it.", "warning")
+        return redirect(url_for("auth.login"))
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        errors = validate_password(password)
+        if password != confirm_password:
+            errors.append("Passwords do not match.")
+        if errors:
+            for err in errors:
+                flash(err, "danger")
+            return render_template(
+                "auth/accept_invite.html", token=token, email=user.email
+            )
+
+        user.set_password(password)
+        user.invite_accepted_at = utcnow()
+        user.invite_token = None
+        user.invite_token_expires_at = None
+        user.employee_status = "active"
+        user.is_active = True
+        user.must_change_password = False
+        db.session.commit()
+        get_container().audit_service.log(
+            user,
+            "employee_invite_accepted",
+            "User",
+            user.id,
+            after={"employee_status": "active"},
+            change_summary=f"{user.name} accepted their invitation.",
+        )
+        db.session.commit()
+        flash("Account activated. You can now sign in.", "success")
+        return redirect(url_for("auth.login"))
+
+    return render_template("auth/accept_invite.html", token=token, email=user.email)
+
+
+@auth_bp.route("/force-password-change", methods=["GET", "POST"])
+@login_required
+def force_password_change():
+    if not getattr(current_user, "must_change_password", False):
+        return redirect(role_home(current_user))
+
+    expected_portal = role_portal(current_user)
+    if current_portal_role() != expected_portal:
+        return redirect(forced_password_change_url(current_user))
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        errors = validate_password(password)
+        if password != confirm_password:
+            errors.append("Passwords do not match.")
+        if current_user.check_password(password):
+            errors.append("New password must be different from the temporary password.")
+
+        if errors:
+            for err in errors:
+                flash(err, "danger")
+            return redirect(url_for("auth.force_password_change"))
+
+        current_user.set_password(password)
+        from app import record_development_credential
+
+        record_development_credential(
+            role_portal(current_user),
+            current_user.email,
+            password,
+            label=f"{current_user.role.replace('_', ' ').title()} Account ({current_user.name})",
+            source="forced_password_change",
+        )
+        db.session.commit()
+        flash("Password updated. You can now continue.", "success")
+        return redirect(role_home(current_user))
+
+    return render_template("auth/force_password_change.html")
 
 
 @auth_bp.route("/login/google")
@@ -215,6 +354,7 @@ def authorize_google():
 
     db.session.commit()
     login_user(user)
+    _establish_user_session(user)
     record_login(user, "success")
     db.session.commit()
     flash(f"Logged in successfully via Google, {user.name}!", "success")
@@ -267,6 +407,7 @@ def register():
                 source="registered",
             )
             login_user(user)
+            _establish_user_session(user)
             from routes.customer import merge_guest_cart_into_user
 
             merged_items = merge_guest_cart_into_user(user.id)
@@ -306,7 +447,17 @@ def forgot_password():
         email = request.form.get("email", "").strip().lower()
         user = User.query.filter_by(email=email, role="customer").first()
 
+        blocked = False
         if user and user.is_active:
+            try:
+                blocked = (
+                    get_container().customer_risk_service.login_blocked_message(user)
+                    is not None
+                )
+            except Exception:
+                blocked = False
+
+        if user and user.is_active and not blocked:
             token = password_reset_serializer().dumps(
                 {"user_id": user.id, "email": user.email}
             )

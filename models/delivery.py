@@ -1,3 +1,4 @@
+from clock import utcnow
 from .base import db
 
 class DeliveryAgent(db.Model):
@@ -38,4 +39,30 @@ class Delivery(db.Model):
         db.Index('idx_delivery_agent', 'agent_id'),
         db.Index('idx_delivery_status', 'status'),
         db.Index('idx_delivery_order', 'order_id'),
+    )
+
+
+class DeliveryCashLedger(db.Model):
+    __tablename__ = 'delivery_cash_ledger'
+
+    id = db.Column(db.Integer, primary_key=True)
+    agent_id = db.Column(db.Integer, db.ForeignKey('delivery_agents.id'), nullable=False)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'))
+    action = db.Column(db.String(40), nullable=False)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    balance_after = db.Column(db.Numeric(10, 2), nullable=False)
+    payment_mode = db.Column(db.String(40), default='CASH')
+    recovery_method = db.Column(db.String(40))
+    notes = db.Column(db.Text)
+    recorded_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    agent = db.relationship('DeliveryAgent', backref=db.backref('cash_ledger_entries', lazy='dynamic'))
+    order = db.relationship('Order', backref=db.backref('delivery_cash_entries', lazy='dynamic'))
+    recorder = db.relationship('User', foreign_keys=[recorded_by])
+
+    __table_args__ = (
+        db.Index('idx_delivery_cash_agent_created', 'agent_id', 'created_at'),
+        db.Index('idx_delivery_cash_order', 'order_id'),
+        db.Index('idx_delivery_cash_action', 'action'),
     )

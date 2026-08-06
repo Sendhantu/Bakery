@@ -14,6 +14,7 @@ ROLE_HIERARCHY = {
 }
 
 ADMIN_PORTAL_ROLES = {"super_admin", "admin", "branch_manager", "cashier", "kitchen_staff"}
+ORDER_SCREEN_ROLES = {"cashier"}
 ADMIN_TIER_HIERARCHY = {
     "staff": 10,
     "manager": 20,
@@ -26,6 +27,10 @@ def has_role(user, *roles):
         return False
     normalized_roles = {(role or "").strip().lower() for role in roles}
     return (getattr(user, "role", "") or "").strip().lower() in normalized_roles
+
+
+def is_order_screen_user(user):
+    return has_role(user, *ORDER_SCREEN_ROLES)
 
 
 def role_meets_minimum(user, minimum_role):

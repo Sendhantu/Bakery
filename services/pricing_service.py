@@ -19,6 +19,8 @@ class PricingService:
         for rule in rules:
             if rule.category_id and product.category_id != rule.category_id:
                 continue
+            if rule.branch_id and not self._rule_applies_to_branch(rule, variant):
+                continue
             if rule.starts_at and now < rule.starts_at:
                 continue
             if rule.ends_at and now > rule.ends_at:
@@ -42,6 +44,11 @@ class PricingService:
             "rule": applied_rule,
             "original_price": Decimal(str((variant.price if variant else product.base_price) or 0)),
         }
+
+    def _rule_applies_to_branch(self, rule, variant=None):
+        if not rule.branch_id:
+            return True
+        return bool(variant and variant.branch_id == rule.branch_id)
 
     def _batch_is_old_enough(self, product_id, max_batch_age_hours):
         if not max_batch_age_hours:

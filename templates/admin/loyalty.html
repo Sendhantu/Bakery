@@ -54,8 +54,12 @@
               </span>
             </td>
             <td>
-              <button class="btn btn-ghost btn-sm"
-                      onclick="openAdjust({{ user.id }}, '{{ user.name }}', {{ (pts or 0)|int }})">
+              <button type="button"
+                      class="btn btn-ghost btn-sm"
+                      data-loyalty-adjust
+                      data-user-id="{{ user.id }}"
+                      data-user-name="{{ user.name }}"
+                      data-points="{{ (pts or 0)|int }}">
                 ✏️ Adjust
               </button>
             </td>
@@ -96,7 +100,11 @@
           </div>
           <div style="display:flex;justify-content:space-between;padding:0.5rem;background:var(--cream);border-radius:var(--radius)">
             <span class="text-muted">Max discount per order</span>
-            <strong>20% of subtotal</strong>
+            <strong>{{ loyalty_config.LOYALTY_REDEEM_MAX_PERCENT }}% of order value</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:var(--cream);border-radius:var(--radius)">
+            <span class="text-muted">Large order minimum</span>
+            <strong>{{ loyalty_config.LOYALTY_MIN_REDEEM_PERCENT }}% when order value is above ₹{{ loyalty_config.LOYALTY_MIN_REDEEM_ORDER_VALUE }}</strong>
           </div>
         </div>
         <div style="margin-top:1rem;padding:0.75rem;background:#FFF8E1;border-radius:var(--radius);border:1px solid #FFE082;font-size:0.8rem;color:var(--text-muted)">
@@ -137,7 +145,7 @@
         </div>
         <div class="flex gap-2">
           <button type="submit" class="btn btn-primary">Apply</button>
-          <button type="button" class="btn btn-ghost" onclick="closeAdjust()">Cancel</button>
+          <button type="button" class="btn btn-ghost" data-loyalty-close>Cancel</button>
         </div>
       </form>
     </div>
@@ -145,18 +153,41 @@
 </div>
 
 <script>
-function openAdjust(userId, name, pts) {
-  document.getElementById('adjust-user-id').value = userId;
-  document.getElementById('adjust-modal-title').textContent = `Adjust Points — ${name} (${pts.toLocaleString()} pts)`;
-  document.getElementById('adjust-points').value = '';
+(() => {
   const modal = document.getElementById('adjust-modal');
-  modal.style.display = 'flex';
-}
-function closeAdjust() {
-  document.getElementById('adjust-modal').style.display = 'none';
-}
-document.getElementById('adjust-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeAdjust();
-});
+  const userInput = document.getElementById('adjust-user-id');
+  const title = document.getElementById('adjust-modal-title');
+  const pointsInput = document.getElementById('adjust-points');
+
+  const closeAdjust = () => {
+    if (modal) modal.style.display = 'none';
+  };
+
+  document.querySelectorAll('[data-loyalty-adjust]').forEach((button) => {
+    if (button.dataset.loyaltyBound === 'true') return;
+    button.dataset.loyaltyBound = 'true';
+    button.addEventListener('click', () => {
+      if (!modal || !userInput || !title || !pointsInput) return;
+      const points = Number(button.dataset.points || 0);
+      userInput.value = button.dataset.userId || '';
+      title.textContent = `Adjust Points — ${button.dataset.userName || 'Customer'} (${points.toLocaleString()} pts)`;
+      pointsInput.value = '';
+      modal.style.display = 'flex';
+    });
+  });
+
+  document.querySelectorAll('[data-loyalty-close]').forEach((button) => {
+    if (button.dataset.loyaltyCloseBound === 'true') return;
+    button.dataset.loyaltyCloseBound = 'true';
+    button.addEventListener('click', closeAdjust);
+  });
+
+  if (modal && modal.dataset.loyaltyBackdropBound !== 'true') {
+    modal.dataset.loyaltyBackdropBound = 'true';
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) closeAdjust();
+    });
+  }
+})();
 </script>
 {% endblock %}

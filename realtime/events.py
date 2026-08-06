@@ -94,8 +94,11 @@ def emit_new_order(order):
 def emit_order_status_updated(order, rooms):
     payload = {
         "order_id": order.id,
+        "order_number": order.order_number,
+        "status": order.status,
         "new_status": order.status,
         "updated_at": _isoformat(order.updated_at),
+        "detail_url": f"/admin/orders/{order.id}",
     }
     _emit("order_status_updated", payload, rooms)
 
@@ -147,6 +150,21 @@ def emit_stock_updated(item, include_customer=False):
             "stock_status": item.stock_status,
         }
     _emit("stock_updated", payload, rooms)
+
+
+def emit_support_message(message, customer_id):
+    payload = {
+        "message_id": message.id,
+        "customer_id": customer_id,
+        "sender_id": message.sender_id,
+        "receiver_id": message.receiver_id,
+        "sender_name": message.sender.name if message.sender else "Support",
+        "sender_role": message.sender.role if message.sender else "",
+        "content": message.content,
+        "sent_at": _isoformat(message.sent_at),
+        "thread_url": f"/admin/chat/{customer_id}",
+    }
+    _emit("support_message", payload, ["admin", customer_room(customer_id)])
 
 
 def emit_kds_refresh(branch_id=None):

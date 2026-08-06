@@ -1,0 +1,69 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Purchase Updates — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Purchase Updates</h1>
+    <p class="text-muted">Track purchase orders from placement through ordering, receiving, payment, and cancellation.</p>
+  </div>
+  <div class="flex gap-2 flex-wrap">
+    <a href="{{ url_for('admin.purchase_orders') }}" class="btn btn-outline btn-sm">All Purchase Orders</a>
+    {% if can_admin_manager %}
+    <a href="{{ url_for('admin.new_purchase_order') }}" class="btn btn-primary btn-sm">New Purchase Order</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="flex gap-2 flex-wrap mb-4">
+  {% for value, label in [('', 'All'), ('draft', 'Draft'), ('ordered', 'Ordered'), ('received', 'Received'), ('cancelled', 'Cancelled')] %}
+  <a href="{{ url_for('admin.purchase_order_updates', status=value) }}"
+     class="btn btn-sm {% if status == value %}btn-primary{% else %}btn-ghost{% endif %}">
+    {{ label }}
+  </a>
+  {% endfor %}
+</div>
+
+<div class="page-grid page-grid-sidebar">
+  <section class="card">
+    <div class="card-header">Latest Updates</div>
+    <div class="card-body">
+      {% for event in update_feed %}
+      {% set po = event.purchase_order %}
+      <a href="{{ url_for('admin.purchase_order_detail', order_id=po.id) }}" class="category-row" style="text-decoration:none;color:inherit">
+        <div>
+          <span class="category-name">PO #{{ po.id }} · {{ po.vendor.name }}</span>
+          <span class="text-muted text-sm">{{ event.summary }}</span>
+        </div>
+        <div class="text-right">
+          <span class="badge {{ event.badge_class }}">{{ event.label }}</span>
+          <div class="text-sm text-muted mt-1">
+            {% if event.timestamp %}
+            {{ event.timestamp.strftime('%d %b %Y, %I:%M %p') }}
+            {% else %}
+            Time not recorded
+            {% endif %}
+          </div>
+        </div>
+      </a>
+      {% else %}
+      <p class="text-center text-muted" style="padding:1.5rem">No purchase updates recorded yet.</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  <aside class="card">
+    <div class="card-header">Open Purchase Orders</div>
+    <div class="card-body">
+      {% for po in purchase_orders %}
+      <div style="padding:0.75rem 0;border-bottom:1px solid var(--border)">
+        <a href="{{ url_for('admin.purchase_order_detail', order_id=po.id) }}" style="font-weight:700">PO #{{ po.id }}</a>
+        <div class="text-sm text-muted">{{ po.vendor.name }} · {{ po.order_date.strftime('%d %b %Y') }}</div>
+        <span class="badge badge-brown mt-1">{{ po.status }}</span>
+      </div>
+      {% else %}
+      <p class="text-muted">No purchase orders found for this filter.</p>
+      {% endfor %}
+    </div>
+  </aside>
+</div>
+{% endblock %}

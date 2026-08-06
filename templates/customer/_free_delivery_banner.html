@@ -1,0 +1,14 @@
+{# Free-delivery progress banner. Requires in scope: amount_to_free_delivery,
+   free_delivery_unlocked, free_delivery_progress. Optional: free_delivery_banner_id. #}
+<div class="free-delivery-banner{% if free_delivery_unlocked %} free-delivery-banner-unlocked{% endif %}"
+     {% if free_delivery_banner_id %}id="{{ free_delivery_banner_id }}"{% endif %}
+     data-free-delivery-banner>
+  {% if free_delivery_unlocked %}
+  <p class="free-delivery-message">You've unlocked <strong>FREE delivery</strong> 🎁</p>
+  {% else %}
+  <p class="free-delivery-message">Add {{ format_inr(amount_to_free_delivery) }} more for <strong>FREE delivery</strong> 🎁</p>
+  {% endif %}
+  <div class="free-delivery-track" aria-hidden="true">
+    <div class="free-delivery-track-fill" style="width: {{ free_delivery_progress }}%"></div>
+  </div>
+</div>

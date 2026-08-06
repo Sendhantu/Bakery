@@ -11,7 +11,10 @@
 
 <div class="stat-grid" style="margin-bottom:1.5rem">
   <div class="stat-card brown"><div class="stat-value">₹{{ purchase_order.subtotal|int }}</div><div class="stat-label">Subtotal</div></div>
+  <div class="stat-card green"><div class="stat-value">₹{{ '%.2f'|format(paid_amount) }}</div><div class="stat-label">Paid</div></div>
+  <div class="stat-card orange"><div class="stat-value">₹{{ '%.2f'|format(remaining_amount) }}</div><div class="stat-label">Remaining</div></div>
   <div class="stat-card green"><div class="stat-value">{{ purchase_order.gst_rate_percent|int }}%</div><div class="stat-label">GST Rate</div></div>
+  <div class="stat-card orange"><div class="stat-value">₹{{ '%.2f'|format(purchase_order.tds_amount or (transaction.tds_withheld if transaction else tds_preview.tds_amount) or 0) }}</div><div class="stat-label">TDS Withheld</div></div>
   <div class="stat-card {% if purchase_order.input_tax_credit_eligible %}green{% else %}rose{% endif %}"><div class="stat-value">{{ 'Yes' if purchase_order.input_tax_credit_eligible else 'No' }}</div><div class="stat-label">ITC Eligible</div></div>
   <div class="stat-card orange"><div class="stat-value">{{ purchase_order.items.count() }}</div><div class="stat-label">Items</div></div>
 </div>
@@ -21,6 +24,26 @@
   <span>This vendor has no GSTIN on file, so input tax credit likely does not apply.</span>
 </div>
 {% endif %}
+
+<section class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">TDS Deduction</div>
+  <div class="card-body">
+    <div class="form-row">
+      <p><strong>Vendor rule:</strong> {{ purchase_order.vendor.tds_payment_type_label if purchase_order.vendor.tds_enabled else 'TDS disabled' }}</p>
+      <p><strong>Section:</strong> {{ purchase_order.tds_section or tds_preview.section or '—' }}</p>
+      <p><strong>Rate:</strong> {{ purchase_order.tds_rate_percent or tds_preview.rate_percent }}%</p>
+      <p><strong>Base amount:</strong> ₹{{ '%.2f'|format(purchase_order.tds_base_amount or tds_preview.base_amount or 0) }}</p>
+      <p><strong>TDS amount:</strong> ₹{{ '%.2f'|format(purchase_order.tds_amount or (transaction.tds_withheld if transaction else tds_preview.tds_amount) or 0) }}</p>
+      <p><strong>Deposit due:</strong> {{ purchase_order.tds_deposit_due_date.strftime('%d %b %Y') if purchase_order.tds_deposit_due_date else (tds_preview.deposit_due_date.strftime('%d %b %Y') if tds_preview.deposit_due_date else '—') }}</p>
+    </div>
+    <p class="text-sm text-muted" style="margin:0">
+      {{ purchase_order.tds_reason or tds_preview.reason }} TDS is calculated on the invoice base value only; GST is kept separate for input-credit reporting.
+    </p>
+    {% if tds_preview.pan_missing %}
+    <p class="text-sm" style="margin:0.5rem 0 0;color:var(--danger)">PAN is missing for this vendor, so the 20% fallback rate will be applied when TDS is applicable.</p>
+    {% endif %}
+  </div>
+</section>
 
 <div class="page-grid page-grid-sidebar">
   <section class="card">
@@ -40,15 +63,67 @@
   <aside class="card">
     <div class="card-header">Actions</div>
     <div class="card-body">
-      <p class="text-sm text-muted">Receiving creates stock movements and a linked raw-material purchase expense.</p>
-      {% if transaction %}
-      <p><strong>Finance transaction:</strong> #{{ transaction.id }} · ₹{{ transaction.amount|int }}</p>
+      <p class="text-sm text-muted">Receiving creates stock movements, a linked raw-material purchase expense, and one batch per item.</p>
+      {% if payments %}
+      <div style="margin-bottom:0.75rem">
+        <div class="text-sm text-muted" style="margin-bottom:0.25rem">Payments ({{ payments|length }})</div>
+        {% for payment in payments %}
+        <div class="flex gap-2 items-center" style="padding:0.3rem 0;border-bottom:1px dashed var(--border)">
+          <span class="text-sm" style="min-width:70px">₹{{ '%.2f'|format(payment.amount) }}</span>
+          <span class="text-sm">{{ payment_method_label(payment.payment_method) or 'Method not recorded' }}</span>
+          <span class="text-sm text-muted">{{ payment.created_at.strftime('%d %b %Y') }}</span>
+          {% if payment.creator %}<span class="text-sm text-muted">· {{ payment.creator.name }}</span>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if can_admin_manager and remaining_amount > 0 and purchase_order.status != 'cancelled' %}
+      <form method="POST" action="{{ url_for('admin.record_purchase_payment', order_id=purchase_order.id) }}" class="grid gap-2" style="margin-bottom:1rem;padding:0.75rem;border:1px dashed var(--border);border-radius:var(--radius-lg)">
+        <div class="text-sm" style="font-weight:600;color:var(--brown)">Record Payment (₹{{ '%.2f'|format(remaining_amount) }} remaining)</div>
+        <label class="form-label" for="payment_amount">Amount</label>
+        <input class="form-control" id="payment_amount" type="number" step="0.01" min="0.01" max="{{ remaining_amount }}" name="payment_amount" placeholder="0.00">
+        <label class="form-label" for="payment_method">Payment Method</label>
+        <select class="form-control" id="payment_method" name="payment_method">
+          <option value="">Not recorded</option>
+          {% for value, label in payment_method_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label" for="payment_references">Reference</label>
+        <input class="form-control" id="payment_references" name="references" placeholder="Cheque / UPI / bank reference">
+        <label class="form-label" for="payment_notes">Notes</label>
+        <input class="form-control" id="payment_notes" name="notes" placeholder="Optional note">
+        <button class="btn btn-primary btn-sm" type="submit">Record Payment</button>
+      </form>
       {% endif %}
       {% if can_admin_manager and purchase_order.status != 'received' %}
-      <form method="POST" action="{{ url_for('admin.update_purchase_order_status', order_id=purchase_order.id) }}" class="flex gap-2 flex-wrap">
-        <button class="btn btn-outline btn-sm" name="action" value="ordered" type="submit">Mark Ordered</button>
-        <button class="btn btn-primary btn-sm" name="action" value="received" type="submit">Mark Received</button>
-        <button class="btn btn-ghost btn-sm" name="action" value="cancelled" type="submit">Cancel</button>
+      <form method="POST" action="{{ url_for('admin.update_purchase_order_status', order_id=purchase_order.id) }}" class="grid gap-2">
+        <label class="form-label" for="payment_method">Payment Method (on receive)</label>
+        <select class="form-control" id="payment_method" name="payment_method">
+          <option value="">Not recorded</option>
+          {% for value, label in payment_method_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label" for="payment_amount">Payment Amount (optional, for partial payment)</label>
+        <input class="form-control" id="payment_amount" type="number" step="0.01" min="0.01" name="payment_amount" placeholder="Leave empty to record full amount">
+        {% if purchase_order.items.count() %}
+        <div class="text-sm" style="font-weight:600;color:var(--brown)">Batch Details (optional)</div>
+        {% for item in purchase_order.items.all() %}
+        <div class="grid gap-2" style="padding:0.5rem;background:rgba(253,246,236,0.5);border-radius:var(--radius-md)">
+          <div class="text-sm">{{ item.raw_material.name }} × {{ item.quantity }} {{ item.raw_material.unit }}</div>
+          <input class="form-control" name="batch_{{ item.id }}_batch_number" placeholder="Batch number (default auto)">
+          <input class="form-control" type="date" name="batch_{{ item.id }}_manufacturing_date" placeholder="Manufacturing date">
+          <input class="form-control" type="date" name="batch_{{ item.id }}_expiry_date" placeholder="Expiry date">
+          <input class="form-control" name="batch_{{ item.id }}_storage_location" placeholder="Storage location">
+        </div>
+        {% endfor %}
+        {% endif %}
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-outline btn-sm" name="action" value="ordered" type="submit">Mark Ordered</button>
+          <button class="btn btn-primary btn-sm" name="action" value="received" type="submit">Mark Received</button>
+          <button class="btn btn-ghost btn-sm" name="action" value="cancelled" type="submit">Cancel</button>
+        </div>
       </form>
       {% elif not can_admin_manager %}
       <p class="text-muted">Manager access is required to update purchase orders.</p>
@@ -56,4 +131,28 @@
     </div>
   </aside>
 </div>
+
+<section class="card" style="margin-top:1.5rem">
+  <div class="card-header">Purchase Updates</div>
+  <div class="card-body">
+    {% for event in update_events %}
+    <div class="flex gap-3 items-start" style="padding:0.75rem 0;border-bottom:1px solid var(--border)">
+      <span class="badge {{ event.badge_class }}" style="flex-shrink:0">{{ event.label }}</span>
+      <div>
+        <div style="font-weight:600;color:var(--text-main)">{{ event.summary }}</div>
+        <div class="text-sm text-muted">
+          {% if event.timestamp %}
+          {{ event.timestamp.strftime('%d %b %Y, %I:%M %p') }}
+          {% else %}
+          Time not recorded
+          {% endif %}
+          {% if event.actor %} · {{ event.actor }}{% endif %}
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No purchase updates recorded yet.</p>
+    {% endfor %}
+  </div>
+</section>
 {% endblock %}

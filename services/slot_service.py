@@ -9,13 +9,18 @@ class SlotService:
         self.time_slots = list(time_slots or [])
         self.pickup_buffer_minutes = max(0, int(pickup_buffer_minutes or 0))
 
-    def get_available_slots(self, target_date, now=None):
+    def get_available_slots(self, target_date, now=None, lead_minutes=None):
         current_time = now or utcnow()
         normalized_date = self._normalize_date(target_date)
         if normalized_date > current_time.date():
             return list(self.time_slots)
 
-        earliest_allowed = current_time + timedelta(minutes=self.pickup_buffer_minutes)
+        lead_time = (
+            self.pickup_buffer_minutes
+            if lead_minutes is None
+            else max(0, int(lead_minutes or 0))
+        )
+        earliest_allowed = current_time + timedelta(minutes=lead_time)
         available = []
         for slot in self.time_slots:
             start_time, _ = self._parse_slot(slot)
@@ -29,9 +34,15 @@ class SlotService:
         normalized_date = self._normalize_date(target_date)
         selected_slot = (selected_slot or "").strip()
 
-        if normalized_date < (current_time.date() + timedelta(days=1)):
-            raise ValidationError("Please choose a delivery date from tomorrow onward.")
+        if normalized_date < current_time.date():
+            raise ValidationError("Please choose a valid delivery date.")
         if selected_slot not in self.time_slots:
+            raise ValidationError("Please choose a valid delivery time slot.")
+        if selected_slot not in self.get_available_slots(
+            normalized_date, now=current_time, lead_minutes=0
+        ):
+            if normalized_date == current_time.date():
+                raise ValidationError("Please choose the next available delivery slot.")
             raise ValidationError("Please choose a valid delivery time slot.")
         return selected_slot
 

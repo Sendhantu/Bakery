@@ -199,8 +199,8 @@ def test_pos_sale_commits_even_when_socket_emit_fails(
             .first()
         )
         assert order is not None
-        assert order.payment_status == "PAID"
-        assert Decimal(str(order.total)) == Decimal("50.00")
+        assert order.payment_status == "PENDING"
+        assert Decimal(str(order.total)) == Decimal("52.50")
 
 
 def test_triage_ai_fallback_is_deterministic_and_does_not_invent_stock(

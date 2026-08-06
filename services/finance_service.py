@@ -6,18 +6,35 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from dateutil.relativedelta import relativedelta
 from flask import current_app
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from clock import utcnow
 from models import (
     Branch,
     FinancialCategory,
     FinancialTransaction,
+    GST_ECOMMERCE_OPERATOR_BY_SOURCE,
+    GST_ECOMMERCE_ORDER_SOURCES,
+    GST_LIABILITY_BAKERY,
+    GST_LIABILITY_ECOMMERCE_OPERATOR,
+    GST_ORDER_SOURCE_COUNTER_TAKEAWAY,
+    GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY,
+    GST_ORDER_SOURCE_DIRECT_WEB_PICKUP,
+    GST_ORDER_SOURCE_ECOMMERCE_SWIGGY,
+    GST_ORDER_SOURCE_ECOMMERCE_ZOMATO,
+    GST_ORDER_SOURCE_LABELS,
+    GST_ORDER_SOURCE_VALUES,
+    GST_RETURN_ECOMMERCE_9_5,
+    GST_RETURN_OUTWARD_SUPPLIES,
+    GST_SUPPLY_RESTAURANT_SERVICE,
     Order,
     Product,
     ProductMaterial,
     RawMaterial,
     StockMovement,
+    TDS_NO_PAN_RATE,
+    TDS_PAYMENT_TYPE_CONFIG,
+    TDS_PAYMENT_TYPE_NONE,
     TaxRate,
     TaxRecord,
     db,
@@ -53,6 +70,7 @@ PERIOD_ALIASES = {
     "fy": "financial_year",
     "financial-year": "financial_year",
 }
+MONEY_QUANT = Decimal("0.01")
 
 
 def financial_year_bounds(now=None):
@@ -65,6 +83,10 @@ def financial_year_bounds(now=None):
         start = date(current.year - 1, 4, 1)
         end = date(current.year, 3, 31)
     return start, end
+
+
+def _money(value) -> Decimal:
+    return Decimal(str(value or 0)).quantize(MONEY_QUANT)
 
 
 class FinanceService:
@@ -102,12 +124,16 @@ class FinanceService:
             )
         return query.all()
 
-    def resolve_sales_tax_rate(self, order: Order) -> Decimal:
-        stored = Decimal(str(order.gst_rate or 0))
-        if stored > 0:
-            return stored
+    def resolve_active_sales_tax_rate(self, as_of=None) -> Decimal:
+        as_of_date = as_of.date() if isinstance(as_of, datetime) else as_of
+        as_of_date = as_of_date or utcnow().date()
         active_rate = (
-            TaxRate.query.filter_by(is_active=True, applies_to="sales")
+            TaxRate.query.filter(
+                TaxRate.is_active == True,
+                TaxRate.applies_to == "sales",
+                TaxRate.effective_from <= as_of_date,
+                or_(TaxRate.effective_to.is_(None), TaxRate.effective_to >= as_of_date),
+            )
             .order_by(TaxRate.effective_from.desc())
             .first()
         )
@@ -115,10 +141,148 @@ class FinanceService:
             return Decimal(str(active_rate.rate_percent or 0))
         return Decimal("5")
 
+    def resolve_sales_tax_rate(self, order: Order) -> Decimal:
+        stored = Decimal(str(order.gst_rate or 0))
+        if stored > 0:
+            return stored
+        return self.resolve_active_sales_tax_rate(getattr(order, "placed_at", None))
+
+    def taxable_sales_amount(
+        self,
+        subtotal: Decimal,
+        discount: Decimal = Decimal("0"),
+        loyalty_discount: Decimal = Decimal("0"),
+    ) -> Decimal:
+        taxable = (
+            Decimal(str(subtotal or 0))
+            - Decimal(str(discount or 0))
+            - Decimal(str(loyalty_discount or 0))
+        )
+        return max(taxable, Decimal("0")).quantize(Decimal("0.01"))
+
+    def calculate_sales_gst(
+        self,
+        subtotal: Decimal,
+        *,
+        discount: Decimal = Decimal("0"),
+        loyalty_discount: Decimal = Decimal("0"),
+        rate_percent: Decimal | None = None,
+    ) -> Dict[str, Decimal]:
+        """Calculate output GST added on top of product prices at checkout."""
+        rate = (
+            Decimal(str(rate_percent))
+            if rate_percent is not None
+            else self.resolve_active_sales_tax_rate()
+        )
+        taxable = self.taxable_sales_amount(subtotal, discount, loyalty_discount)
+        gst_amount = (taxable * rate / Decimal("100")).quantize(Decimal("0.01"))
+        cgst_amount = (gst_amount / Decimal("2")).quantize(Decimal("0.01"))
+        sgst_amount = (gst_amount - cgst_amount).quantize(Decimal("0.01"))
+        return {
+            "taxable_amount": taxable,
+            "gst_rate": rate,
+            "gst_amount": gst_amount,
+            "cgst_amount": cgst_amount,
+            "sgst_amount": sgst_amount,
+        }
+
+    def normalize_gst_order_source(
+        self,
+        value=None,
+        *,
+        channel="online",
+        source=None,
+        fulfillment_type="DELIVERY",
+    ) -> str:
+        explicit = (value or "").strip().upper()
+        if explicit in GST_ORDER_SOURCE_VALUES:
+            return explicit
+        source_upper = (source or "").strip().upper()
+        if source_upper in {"SWIGGY", "ECOMMERCE_SWIGGY"}:
+            return GST_ORDER_SOURCE_ECOMMERCE_SWIGGY
+        if source_upper in {"ZOMATO", "ECOMMERCE_ZOMATO"}:
+            return GST_ORDER_SOURCE_ECOMMERCE_ZOMATO
+        if (channel or "").strip().lower() == "counter":
+            return GST_ORDER_SOURCE_COUNTER_TAKEAWAY
+        if (fulfillment_type or "").strip().upper() == "PICKUP":
+            return GST_ORDER_SOURCE_DIRECT_WEB_PICKUP
+        return GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY
+
+    def gst_liability_party_for_source(self, gst_order_source) -> str:
+        source = self.normalize_gst_order_source(gst_order_source)
+        if source in GST_ECOMMERCE_ORDER_SOURCES:
+            return GST_LIABILITY_ECOMMERCE_OPERATOR
+        return GST_LIABILITY_BAKERY
+
+    def gst_return_bucket_for_source(self, gst_order_source) -> str:
+        source = self.normalize_gst_order_source(gst_order_source)
+        if source in GST_ECOMMERCE_ORDER_SOURCES:
+            return GST_RETURN_ECOMMERCE_9_5
+        return GST_RETURN_OUTWARD_SUPPLIES
+
+    def ecommerce_operator_for_source(self, gst_order_source):
+        return GST_ECOMMERCE_OPERATOR_BY_SOURCE.get(
+            self.normalize_gst_order_source(gst_order_source)
+        )
+
+    def ecommerce_tcs_amount(self, taxable_amount, gst_order_source) -> Decimal:
+        if self.gst_liability_party_for_source(gst_order_source) != GST_LIABILITY_ECOMMERCE_OPERATOR:
+            return Decimal("0.00")
+        rate = Decimal(str(current_app.config.get("GST_ECOMMERCE_TCS_RATE", 1)))
+        return (
+            Decimal(str(taxable_amount or 0)) * rate / Decimal("100")
+        ).quantize(Decimal("0.01"))
+
+    def sales_gst_context(
+        self,
+        subtotal,
+        *,
+        discount=Decimal("0"),
+        loyalty_discount=Decimal("0"),
+        rate_percent=None,
+        gst_order_source=None,
+        channel="online",
+        source=None,
+        fulfillment_type="DELIVERY",
+    ) -> Dict[str, Any]:
+        gst = self.calculate_sales_gst(
+            subtotal,
+            discount=discount,
+            loyalty_discount=loyalty_discount,
+            rate_percent=rate_percent,
+        )
+        order_source = self.normalize_gst_order_source(
+            gst_order_source,
+            channel=channel,
+            source=source,
+            fulfillment_type=fulfillment_type,
+        )
+        liability_party = self.gst_liability_party_for_source(order_source)
+        invoice_note = ""
+        if liability_party == GST_LIABILITY_ECOMMERCE_OPERATOR:
+            invoice_note = (
+                "Tax to be deposited by E-commerce Operator under Section 9(5) "
+                "of the CGST Act."
+            )
+        return {
+            **gst,
+            "gst_supply_type": GST_SUPPLY_RESTAURANT_SERVICE,
+            "gst_order_source": order_source,
+            "gst_order_source_label": GST_ORDER_SOURCE_LABELS.get(order_source, order_source),
+            "gst_liability_party": liability_party,
+            "gst_return_bucket": self.gst_return_bucket_for_source(order_source),
+            "gst_invoice_note": invoice_note,
+            "ecommerce_operator": self.ecommerce_operator_for_source(order_source),
+            "ecommerce_tcs_amount": self.ecommerce_tcs_amount(
+                gst["taxable_amount"],
+                order_source,
+            ),
+        }
+
     def extract_gst_from_inclusive(
         self, inclusive_amount: Decimal, rate_percent: Decimal
     ) -> Decimal:
-        """Extract GST embedded in a tax-inclusive shelf price."""
+        """Extract GST embedded in a tax-inclusive legacy amount."""
         inclusive = Decimal(str(inclusive_amount or 0))
         rate = Decimal(str(rate_percent or 0))
         if inclusive <= 0 or rate <= 0:
@@ -127,15 +291,39 @@ class FinanceService:
         return (inclusive - base).quantize(Decimal("0.01"))
 
     def compute_order_gst_amount(self, order: Order) -> Decimal:
-        """Reuse invoice taxable base, then treat shelf prices as tax-inclusive."""
+        stored = Decimal(str(order.gst_amount or 0))
+        if stored > 0:
+            return stored.quantize(Decimal("0.01"))
         breakdown = InvoiceService(storage_service=None).calculate_gst_breakdown(order)
-        inclusive_taxable = Decimal(str(breakdown["taxable_amount"])) + Decimal(
-            str(breakdown["gst_amount"])
+        return Decimal(str(breakdown["gst_amount"])).quantize(Decimal("0.01"))
+
+    def order_gst_taxable_amount(self, order: Order) -> Decimal:
+        stored = Decimal(str(getattr(order, "gst_taxable_amount", 0) or 0))
+        if stored > 0:
+            return stored.quantize(Decimal("0.01"))
+        return self.taxable_sales_amount(
+            order.subtotal,
+            order.discount,
+            getattr(order, "loyalty_discount", 0),
         )
-        rate = Decimal(str(breakdown["gst_rate"]))
-        if inclusive_taxable <= 0:
-            return Decimal("0")
-        return self.extract_gst_from_inclusive(inclusive_taxable, rate)
+
+    def order_gst_split(self, order: Order) -> Tuple[Decimal, Decimal]:
+        cgst = Decimal(str(getattr(order, "cgst_amount", 0) or 0))
+        sgst = Decimal(str(getattr(order, "sgst_amount", 0) or 0))
+        if cgst > 0 or sgst > 0:
+            return cgst.quantize(Decimal("0.01")), sgst.quantize(Decimal("0.01"))
+        gst_amount = self.compute_order_gst_amount(order)
+        cgst = (gst_amount / Decimal("2")).quantize(Decimal("0.01"))
+        sgst = (gst_amount - cgst).quantize(Decimal("0.01"))
+        return cgst, sgst
+
+    def order_gst_liability_party(self, order: Order) -> str:
+        stored = (getattr(order, "gst_liability_party", "") or "").strip().upper()
+        if stored:
+            return stored
+        return self.gst_liability_party_for_source(
+            getattr(order, "gst_order_source", None)
+        )
 
     def _branch_context(self, branch_id: Optional[int]) -> Tuple[Optional[int], str]:
         if branch_id:
@@ -285,6 +473,7 @@ class FinanceService:
         counterparty: str = "",
         branch_id: Optional[int] = None,
         tds_withheld: Optional[Decimal] = None,
+        payment_method: str = "",
         created_by: Optional[int] = None,
         vendor_id: Optional[int] = None,
         reference_purchase_order_id: Optional[int] = None,
@@ -302,6 +491,7 @@ class FinanceService:
             tds_withheld=(
                 Decimal(str(tds_withheld)) if tds_withheld is not None else None
             ),
+            payment_method=(payment_method or "").strip().upper() or None,
             created_by=created_by,
             vendor_id=vendor_id,
             reference_purchase_order_id=reference_purchase_order_id,
@@ -309,6 +499,150 @@ class FinanceService:
         db.session.add(txn)
         self._audit_transaction(txn, created_by, created=True)
         return txn
+
+    def vendor_financial_year_base_spend(self, vendor_id, as_of=None) -> Decimal:
+        if not vendor_id:
+            return Decimal("0.00")
+        as_of_dt = as_of or utcnow()
+        if isinstance(as_of_dt, date) and not isinstance(as_of_dt, datetime):
+            as_of_dt = datetime.combine(as_of_dt, time.min)
+        fy_start, fy_end = financial_year_bounds(as_of_dt)
+        period_start = datetime.combine(fy_start, time.min)
+        period_end = datetime.combine(fy_end + timedelta(days=1), time.min)
+        txns = (
+            FinancialTransaction.query.filter(
+                FinancialTransaction.transaction_type == "expense",
+                FinancialTransaction.vendor_id == vendor_id,
+                FinancialTransaction.created_at >= period_start,
+                FinancialTransaction.created_at < period_end,
+            )
+            .order_by(FinancialTransaction.created_at.asc())
+            .all()
+        )
+        total = Decimal("0")
+        for txn in txns:
+            total += Decimal(str(txn.amount or 0))
+        return total.quantize(MONEY_QUANT)
+
+    def tds_deposit_due_date(self, deducted_at=None) -> date:
+        deducted_at = deducted_at or utcnow()
+        if isinstance(deducted_at, date) and not isinstance(deducted_at, datetime):
+            deducted_date = deducted_at
+        else:
+            deducted_date = deducted_at.date()
+        if deducted_date.month == 3:
+            return date(deducted_date.year, 4, 30)
+        if deducted_date.month == 12:
+            return date(deducted_date.year + 1, 1, 7)
+        return date(deducted_date.year, deducted_date.month + 1, 7)
+
+    def purchase_order_tds_preview(
+        self,
+        purchase_order,
+        *,
+        subtotal: Optional[Decimal] = None,
+        as_of=None,
+    ) -> Dict[str, Any]:
+        if purchase_order is None:
+            return self.calculate_vendor_tds(None, Decimal("0"), as_of=as_of)
+        base_amount = subtotal if subtotal is not None else purchase_order.subtotal
+        return self.calculate_vendor_tds(
+            purchase_order.vendor,
+            base_amount,
+            as_of=as_of,
+        )
+
+    def calculate_vendor_tds(
+        self,
+        vendor,
+        invoice_base_amount,
+        *,
+        as_of=None,
+    ) -> Dict[str, Any]:
+        deducted_at = as_of or utcnow()
+        base_amount = _money(invoice_base_amount)
+        zero_result = {
+            "applicable": False,
+            "section": "",
+            "rate_percent": Decimal("0"),
+            "base_amount": base_amount,
+            "tds_amount": Decimal("0.00"),
+            "annual_spend_before": Decimal("0.00"),
+            "projected_annual_spend": base_amount,
+            "deposit_due_date": None,
+            "reason": "",
+            "pan_missing": False,
+        }
+        if vendor is None:
+            return {**zero_result, "reason": "Vendor is missing."}
+        if base_amount <= 0:
+            return {**zero_result, "reason": "Invoice base amount is zero."}
+
+        payment_type = vendor.tds_payment_type or TDS_PAYMENT_TYPE_NONE
+        config = TDS_PAYMENT_TYPE_CONFIG.get(
+            payment_type, TDS_PAYMENT_TYPE_CONFIG[TDS_PAYMENT_TYPE_NONE]
+        )
+        if not vendor.tds_enabled or payment_type == TDS_PAYMENT_TYPE_NONE:
+            return {**zero_result, "reason": "TDS disabled for this vendor."}
+
+        annual_spend_before = self.vendor_financial_year_base_spend(
+            vendor.id, as_of=deducted_at
+        )
+        projected_annual_spend = (annual_spend_before + base_amount).quantize(
+            MONEY_QUANT
+        )
+        rate_percent = (
+            Decimal(str(vendor.tds_rate_percent))
+            if vendor.tds_rate_percent is not None
+            else config["rate"]
+        )
+        annual_threshold = (
+            Decimal(str(vendor.tds_threshold_amount))
+            if vendor.tds_threshold_amount is not None
+            else config["annual_threshold"]
+        )
+        single_threshold = config["single_threshold"]
+        annual_crossed = annual_threshold <= 0 or projected_annual_spend > annual_threshold
+        single_crossed = (
+            single_threshold is not None and base_amount > Decimal(str(single_threshold))
+        )
+        if not (annual_crossed or single_crossed):
+            return {
+                **zero_result,
+                "annual_spend_before": annual_spend_before,
+                "projected_annual_spend": projected_annual_spend,
+                "section": config["section"],
+                "rate_percent": rate_percent,
+                "reason": "Vendor threshold has not been crossed for this financial year.",
+            }
+
+        pan_missing = not vendor.pan_on_file
+        applied_rate = TDS_NO_PAN_RATE if pan_missing else rate_percent
+        tds_amount = (base_amount * applied_rate / Decimal("100")).quantize(
+            MONEY_QUANT
+        )
+        threshold_reason = (
+            "single-invoice threshold crossed"
+            if single_crossed
+            else "annual vendor threshold crossed"
+        )
+        if annual_threshold <= 0:
+            threshold_reason = "admin configured TDS from first invoice"
+        reason = f"{config['section']} {threshold_reason}"
+        if pan_missing:
+            reason = f"{reason}; PAN missing, so 20% rate applied"
+        return {
+            "applicable": tds_amount > 0,
+            "section": config["section"],
+            "rate_percent": applied_rate,
+            "base_amount": base_amount,
+            "tds_amount": tds_amount,
+            "annual_spend_before": annual_spend_before,
+            "projected_annual_spend": projected_annual_spend,
+            "deposit_due_date": self.tds_deposit_due_date(deducted_at),
+            "reason": reason,
+            "pan_missing": pan_missing,
+        }
 
     def log_restock_expense(
         self,
@@ -743,17 +1077,124 @@ class FinanceService:
 
     def gst_summary(self, start_date=None, end_date=None) -> Dict[str, Any]:
         start, end = period_bounds("custom", start_date=start_date, end_date=end_date)
-        income_txns = self._transactions_in_period(start, end, "income")
         expense_txns = self._transactions_in_period(start, end, "expense")
-        gst_collected = self._sum_tax(income_txns)
-        gst_paid = self._sum_tax(expense_txns)
+        sales_report = self.gst_sales_channel_report(start_date=start_date, end_date=end_date)
+        gross_output_gst = sales_report["total_gst_shown"]
+        gst_collected = sales_report["bakery_payable_gst"]
+        input_gst_recorded = self._sum_tax(expense_txns)
+        no_itc = bool(current_app.config.get("GST_RESTAURANT_SERVICE_NO_ITC", True))
+        gst_paid = Decimal("0.00") if no_itc else input_gst_recorded
+        non_creditable_input_gst = input_gst_recorded if no_itc else Decimal("0.00")
         net_liability = (gst_collected - gst_paid).quantize(Decimal("0.01"))
         return {
             "start": start,
             "end": end,
+            "gross_output_gst": gross_output_gst,
             "gst_collected": gst_collected,
+            "ecommerce_operator_gst": sales_report["ecommerce_operator_gst"],
+            "input_gst_recorded": input_gst_recorded,
             "gst_paid": gst_paid,
+            "non_creditable_input_gst": non_creditable_input_gst,
             "net_gst_liability": net_liability,
+            "restaurant_no_itc": no_itc,
+            "ecommerce_tcs": sales_report["ecommerce_tcs"],
+            "regular_outward_taxable": sales_report["regular_outward_taxable"],
+            "ecommerce_taxable": sales_report["ecommerce_taxable"],
+            "rows": sales_report["rows"],
+            "gstr1_mapping": sales_report["gstr1_mapping"],
+        }
+
+    def gst_sales_channel_report(self, start_date=None, end_date=None) -> Dict[str, Any]:
+        start, end = period_bounds("custom", start_date=start_date, end_date=end_date)
+        orders = (
+            Order.query.filter(
+                Order.status.in_(REVENUE_ORDER_STATUSES),
+                Order.payment_status.in_(REVENUE_PAYMENT_STATUSES),
+                Order.placed_at >= start,
+                Order.placed_at < end,
+            )
+            .order_by(Order.placed_at.asc(), Order.id.asc())
+            .all()
+        )
+        rows = []
+        regular_taxable = Decimal("0.00")
+        regular_gst = Decimal("0.00")
+        ecommerce_taxable = Decimal("0.00")
+        ecommerce_gst = Decimal("0.00")
+        ecommerce_tcs = Decimal("0.00")
+        total_gst = Decimal("0.00")
+        for order in orders:
+            taxable = self.order_gst_taxable_amount(order)
+            cgst, sgst = self.order_gst_split(order)
+            gst_amount = (cgst + sgst).quantize(Decimal("0.01"))
+            liability_party = self.order_gst_liability_party(order)
+            order_source = self.normalize_gst_order_source(
+                getattr(order, "gst_order_source", None),
+                channel=order.channel,
+                source=order.source,
+                fulfillment_type=order.fulfillment_type,
+            )
+            return_bucket = (
+                getattr(order, "gst_return_bucket", None)
+                or self.gst_return_bucket_for_source(order_source)
+            )
+            tcs_amount = Decimal(
+                str(getattr(order, "ecommerce_tcs_amount", 0) or 0)
+            ).quantize(Decimal("0.01"))
+            if liability_party == GST_LIABILITY_ECOMMERCE_OPERATOR:
+                ecommerce_taxable += taxable
+                ecommerce_gst += gst_amount
+                ecommerce_tcs += tcs_amount
+                liability_flag = "Paid by Aggregator"
+            else:
+                regular_taxable += taxable
+                regular_gst += gst_amount
+                liability_flag = "Payable by Bakery"
+            total_gst += gst_amount
+            rows.append(
+                {
+                    "order_date": order.placed_at.date() if order.placed_at else None,
+                    "invoice_number": order.invoice_number or order.order_number,
+                    "order_number": order.order_number,
+                    "order_source": order_source,
+                    "order_source_label": GST_ORDER_SOURCE_LABELS.get(
+                        order_source,
+                        order_source,
+                    ),
+                    "base_taxable_value": taxable.quantize(Decimal("0.01")),
+                    "cgst_amount": cgst,
+                    "sgst_amount": sgst,
+                    "gst_amount": gst_amount,
+                    "tax_liability_flag": liability_flag,
+                    "gst_return_bucket": return_bucket,
+                    "ecommerce_operator": getattr(order, "ecommerce_operator", None)
+                    or self.ecommerce_operator_for_source(order_source)
+                    or "",
+                    "ecommerce_tcs_amount": tcs_amount,
+                }
+            )
+        return {
+            "start": start,
+            "end": end,
+            "rows": rows,
+            "regular_outward_taxable": regular_taxable.quantize(Decimal("0.01")),
+            "bakery_payable_gst": regular_gst.quantize(Decimal("0.01")),
+            "ecommerce_taxable": ecommerce_taxable.quantize(Decimal("0.01")),
+            "ecommerce_operator_gst": ecommerce_gst.quantize(Decimal("0.01")),
+            "ecommerce_tcs": ecommerce_tcs.quantize(Decimal("0.01")),
+            "total_gst_shown": total_gst.quantize(Decimal("0.01")),
+            "gstr1_mapping": {
+                "regular_outward_supplies": {
+                    "table": "Standard outward supplies",
+                    "taxable_value": regular_taxable.quantize(Decimal("0.01")),
+                    "gst": regular_gst.quantize(Decimal("0.01")),
+                },
+                "ecommerce_operator_9_5": {
+                    "table": "GSTR-1 Table 14 / Section 9(5)",
+                    "taxable_value": ecommerce_taxable.quantize(Decimal("0.01")),
+                    "gst": ecommerce_gst.quantize(Decimal("0.01")),
+                },
+            },
         }
 
     def vendor_spend_report(
@@ -771,6 +1212,7 @@ class FinanceService:
             .all()
         )
         rows: Dict[int, Dict[str, Any]] = {}
+        no_itc = bool(current_app.config.get("GST_RESTAURANT_SERVICE_NO_ITC", True))
         for txn in txns:
             vendor = txn.vendor
             vendor_id = txn.vendor_id
@@ -782,14 +1224,18 @@ class FinanceService:
                     "vendor_name": name,
                     "total_spend": Decimal("0"),
                     "gst_paid": Decimal("0"),
+                    "tds_withheld": Decimal("0"),
                     "transaction_count": 0,
-                    "input_tax_credit_eligible": bool(vendor and vendor.gstin),
+                    "input_tax_credit_eligible": bool(vendor and vendor.gstin and not no_itc),
+                    "input_tax_credit_blocked": no_itc,
                     "last_purchase_at": txn.created_at,
                 },
             )
             row["total_spend"] += Decimal(str(txn.amount or 0))
-            if row["input_tax_credit_eligible"] and txn.tax_amount is not None:
+            if txn.tax_amount is not None:
                 row["gst_paid"] += Decimal(str(txn.tax_amount))
+            if txn.tds_withheld is not None:
+                row["tds_withheld"] += Decimal(str(txn.tds_withheld or 0))
             row["transaction_count"] += 1
             if txn.created_at and txn.created_at > row["last_purchase_at"]:
                 row["last_purchase_at"] = txn.created_at
@@ -800,6 +1246,7 @@ class FinanceService:
                     **row,
                     "total_spend": row["total_spend"].quantize(Decimal("0.01")),
                     "gst_paid": row["gst_paid"].quantize(Decimal("0.01")),
+                    "tds_withheld": row["tds_withheld"].quantize(Decimal("0.01")),
                 }
                 for row in rows.values()
             ],
@@ -817,6 +1264,21 @@ class FinanceService:
                 "amount": Decimal(str(txn.amount or 0)),
                 "tds_withheld": Decimal(str(txn.tds_withheld or 0)),
                 "created_at": txn.created_at,
+                "section": (
+                    txn.purchase_order.tds_section
+                    if txn.purchase_order and txn.purchase_order.tds_section
+                    else (txn.vendor.tds_section if txn.vendor else "")
+                ),
+                "deposit_due_date": (
+                    txn.purchase_order.tds_deposit_due_date
+                    if txn.purchase_order
+                    else self.tds_deposit_due_date(txn.created_at)
+                ),
+                "deposit_status": (
+                    "Deposited"
+                    if txn.purchase_order and txn.purchase_order.tds_deposited_at
+                    else "Pending deposit"
+                ),
             }
             for txn in expense_txns
             if txn.tds_withheld and Decimal(str(txn.tds_withheld)) > 0
@@ -828,7 +1290,7 @@ class FinanceService:
             "vendor_payments_tracked": len(vendor_rows) > 0,
             "rows": vendor_rows,
             "placeholder_note": (
-                "Vendor payment tracking is limited to manually entered expense transactions with TDS."
+                "No expense transactions with TDS were found for this period."
                 if not vendor_rows
                 else ""
             ),

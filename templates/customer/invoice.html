@@ -17,15 +17,23 @@
     <a href="{{ url_for('customer.order_detail', order_id=order.id) }}" class="btn btn-ghost">← Back to Order</a>
   </div>
 
+  {% set taxable_amount = order.gst_taxable_amount or ((order.subtotal or 0) - (order.discount or 0) - (order.loyalty_discount or 0)) %}
+  {% set cgst_amount = order.cgst_amount or ((order.gst_amount or 0) / 2) %}
+  {% set sgst_amount = order.sgst_amount or ((order.gst_amount or 0) - cgst_amount) %}
   <div style="border:1px solid #ddd;border-radius:12px;padding:2rem;max-width:700px;margin:0 auto">
     <div class="invoice-header">
       <div>
         <div class="invoice-brand">🎂 SweetCrumbs</div>
         <p style="color:#7A6A5A;font-size:0.85rem;margin-top:0.25rem">Artisan Bakery · {{ store_details.phone }}</p>
+        {% if store_details.gstin %}
+        <p style="color:#7A6A5A;font-size:0.85rem;margin:0">GSTIN: {{ store_details.gstin }}</p>
+        {% endif %}
       </div>
       <div style="text-align:right">
         <div style="font-size:1.5rem;font-weight:700;color:#C8873A">INVOICE</div>
-        <div style="font-size:0.9rem;color:#7A6A5A">#{{ order.order_number }}</div>
+        <div style="font-size:0.9rem;color:#7A6A5A">Invoice #{{ order.invoice_number or order.order_number }}</div>
+        <div style="font-size:0.9rem;color:#7A6A5A">Order #{{ order.order_number }}</div>
+        <div style="font-size:0.85rem;color:#7A6A5A">{{ order.gst_order_source_label }}</div>
         <div style="font-size:0.85rem;color:#7A6A5A">{{ order.placed_at.strftime('%d %B %Y') }}</div>
       </div>
     </div>
@@ -74,14 +82,24 @@
         <div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem"><span style="color:#7A6A5A">Subtotal</span><span>₹{{ order.subtotal|int }}</span></div>
         {% if order.discount > 0 %}<div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem;color:#7A9E7E"><span>Discount</span><span>−₹{{ order.discount|int }}</span></div>{% endif %}
         {% if order.loyalty_discount > 0 %}<div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem;color:#7A9E7E"><span>Loyalty Discount</span><span>−₹{{ order.loyalty_discount|int }}</span></div>{% endif %}
+        <div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem"><span style="color:#7A6A5A">Taxable Value</span><span>₹{{ '%.2f'|format(taxable_amount or 0) }}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem"><span style="color:#7A6A5A">CGST ({{ ((order.gst_rate or 0) / 2)|round(3) }}%)</span><span>₹{{ '%.2f'|format(cgst_amount or 0) }}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem"><span style="color:#7A6A5A">SGST ({{ ((order.gst_rate or 0) / 2)|round(3) }}%)</span><span>₹{{ '%.2f'|format(sgst_amount or 0) }}</span></div>
         <div style="display:flex;justify-content:space-between;padding:0.4rem 0;font-size:0.9rem"><span style="color:#7A6A5A">Delivery</span><span>{% if order.delivery_charge == 0 %}FREE{% else %}₹{{ order.delivery_charge|int }}{% endif %}</span></div>
         <div style="display:flex;justify-content:space-between;padding:0.75rem 0;border-top:2px solid #5C3D2E;margin-top:0.5rem">
           <span style="font-weight:700">Total</span>
           <span style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#C8873A">₹{{ order.total|int }}</span>
         </div>
+        <div style="padding:0.4rem 0;font-size:0.85rem;color:#7A6A5A">Tax liability: {{ order.gst_liability_label }}</div>
         <div style="padding:0.4rem 0;font-size:0.85rem;color:#7A6A5A">Payment: {{ order.payment_method }} · <span class="badge {% if order.payment_status == 'PAID' %}badge-green{% else %}badge-orange{% endif %}">{{ order.payment_status }}</span></div>
       </div>
     </div>
+
+    {% if order.gst_invoice_note %}
+    <div style="margin-top:1rem;padding:0.85rem;background:#FFF7E8;border:1px solid #F2D8A8;border-radius:8px;font-size:0.85rem;color:#6F4E37">
+      {{ order.gst_invoice_note }}
+    </div>
+    {% endif %}
 
     <div style="margin-top:2rem;padding:1rem;background:#FDF6EC;border-radius:8px;text-align:center;font-size:0.85rem;color:#7A6A5A">
       Thank you for choosing SweetCrumbs! 🎂 We hope every bite brings joy. 

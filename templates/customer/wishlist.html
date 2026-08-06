@@ -11,6 +11,7 @@
         <a href="{{ url_for('customer.product_detail', product_id=item.product_id) }}">
           <img src="{{ item.product.image_src }}"
                alt="{{ item.product.name }}" class="product-card-img" loading="lazy" decoding="async"
+               style="--product-image-fit: {{ item.product.image_object_fit }}; --product-image-position: {{ item.product.image_object_position }};"
                onerror="this.onerror=null;this.src='{{ item.product.fallback_image_src }}'">
         </a>
       </div>

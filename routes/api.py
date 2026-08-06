@@ -15,6 +15,7 @@ def validate_coupon():
     result = get_container().payment_service.validate_coupon(
         data.get('code', ''),
         data.get('subtotal', 0),
+        user=current_user,
     )
     return jsonify(result)
 
@@ -114,7 +115,9 @@ def loyalty_validate_redeem():
     try:
         points_to_use = int(data.get('points', 0))
     except (TypeError, ValueError):
-        return jsonify({'valid': False, 'message': 'Enter a valid whole number of points.'})
+        return jsonify(
+            {'valid': False, 'message': 'Enter a valid whole number of points.'}
+        )
 
     try:
         subtotal = Decimal(str(data.get('subtotal', 0)))
@@ -126,21 +129,54 @@ def loyalty_validate_redeem():
     if points_to_use > current_user.loyalty_points:
         return jsonify({'valid': False, 'message': 'Not enough loyalty points.'})
     if points_to_use < redeem_per:
-        return jsonify({'valid': False,
-                        'message': f'Minimum {redeem_per} points required.'})
+        return jsonify(
+            {'valid': False, 'message': f'Minimum {redeem_per} points required.'}
+        )
+    if points_to_use % redeem_per != 0:
+        return jsonify(
+            {
+                'valid': False,
+                'message': (
+                    f'Points can be redeemed only in multiples of {redeem_per}.'
+                ),
+            }
+        )
 
-    loyalty_result = calculate_loyalty_redemption(points_to_use, subtotal, current_user.loyalty_points)
+    loyalty_result = calculate_loyalty_redemption(
+        points_to_use, subtotal, current_user.loyalty_points
+    )
     requested_discount = Decimal(str(loyalty_result['requested_discount']))
     applied_discount = Decimal(str(loyalty_result['discount']))
     capped = loyalty_result['capped']
 
+    if loyalty_result.get('below_minimum'):
+        return jsonify(
+            {
+                'valid': False,
+                'discount': 0,
+                'requested_discount': float(requested_discount),
+                'points_applied': 0,
+                'capped': False,
+                'min_points_required': loyalty_result['min_points_required'],
+                'min_required_discount': loyalty_result['min_required_discount'],
+                'message': (
+                    f'Orders above ₹{loyalty_result["min_order_value"]} need at least '
+                    f'{loyalty_result["min_points_required"]} points '
+                    f'(₹{loyalty_result["min_required_discount"]:.2f}) to redeem.'
+                ),
+            }
+        )
+
     if capped:
         message = (
             f'{points_to_use} pts requested ₹{requested_discount:.0f} off, '
-            f'but this order can apply {loyalty_result["points_applied"]} pts for ₹{applied_discount:.2f}.'
+            f'but this order can apply {loyalty_result["points_applied"]} pts '
+            f'for ₹{applied_discount:.2f}.'
         )
     else:
-        message = f'{loyalty_result["points_applied"]} pts = ₹{applied_discount:.2f} off'
+        message = (
+            f'{loyalty_result["points_applied"]} pts = ₹{applied_discount:.2f} off'
+        )
 
     return jsonify({
         'valid':              True,

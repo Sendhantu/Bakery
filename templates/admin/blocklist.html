@@ -1,0 +1,73 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Fraud Blocklist — Admin{% endblock %}
+{% block content %}
+<h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:1.5rem">🛡️ Fraud Blocklist</h1>
+
+<p class="text-muted" style="margin-bottom:1rem">
+  Only irreversible hashes of identifiers are stored. Matching accounts are flagged
+  for human review with a temporary restriction — never automatically deleted.
+</p>
+
+<div class="card mb-3">
+  <div class="card-header">Add Identifier</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('admin.blocklist_add') }}" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.75rem;align-items:start">
+      <select name="identifier_type" class="form-control" required>
+        <option value="">Identifier type…</option>
+        {% for itype in identifier_types %}
+        <option value="{{ itype }}">{{ itype|replace('_',' ') }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="identifier_value" class="form-control" placeholder="Mobile / email / provider ref" required>
+      <input type="text" name="reason" class="form-control" placeholder="Reason" required>
+      <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.85rem">
+        <input type="checkbox" name="auto_approve" value="1"> Auto-approve
+      </label>
+      <button class="btn btn-primary btn-sm">Add to blocklist</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Blocklist Entries</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Identifier</th><th>Status</th><th>Matches</th><th>Reason</th><th>Added</th><th>Review</th>
+      </tr></thead>
+      <tbody>
+        {% for entry in entries %}<tr>
+          <td>
+            <span class="badge {% if entry.status == 'approved' %}badge-green{% elif entry.status == 'rejected' %}badge-red{% else %}badge-orange{% endif %}">
+              {{ entry.identifier_type|replace('_',' ') }}
+            </span>
+            <code class="text-sm">{{ entry.identifier_hash[:14] }}…</code>
+            {% if entry.match_count %}
+            <div><a href="{{ url_for('admin.customers') }}" class="text-sm">{{ entry.match_count }} matching account(s)</a></div>
+            {% endif %}
+          </td>
+          <td>{{ entry.status|replace('_',' ') }}</td>
+          <td>{{ entry.match_count or 0 }}</td>
+          <td class="text-sm">{{ entry.reason }}</td>
+          <td class="text-sm text-muted">{{ entry.created_at.strftime('%d %b %Y') }}</td>
+          <td>
+            {% if can_admin_manager %}
+            <form method="post" action="{{ url_for('admin.blocklist_review', entry_id=entry.id) }}" style="display:flex;gap:0.35rem;align-items:center">
+              <select name="status" class="form-control" required>
+                {% for status in blocklist_statuses %}
+                <option value="{{ status }}" {% if status == entry.status %}selected{% endif %}>{{ status|replace('_',' ') }}</option>
+                {% endfor %}
+              </select>
+              <input type="text" name="review_notes" class="form-control" placeholder="Review notes" style="width:10rem">
+              <button class="btn btn-outline btn-sm">Save</button>
+            </form>
+            {% else %}<span class="text-muted text-sm">Manager only</span>{% endif %}
+          </td>
+        </tr>{% else %}
+        <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:1.5rem">No blocklist entries yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

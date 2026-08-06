@@ -8,6 +8,31 @@ PRODUCT_FALLBACK_IMAGES = {
     'cookies':  'https://images.unsplash.com/photo-1639678114429-a915fdb55000?auto=format&fit=crop&w=1200&q=80',
     'breads':   'https://images.unsplash.com/photo-1562099870-a3c3f2f3b44d?auto=format&fit=crop&w=1200&q=80',
     'cupcakes': 'https://images.unsplash.com/photo-1486427944299-d1955d23e34d?auto=format&fit=crop&w=1200&q=80',
+    'party add-ons': 'https://images.unsplash.com/photo-1513151233558-d860c5398176?auto=format&fit=crop&w=1200&q=80',
+}
+
+PRODUCT_IMAGE_FIT_CHOICES = [
+    ('cover', 'Fill frame'),
+    ('contain', 'Fit whole image'),
+]
+PRODUCT_IMAGE_FIT_VALUES = {value for value, _label in PRODUCT_IMAGE_FIT_CHOICES}
+
+PRODUCT_IMAGE_POSITION_CHOICES = [
+    ('center', 'Center'),
+    ('top', 'Top'),
+    ('bottom', 'Bottom'),
+    ('left', 'Left'),
+    ('right', 'Right'),
+]
+PRODUCT_IMAGE_POSITION_VALUES = {
+    value for value, _label in PRODUCT_IMAGE_POSITION_CHOICES
+}
+PRODUCT_IMAGE_POSITION_CSS = {
+    'center': 'center center',
+    'top': 'center top',
+    'bottom': 'center bottom',
+    'left': 'left center',
+    'right': 'right center',
 }
 
 class Category(db.Model):
@@ -15,7 +40,25 @@ class Category(db.Model):
     id       = db.Column(db.Integer, primary_key=True)
     name     = db.Column(db.String(100), nullable=False, unique=True)
     icon     = db.Column(db.String(50), default='🎂')
+    image    = db.Column(db.String(512))
+    image_url = db.Column(db.String(512))
     products = db.relationship('Product', backref='category', lazy='dynamic')
+
+    @property
+    def image_src(self):
+        from flask import url_for
+        if self.image_url:
+            return self.image_url
+        if self.image and self.image.startswith(('http://', 'https://')):
+            return self.image
+        if self.image:
+            return url_for('static', filename=f'images/categories/{self.image}')
+        return self.fallback_image_src
+
+    @property
+    def fallback_image_src(self):
+        category_name = (self.name or '').lower()
+        return PRODUCT_FALLBACK_IMAGES.get(category_name, PRODUCT_FALLBACK_IMAGES['cakes'])
 
 
 class Product(db.Model):
@@ -24,10 +67,13 @@ class Product(db.Model):
     name          = db.Column(db.String(200), nullable=False)
     description   = db.Column(db.Text)
     ingredients   = db.Column(db.Text)
+    special_ingredient = db.Column(db.String(255))
     preparation   = db.Column(db.Text)
     base_price    = db.Column(db.Numeric(10, 2), nullable=False)
     image         = db.Column(db.String(255), default='default-product.jpg')
     image_url     = db.Column(db.String(512))
+    image_fit     = db.Column(db.String(20), default='cover')
+    image_position = db.Column(db.String(20), default='center')
     category_id   = db.Column(db.Integer, db.ForeignKey('categories.id'))
     is_eggless    = db.Column(db.Boolean, default=False)
     is_active     = db.Column(db.Boolean, default=True)
@@ -83,6 +129,10 @@ class Product(db.Model):
         return 'in_stock'
 
     @property
+    def egg_status_label(self):
+        return 'Eggless' if self.is_eggless else 'Contains Egg'
+
+    @property
     def default_variant_id(self):
         cached = getattr(self, '_default_variant_id_cache', None)
         if cached is not None:
@@ -105,6 +155,16 @@ class Product(db.Model):
     def fallback_image_src(self):
         category_name = (self.category.name if self.category else '').lower()
         return PRODUCT_FALLBACK_IMAGES.get(category_name, PRODUCT_FALLBACK_IMAGES['cakes'])
+
+    @property
+    def image_object_fit(self):
+        if self.image_fit in PRODUCT_IMAGE_FIT_VALUES:
+            return self.image_fit
+        return 'cover'
+
+    @property
+    def image_object_position(self):
+        return PRODUCT_IMAGE_POSITION_CSS.get(self.image_position, 'center center')
 
     @property
     def current_price(self):

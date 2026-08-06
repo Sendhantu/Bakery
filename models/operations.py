@@ -200,6 +200,29 @@ class SearchAnalytics(db.Model):
     )
 
 
+class CustomerActivity(db.Model):
+    __tablename__ = "customer_activity"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    event_type = db.Column(db.String(40), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"))
+    query_text = db.Column(db.String(255))
+    metadata_json = db.Column(db.Text)
+    session_id = db.Column(db.String(120))
+    ip_address = db.Column(db.String(64))
+    user_agent = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    user = db.relationship("User", backref="customer_activity")
+    product = db.relationship("Product")
+
+    __table_args__ = (
+        db.Index("idx_customer_activity_user_created", "user_id", "created_at"),
+        db.Index("idx_customer_activity_product_created", "product_id", "created_at"),
+        db.Index("idx_customer_activity_event_created", "event_type", "created_at"),
+    )
+
+
 class BackupVerification(db.Model):
     __tablename__ = "backup_verifications"
     id = db.Column(db.Integer, primary_key=True)

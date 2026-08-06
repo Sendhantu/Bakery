@@ -104,10 +104,39 @@ class FinanceExportService:
     def gst_summary_pdf(self, payload: Dict[str, Any]) -> bytes:
         lines = [
             f"Period: {payload['start'].date()} to {payload['end'].date()}",
-            f"GST Collected (output tax): INR {_format_decimal(payload['gst_collected'])}",
-            f"GST Paid (input credit): INR {_format_decimal(payload['gst_paid'])}",
+            f"GST payable by bakery: INR {_format_decimal(payload['gst_collected'])}",
+            f"GST paid by e-commerce operators: INR {_format_decimal(payload['ecommerce_operator_gst'])}",
+            f"Supplier GST recorded: INR {_format_decimal(payload['input_gst_recorded'])}",
+            f"Blocked input GST: INR {_format_decimal(payload['non_creditable_input_gst'])}",
+            f"E-commerce TCS to claim: INR {_format_decimal(payload['ecommerce_tcs'])}",
             f"Net GST Liability: INR {_format_decimal(payload['net_gst_liability'])}",
             "",
-            "Figures are calculated from recorded transactions only.",
+            "GSTR-1 mapping:",
+            (
+                "Regular outward supplies: taxable="
+                f"{_format_decimal(payload['gstr1_mapping']['regular_outward_supplies']['taxable_value'])} "
+                f"gst={_format_decimal(payload['gstr1_mapping']['regular_outward_supplies']['gst'])}"
+            ),
+            (
+                "GSTR-1 Table 14 / Section 9(5): taxable="
+                f"{_format_decimal(payload['gstr1_mapping']['ecommerce_operator_9_5']['taxable_value'])} "
+                f"gst={_format_decimal(payload['gstr1_mapping']['ecommerce_operator_9_5']['gst'])}"
+            ),
+            "",
+            "Order-wise rows:",
         ]
+        for row in payload.get("rows", []):
+            lines.append(
+                f"{row['order_date']} {row['invoice_number']} {row['order_source']} "
+                f"taxable={_format_decimal(row['base_taxable_value'])} "
+                f"cgst={_format_decimal(row['cgst_amount'])} "
+                f"sgst={_format_decimal(row['sgst_amount'])} "
+                f"liability={row['tax_liability_flag']}"
+            )
+        lines.extend(
+            [
+                "",
+                "Figures are calculated from recorded orders and transactions only.",
+            ]
+        )
         return self.simple_pdf("GST Summary", lines)

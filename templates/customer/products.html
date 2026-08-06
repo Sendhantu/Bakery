@@ -10,24 +10,73 @@
   <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
     <div>
       <h1 class="section-title">Our Bakery Shop</h1>
-      <p class="text-muted">{{ products|length }} delicious item{{ 's' if products|length != 1 else '' }} found</p>
+      <p class="text-muted">{{ pagination.total }} delicious item{{ 's' if pagination.total != 1 else '' }} found</p>
+      {% if pagination.total %}
+      <p class="text-sm text-muted" style="margin-top:0.25rem">
+        Showing {{ ((pagination.page - 1) * pagination.per_page) + 1 }}-{{ [pagination.page * pagination.per_page, pagination.total]|min }} of {{ pagination.total }}
+      </p>
+      {% endif %}
     </div>
-    <div class="search-bar">
+    <form method="GET" action="{{ url_for('customer.products') }}" class="search-bar" style="display:flex;gap:0.5rem;align-items:center">
       <span class="search-icon">🔍</span>
-      <input type="text" class="form-control search-input" placeholder="Search cakes, cookies..."
-             value="{{ q or '' }}" id="search-input">
+      <input type="text" class="form-control search-input" name="q" placeholder="Search cakes, cookies, breads..."
+             value="{{ q or '' }}" id="search-input" autocomplete="off">
+      {% if cat_id %}<input type="hidden" name="category" value="{{ cat_id }}">{% endif %}
+      {% if eggless is not none %}<input type="hidden" name="eggless" value="{{ eggless }}">{% endif %}
+      {% if min_price %}<input type="hidden" name="min_price" value="{{ min_price }}">{% endif %}
+      {% if max_price %}<input type="hidden" name="max_price" value="{{ max_price }}">{% endif %}
+      {% if occasion %}<input type="hidden" name="occasion" value="{{ occasion }}">{% endif %}
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <button class="btn btn-primary btn-sm" type="submit">Search</button>
       <div class="search-suggestions" id="search-suggestions"></div>
-    </div>
+    </form>
   </div>
 
   <div class="flex items-center gap-1 flex-wrap mb-3">
     <span class="text-sm text-muted">Sort:</span>
-    {% for key, label in [('featured','Featured'), ('newest','Newest'), ('price_asc','Price ↑'), ('price_desc','Price ↓'), ('rating','Top Rated')] %}
+    {% for key, label in [('recommended','Recommended'), ('featured','Featured'), ('price_asc','Price: Low to High'), ('price_desc','Price: High to Low'), ('rating','Top Rated'), ('newest','Newest')] %}
     <a href="{{ url_for('customer.products', q=q, category=cat_id, eggless=eggless, min_price=min_price, max_price=max_price, occasion=occasion, sort=key) }}"
        class="btn btn-sm {% if sort == key %}btn-primary{% else %}btn-ghost{% endif %}">
       {{ label }}
     </a>
     {% endfor %}
+  </div>
+
+  <div class="flex items-center gap-1 flex-wrap mb-4">
+    <span class="text-sm text-muted">Category:</span>
+    <a href="{{ url_for('customer.products', q=q, eggless=eggless, min_price=min_price, max_price=max_price, occasion=occasion, sort=sort) }}"
+       class="btn btn-sm {% if not cat_id %}btn-primary{% else %}btn-ghost{% endif %}">All</a>
+    {% for cat in categories %}
+    <a href="{{ url_for('customer.products', q=q, category=cat.id, eggless=eggless, min_price=min_price, max_price=max_price, occasion=occasion, sort=sort) }}"
+       class="btn btn-sm {% if cat_id == cat.id %}btn-primary{% else %}btn-ghost{% endif %}">
+      {{ cat.icon }} {{ cat.name }}
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="card mb-4" id="ai-assistant">
+    <div class="card-body">
+      {% set ai_next = ((request.full_path if request.query_string else request.path) ~ '#ai-assistant') %}
+      {% set ai_login_url = url_for('auth.login', next=ai_next) %}
+      {% set ai_register_url = url_for('auth.register', next=ai_next) %}
+      {% if not current_user.is_authenticated or current_user.role != 'customer' %}
+      {% set ai_auth_title = 'Ask the Bakery AI' %}
+      {% include 'customer/_ai_login_prompt.html' %}
+      {% else %}
+      <div class="flex justify-between items-center gap-2 flex-wrap">
+        <div>
+          <h2 style="font-size:1.15rem;margin-bottom:0.25rem">Ask the Bakery AI</h2>
+          <p class="text-sm text-muted" style="margin:0">Search naturally by occasion, budget, flavour, eggless preference, or add-ons.</p>
+        </div>
+        <span class="badge badge-brown">Ollama local when enabled</span>
+      </div>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:1rem">
+        <input id="shop-ai-query" class="form-control" type="text" value="{{ q or '' }}" placeholder="E.g. birthday cake under ₹800 with candles" style="flex:1;min-width:240px">
+        <button id="shop-ai-submit" type="button" class="btn btn-secondary">AI Search</button>
+      </div>
+      <div id="shop-ai-response" class="mt-3"></div>
+      {% endif %}
+    </div>
   </div>
 
   <div class="layout-sidebar">
@@ -97,11 +146,12 @@
         <div class="form-group">
           <label class="form-label">Sort</label>
           <select class="form-control" name="sort">
+            <option value="recommended" {% if sort == 'recommended' %}selected{% endif %}>Recommended for You</option>
             <option value="featured" {% if sort == 'featured' %}selected{% endif %}>Featured</option>
-            <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest</option>
             <option value="price_asc" {% if sort == 'price_asc' %}selected{% endif %}>Price: Low to High</option>
             <option value="price_desc" {% if sort == 'price_desc' %}selected{% endif %}>Price: High to Low</option>
             <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Top Rated</option>
+            <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest</option>
           </select>
         </div>
 
@@ -120,6 +170,7 @@
             <a href="{{ url_for('customer.product_detail', product_id=product.id) }}">
               <img src="{{ product.image_src }}"
                    alt="{{ product.name }}" class="product-card-img" loading="lazy" decoding="async"
+                   style="--product-image-fit: {{ product.image_object_fit }}; --product-image-position: {{ product.image_object_position }};"
                    onerror="this.onerror=null;this.src='{{ product.fallback_image_src }}'">
             </a>
             <span class="badge stock-badge
@@ -186,9 +237,65 @@
         <a href="{{ url_for('customer.products') }}" class="btn btn-primary mt-3">Clear Filters</a>
       </div>
       {% endif %}
+      {% include 'includes/pagination.html' %}
     </div>
 
   </div>
 </div>
 </div>
+<script>
+  const escapeShopAIHTML = value => String(value || '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  }[character]));
+
+  async function runShopAISearch() {
+    const queryBox = document.getElementById('shop-ai-query');
+    const responseBox = document.getElementById('shop-ai-response');
+    const query = queryBox.value.trim();
+    if (!query) {
+      responseBox.innerHTML = '<div class="text-danger">Type what the customer is looking for.</div>';
+      return;
+    }
+
+    responseBox.innerHTML = '<div class="text-muted">Asking the bakery assistant...</div>';
+    try {
+      const response = await fetch('{{ url_for('customer.ai_recommend') }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, surface: 'shop' }),
+      });
+      const result = await response.json();
+      if (!result.ok) {
+        responseBox.innerHTML = `<div class="text-danger">${result.message || 'Unable to search with AI right now.'}</div>`;
+        return;
+      }
+      const productCards = result.products.map(product => `
+        <a href="${product.detail_url}" class="ai-shop-card">
+          <span class="ai-shop-card-title">${escapeShopAIHTML(product.name)}</span>
+          <span class="text-sm text-muted">${escapeShopAIHTML(product.category || 'Bakery')} · ₹${product.price.toFixed(0)}</span>
+          <span class="text-sm">${escapeShopAIHTML(product.description || 'Fresh bakery item')}</span>
+        </a>
+      `).join('');
+      const addonCards = (result.checkout_addons || []).map(product => `
+        <a href="${product.detail_url}" class="ai-shop-addon">${escapeShopAIHTML(product.name)} · ₹${product.price.toFixed(0)}</a>
+      `).join('');
+      responseBox.innerHTML = `
+        <div class="ai-shop-answer">${escapeShopAIHTML(result.message)}</div>
+        <div class="ai-shop-grid">${productCards}</div>
+        ${addonCards ? `<div class="ai-shop-addons"><strong>Useful add-ons:</strong> ${addonCards}</div>` : ''}
+      `;
+    } catch (error) {
+      responseBox.innerHTML = '<div class="text-danger">AI search is unavailable. Normal search still works.</div>';
+      console.error(error);
+    }
+  }
+
+  const shopAISubmit = document.getElementById('shop-ai-submit');
+  if (shopAISubmit) shopAISubmit.addEventListener('click', runShopAISearch);
+</script>
+{% include 'customer/_ai_shop_widget.html' %}
 {% endblock %}

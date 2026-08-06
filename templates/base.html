@@ -78,6 +78,7 @@
         <a href="{{ url_for('customer.notifications') }}" class="nav-icon-btn" title="Notifications">🔔
           {% if unread_notifs > 0 %}<span class="badge-count">{{ unread_notifs }}</span>{% endif %}
         </a>
+        <a href="{{ url_for('auth.profile') }}" class="btn btn-outline btn-sm">Profile</a>
         <div class="nav-user-menu">
           <button type="button" class="nav-icon-btn nav-user-trigger" id="user-menu-btn" title="Account" aria-haspopup="true" aria-expanded="false" aria-controls="user-dropdown">
             <span class="nav-user-trigger-icon">👤</span>
@@ -95,7 +96,7 @@
               <li><a href="{{ url_for('customer.subscription') }}" class="user-dropdown-link">⭐ Membership</a></li>
               <li><a href="{{ url_for('customer.gift_cards') }}" class="user-dropdown-link">🎁 Gift Cards</a></li>
               <li><a href="{{ url_for('customer.recurring_subscriptions') }}" class="user-dropdown-link">🔁 Recurring Orders</a></li>
-              <li><a href="{{ url_for('customer.chat') }}" class="user-dropdown-link">💬 Chat with Us</a></li>
+              <li><a href="{{ url_for('customer.chat') }}" class="user-dropdown-link">💬 Support</a></li>
               <li class="user-dropdown-item user-dropdown-item--danger">
                 <a href="{{ url_for('auth.logout') }}" class="user-dropdown-link user-dropdown-link--danger">🚪 Logout</a>
               </li>
@@ -166,6 +167,7 @@
       <div class="mini-cart-row"><span>Items</span><strong id="mini-cart-count">0</strong></div>
       <div class="mini-cart-row"><span>Subtotal</span><strong id="mini-cart-subtotal">₹0</strong></div>
     </div>
+    <div class="mini-cart-free-delivery" id="mini-cart-free-delivery"></div>
     <div class="mini-cart-list" id="mini-cart-list"></div>
     <div class="mini-cart-actions">
       <a href="{{ url_for('customer.cart') }}" class="btn btn-outline btn-block">View Cart</a>
@@ -217,7 +219,7 @@
       <div>
         <div class="footer-heading">Support</div>
         <ul class="footer-links">
-          <li><a href="{{ url_for('customer.chat') }}">💬 Chat &amp; FAQ</a></li>
+          <li><a href="{{ url_for('customer.chat') }}">💬 Support</a></li>
           <li><a href="tel:{{ store_details.phone_tel }}">📞 Call: {{ store_details.phone }}</a></li>
           <li><a href="{{ url_for('customer.products') }}">Shop &amp; delivery</a></li>
         </ul>

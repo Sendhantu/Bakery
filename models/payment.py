@@ -13,6 +13,18 @@ PAYMENT_STATES = {
     "CANCELLED": set(),
 }
 
+COUPON_AUDIENCE_ALL = "all"
+COUPON_AUDIENCE_NEW_CUSTOMERS = "new_customers"
+COUPON_AUDIENCE_RETURNING_CUSTOMERS = "returning_customers"
+
+COUPON_AUDIENCE_CHOICES = (
+    (COUPON_AUDIENCE_ALL, "All customers"),
+    (COUPON_AUDIENCE_NEW_CUSTOMERS, "New customers - first order only"),
+    (COUPON_AUDIENCE_RETURNING_CUSTOMERS, "Returning customers"),
+)
+COUPON_AUDIENCE_VALUES = {value for value, _label in COUPON_AUDIENCE_CHOICES}
+COUPON_AUDIENCE_LABELS = dict(COUPON_AUDIENCE_CHOICES)
+
 
 class Payment(db.Model):
     __tablename__ = "payments"
@@ -179,6 +191,10 @@ class Coupon(db.Model):
     max_uses        = db.Column(db.Integer, default=100)
     used_count      = db.Column(db.Integer, default=0)
     per_user_limit = db.Column(db.Integer, default=1)
+    customer_audience = db.Column(
+        db.String(30), default=COUPON_AUDIENCE_ALL, nullable=False
+    )
+    first_order_only = db.Column(db.Boolean, default=False, nullable=False)
     valid_from      = db.Column(db.DateTime)
     valid_until     = db.Column(db.DateTime)
     is_active = db.Column(db.Boolean, default=True)
@@ -192,6 +208,30 @@ class Coupon(db.Model):
         if self.valid_until and now > self.valid_until:
             return False
         return True
+
+    @property
+    def normalized_customer_audience(self):
+        audience = (self.customer_audience or COUPON_AUDIENCE_ALL).strip().lower()
+        return audience if audience in COUPON_AUDIENCE_VALUES else COUPON_AUDIENCE_ALL
+
+    @property
+    def audience_label(self):
+        if self.first_order_only:
+            return COUPON_AUDIENCE_LABELS[COUPON_AUDIENCE_NEW_CUSTOMERS]
+        return COUPON_AUDIENCE_LABELS[self.normalized_customer_audience]
+
+    def eligibility_message(self, prior_order_count):
+        prior_orders = int(prior_order_count or 0)
+        audience = self.normalized_customer_audience
+        if self.first_order_only or audience == COUPON_AUDIENCE_NEW_CUSTOMERS:
+            if prior_orders > 0:
+                return "This welcome coupon is only for a customer's first order."
+        if audience == COUPON_AUDIENCE_RETURNING_CUSTOMERS and prior_orders <= 0:
+            return "This coupon is only for returning customers."
+        return None
+
+    def is_eligible_for_customer(self, prior_order_count):
+        return self.eligibility_message(prior_order_count) is None
 
 
 class PaymentTransitionLog(db.Model):

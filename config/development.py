@@ -1,11 +1,17 @@
 from .base import BaseConfig, REDIS_CLIENT_AVAILABLE
-from .utils import ensure_instance_dirs
+from .utils import ensure_instance_dirs, env_flag
 
 
 class DevelopmentConfig(BaseConfig):
     ENV = "development"
     DEBUG = True
     SHOW_DEMO_ACCOUNTS = True
+    DEVELOPMENT_CREDENTIALS_ENABLED = True
+    AI_ASSISTANT_ENABLED = env_flag("AI_ASSISTANT_ENABLED", default=True)
+    AI_SUPPORT_BOT_ENABLED = env_flag("AI_SUPPORT_BOT_ENABLED", default=True)
+    AI_PUSH_RECOMMENDATIONS_ENABLED = env_flag(
+        "AI_PUSH_RECOMMENDATIONS_ENABLED", default=True
+    )
     SESSION_COOKIE_SECURE = False
     REMEMBER_COOKIE_SECURE = False
     WTF_CSRF_SSL_STRICT = False

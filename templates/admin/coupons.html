@@ -2,15 +2,18 @@
 {% block title %}Coupons — Admin{% endblock %}
 {% block content %}
 <div class="flex justify-between items-center mb-4">
-  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">🎟 Coupons</h1>
-  <button class="btn btn-primary" data-toggle-target="#add-coupon-form" data-toggle-hide-self>+ Add Coupon</button>
+  <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Coupons</h1>
+  <button type="button" class="btn btn-primary" data-toggle-target="#add-coupon-form" data-toggle-hide-self>+ Add Coupon</button>
 </div>
 <form method="GET" action="{{ url_for('admin.coupons') }}" class="admin-toolbar-search" style="margin-bottom:1rem">
   <input class="form-control" type="search" name="q" value="{{ search or '' }}" placeholder="Search coupon code">
   <button type="submit" class="btn btn-outline btn-sm">Search</button>
 </form>
-<div id="add-coupon-form" style="display:none" class="card mb-4">
-  <div class="card-header">Create New Coupon</div>
+<div id="add-coupon-form" class="card mb-4 hidden">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+    <span>Create New Coupon</span>
+    <button type="button" class="btn btn-ghost btn-sm" data-hide-target="#add-coupon-form">Cancel</button>
+  </div>
   <div class="card-body">
     <form method="POST" action="{{ url_for('admin.add_coupon') }}">
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem">
@@ -19,6 +22,16 @@
         <div class="form-group"><label class="form-label">Value</label><input class="form-control" type="number" name="discount_value" required placeholder="10"></div>
         <div class="form-group"><label class="form-label">Min Order (₹)</label><input class="form-control" type="number" name="min_order_value" placeholder="0"></div>
         <div class="form-group"><label class="form-label">Max Uses</label><input class="form-control" type="number" name="max_uses" placeholder="100"></div>
+        <div class="form-group"><label class="form-label">Per Customer Uses</label><input class="form-control" type="number" name="per_user_limit" min="1" placeholder="1"></div>
+        <div class="form-group">
+          <label class="form-label">Customer Condition</label>
+          <select class="form-control" name="customer_audience">
+            {% for value, label in coupon_audience_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+          <p class="text-sm text-muted mt-1">Use "New customers" for welcome coupons and "Returning customers" for old customers.</p>
+        </div>
         <div class="form-group"><label class="form-label">Valid Until</label><input class="form-control" type="date" name="valid_until"></div>
       </div>
       <button type="submit" class="btn btn-primary">Create Coupon</button>
@@ -28,15 +41,17 @@
 <div class="card">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Code</th><th>Type</th><th>Value</th><th>Min Order</th><th>Used</th><th>Valid Until</th><th>Status</th></tr></thead>
+      <thead><tr><th>Code</th><th>Type</th><th>Value</th><th>Audience</th><th>Min Order</th><th>Used</th><th>Per Customer</th><th>Valid Until</th><th>Status</th></tr></thead>
       <tbody>
         {% for c in coupons %}
         <tr>
           <td style="font-family:monospace;font-weight:700;color:var(--brown)">{{ c.code }}</td>
           <td>{{ c.discount_type|title }}</td>
           <td>{% if c.discount_type=='percentage' %}{{ c.discount_value|int }}%{% else %}₹{{ c.discount_value|int }}{% endif %}</td>
+          <td>{{ c.audience_label }}</td>
           <td>₹{{ c.min_order_value|int }}</td>
           <td>{{ c.used_count }} / {{ c.max_uses }}</td>
+          <td>{{ c.per_user_limit or 1 }}</td>
           <td class="text-sm text-muted">{{ c.valid_until.strftime('%d %b %Y') if c.valid_until else '—' }}</td>
           <td>
             <div class="flex items-center gap-2 flex-wrap">
@@ -50,7 +65,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">No coupons found.</td></tr>
+        <tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-muted)">No coupons found.</td></tr>
         {% endfor %}
       </tbody>
     </table>

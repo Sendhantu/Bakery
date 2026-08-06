@@ -57,6 +57,7 @@ class FinancialTransaction(db.Model):
         db.Integer, db.ForeignKey("purchase_orders.id")
     )
     vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"))
+    payment_method = db.Column(db.String(60))
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
     store_location = db.Column(db.String(150))
     tds_withheld = db.Column(EncryptedDecimal)

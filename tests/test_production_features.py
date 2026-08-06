@@ -19,6 +19,7 @@ def _set_required_production_env(monkeypatch):
         "RATELIMIT_STORAGE_URI": "redis://localhost:6379/0",
         "SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
         "JWT_SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
+        "STORAGE_REQUIRED": "false",
         "FINANCIAL_DATA_ENCRYPTION_KEY": (
             "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
         ),
@@ -33,6 +34,7 @@ def _set_minimal_render_production_env(monkeypatch):
         "REDIS_URL": "redis://localhost:6379/0",
         "SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
         "JWT_SECRET_KEY": "abcdefghijklmnopqrstuvwxyz123456",
+        "STORAGE_REQUIRED": "false",
         "FINANCIAL_DATA_ENCRYPTION_KEY": (
             "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
         ),
@@ -156,7 +158,10 @@ def test_render_blueprint_uses_tidb_and_keyvalue():
     }
 
     assert "databases" not in blueprint
+    assert services["bakery-customer-portal"]["healthCheckPath"] == "/livez"
     assert web_env["PORTAL_ROLE"]["value"] == "customer"
+    assert web_env["PYTHON_VERSION"]["value"] == "3.11.9"
+    assert worker_env["PYTHON_VERSION"]["value"] == "3.11.9"
     assert web_env["DATABASE_URL"]["sync"] is False
     assert worker_env["DATABASE_URL"]["fromService"]["name"] == "bakery-customer-portal"
     assert web_env["FINANCIAL_DATA_ENCRYPTION_KEY"]["sync"] is False
@@ -166,6 +171,22 @@ def test_render_blueprint_uses_tidb_and_keyvalue():
     )
     assert services["bakery-redis"]["type"] == "keyvalue"
     assert services["bakery-celery-worker"]["plan"] != "free"
+    assert web_env["SHOW_DEMO_ACCOUNTS"]["value"] == "false"
+    assert worker_env["SHOW_DEMO_ACCOUNTS"]["value"] == "false"
+    assert web_env["DEVELOPMENT_CREDENTIALS_ENABLED"]["value"] == "false"
+    assert worker_env["DEVELOPMENT_CREDENTIALS_ENABLED"]["value"] == "false"
+    assert web_env["BOOTSTRAP_SEED_DATA"]["value"] == "false"
+    assert worker_env["BOOTSTRAP_SEED_DATA"]["value"] == "false"
+    assert web_env["AUTO_INIT_DB"]["value"] == "false"
+    assert worker_env["AUTO_INIT_DB"]["value"] == "false"
+    assert web_env["STORAGE_REQUIRED"]["value"] == "true"
+    assert worker_env["STORAGE_REQUIRED"]["value"] == "true"
+    assert web_env["AI_ASSISTANT_ENABLED"]["value"] == "false"
+    assert worker_env["AI_ASSISTANT_ENABLED"]["value"] == "false"
+    assert web_env["AI_SUPPORT_BOT_ENABLED"]["value"] == "false"
+    assert worker_env["AI_SUPPORT_BOT_ENABLED"]["value"] == "false"
+    assert web_env["AI_PUSH_RECOMMENDATIONS_ENABLED"]["value"] == "false"
+    assert worker_env["AI_PUSH_RECOMMENDATIONS_ENABLED"]["value"] == "false"
 
     render_backed_env = (
         services["bakery-customer-portal"]["envVars"]
@@ -198,12 +219,65 @@ def test_production_cloudinary_required_when_storage_required(monkeypatch):
         ProductionConfig.init_app(_production_config_app())
 
 
+def test_production_disallows_demo_credentials(monkeypatch):
+    _set_required_production_env(monkeypatch)
+    monkeypatch.setenv("SHOW_DEMO_ACCOUNTS", "true")
+
+    from app import create_app
+
+    with pytest.raises(RuntimeError, match="SHOW_DEMO_ACCOUNTS"):
+        create_app("production")
+
+
+def test_development_credential_recording_is_disabled_in_production(
+    monkeypatch, tmp_path
+):
+    import app as app_module
+    from app import record_development_credential
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    registry_path = tmp_path / "dev_credentials.json"
+    monkeypatch.setattr(app_module, "CREDENTIAL_REGISTRY_PATH", str(registry_path))
+
+    flask_app = Flask(__name__)
+    flask_app.config.update(
+        ENV="production",
+        SHOW_DEMO_ACCOUNTS=True,
+        DEVELOPMENT_CREDENTIALS_ENABLED=True,
+        TESTING=False,
+    )
+
+    with flask_app.app_context():
+        record_development_credential(
+            "admin",
+            "admin@example.com",
+            "plain-password",
+            label="Should Not Persist",
+        )
+
+    assert not registry_path.exists()
+
+
 def test_healthz_returns_json(client):
     response = client.get("/healthz")
     payload = response.get_json()
     assert response.status_code in {200, 503}
     assert "database" in payload
     assert "redis" in payload
+
+
+def test_readiness_endpoints_include_production_metadata(client):
+    response = client.get("/readyz")
+    payload = response.get_json()
+    assert response.status_code in {200, 503}
+    assert payload["service"] == "bakery"
+    assert payload["portal_role"] == "customer"
+    assert "migrations" in payload
+    assert "requirements" in payload
+
+    api_response = client.get("/api/health")
+    assert api_response.status_code in {200, 503}
+    assert api_response.get_json()["service"] == "bakery"
 
 
 def test_payment_transition_invalid(app):

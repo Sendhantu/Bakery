@@ -6,6 +6,7 @@
       <div>
         <a href="{{ url_for('customer.order_detail', order_id=order.id) }}" style="font-family:var(--font-display);font-size:1.1rem;font-weight:600;color:var(--brown)">#{{ order.order_number }}</a>
         <span class="text-sm text-muted" style="margin-left:0.75rem">{{ order.placed_at.strftime('%d %b %Y, %I:%M %p') }}</span>
+        <span class="text-sm text-muted" style="margin-left:0.75rem">GST ₹{{ (order.gst_amount or 0)|int }}</span>
       </div>
       <div class="flex gap-2 items-center flex-wrap">
         <span class="badge
@@ -16,10 +17,15 @@
           {% else %}badge-brown{% endif %}" data-order-status="{{ order.id }}">
           {{ order.status.replace('_',' ') }}
         </span>
-        <span style="font-family:var(--font-display);font-weight:700;color:var(--caramel)">₹{{ order.total|int }}</span>
-        <a href="{{ url_for('customer.order_detail', order_id=order.id) }}" class="btn btn-outline btn-sm">View Details</a>
-        <a href="{{ url_for('customer.reorder', order_id=order.id) }}" class="btn btn-ghost btn-sm">🔄 Reorder</a>
-      </div>
+	        <span style="font-family:var(--font-display);font-weight:700;color:var(--caramel)">₹{{ order.total|int }}</span>
+	        <a href="{{ url_for('customer.order_detail', order_id=order.id) }}" class="btn btn-outline btn-sm">View Details</a>
+	        {% if order.can_cancel() %}
+	        <form method="POST" action="{{ url_for('customer.cancel_order', order_id=order.id) }}" class="inline-cancel-form">
+	          <button type="submit" class="btn btn-danger btn-sm cancel-btn" data-confirm="Cancel this order? You can only cancel within 2 minutes of placing it.">Cancel</button>
+	        </form>
+	        {% endif %}
+	        <a href="{{ url_for('customer.reorder', order_id=order.id) }}" class="btn btn-ghost btn-sm">🔄 Reorder</a>
+	      </div>
     </div>
     <div style="padding:1rem 1.5rem;display:flex;flex-wrap:wrap;gap:0.5rem">
       {% for item in order.preview_items %}

@@ -1,16 +1,22 @@
 from .audit_service import AuditService
+from .ai_assistant_service import AIAssistantService
 from .auth_service import AuthService
+from .rbac_service import RbacService
 from .delivery_service import DeliveryService
+from .delivery_cash_service import DeliveryCashService
 from .demand_service import DemandService
 from .finance_export_service import FinanceExportService
 from .finance_service import FinanceService
 from .forecast_service import ForecastService
 from .gift_card_service import GiftCardService
+from .customer_risk_service import CustomerRiskService
 from .inventory_service import InventoryService
 from .invoice_service import InvoiceService
 from .loyalty_service import LoyaltyService
+from .mcp_context_service import BakeryMCPContextService
 from .offline_sync_service import OfflineSyncService
 from .order_reversal_service import OrderReversalService
+from .offer_recommendation_service import OfferRecommendationService
 from .order_service import OrderService
 from .payment_service import PaymentService
 from .push_service import PushService
@@ -44,18 +50,24 @@ from .review_reply_service import generate_review_reply_draft, review_needs_atte
 
 __all__ = [
     "AuditService",
+    "AIAssistantService",
     "AuthService",
+    "RbacService",
     "DeliveryService",
+    "DeliveryCashService",
     "DemandService",
     "FinanceExportService",
     "FinanceService",
     "ForecastService",
     "GiftCardService",
+    "CustomerRiskService",
     "InventoryService",
     "InvoiceService",
     "LoyaltyService",
+    "BakeryMCPContextService",
     "OfflineSyncService",
     "OrderReversalService",
+    "OfferRecommendationService",
     "OrderService",
     "PaymentService",
     "PushService",

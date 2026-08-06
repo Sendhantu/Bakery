@@ -11,19 +11,30 @@
 <div class="card">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Orders</th><th>Action</th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Risk</th><th>Account</th><th>Joined</th><th>Orders</th><th>Action</th></tr></thead>
       <tbody>
         {% for u in users %}
+        {% set profile = risk_profiles.get(u.id) %}
         <tr>
           <td style="font-weight:600">{{ u.name }}</td>
           <td>{{ u.email }}</td>
           <td>{{ u.phone or '—' }}</td>
+          <td>
+            <span class="badge {% if not profile or profile.risk_status == 'normal' %}badge-green{% elif profile.risk_status == 'confirmed_fraud' %}badge-red{% else %}badge-orange{% endif %}">
+              {{ (profile.risk_status if profile else 'normal')|replace('_',' ') }}
+            </span>
+          </td>
+          <td>
+            <span class="badge {% if not profile or profile.account_status == 'active' %}badge-blue{% elif profile.account_status in ['suspended','blocked','soft_deleted','anonymized','permanently_deleted'] %}badge-red{% else %}badge-orange{% endif %}">
+              {{ (profile.account_status if profile else 'active')|replace('_',' ') }}
+            </span>
+          </td>
           <td class="text-sm text-muted">{{ u.created_at.strftime('%d %b %Y') }}</td>
           <td><span class="badge badge-brown">{{ u.order_count }}</span></td>
           <td><a href="{{ url_for('admin.customer_detail', user_id=u.id) }}" class="btn btn-ghost btn-sm">View →</a></td>
         </tr>
         {% else %}
-        <tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-muted)">No customers found for this search.</td></tr>
+        <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted)">No customers found for this search.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -145,6 +145,8 @@ The application displays demo credentials on startup. They are also saved to `ou
 | Customer | customer@test.com       | customer123  |
 | Delivery | delivery@bakery.com     | delivery123  |
 
+`output/dev_credentials.json` is generated only for local/demo accounts when demo credentials are enabled, and `output/` is gitignored. Real registered users are not written to README or any tracked credential file. Their passwords are stored only as non-reversible bcrypt hashes in the database.
+
 ## ▲ Vercel Deployment Guide
 
 This repository can now be deployed directly to Vercel as the **customer portal** using the root `wsgi.py` entrypoint.

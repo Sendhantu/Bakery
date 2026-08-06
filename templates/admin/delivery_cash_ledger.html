@@ -1,0 +1,130 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Delivery Cash Ledger — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Delivery Cash Ledger</h1>
+    <p class="text-muted">Track COD cash collected by riders, store handovers, and shortage recovery.</p>
+  </div>
+  <a href="{{ url_for('admin.agents') }}" class="btn btn-outline btn-sm">Delivery Agents</a>
+</div>
+
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card brown">
+    <div class="stat-value">₹{{ total_outstanding|int }}</div>
+    <div class="stat-label">Cash With Riders</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-value">{{ agents|length }}</div>
+    <div class="stat-label">Rider Profiles</div>
+  </div>
+</div>
+
+<section class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">Rider Balances</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Rider</th>
+          <th>Type</th>
+          <th>Cash Balance</th>
+          <th>Cash Handover</th>
+          <th>Shortage Recovery</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for agent in agents %}
+        {% set balance = balances.get(agent.id, 0) %}
+        <tr>
+          <td>
+            <a href="{{ url_for('admin.delivery_cash_ledger', agent_id=agent.id) }}" style="font-weight:700">{{ agent.name }}</a>
+            <div class="text-sm text-muted">{{ agent.phone or 'No phone' }}{% if agent.branch %} · {{ agent.branch.name }}{% endif %}</div>
+          </td>
+          <td>
+            {% if agent.user_id %}
+            <span class="badge badge-blue">Employee</span>
+            {% else %}
+            <span class="badge badge-orange">Delivery Vendor</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge {% if balance > 0 %}badge-orange{% else %}badge-green{% endif %}">₹{{ balance|int }}</span>
+          </td>
+          <td>
+            <form method="POST" action="{{ url_for('admin.delivery_cash_handover', agent_id=agent.id) }}" class="flex gap-2 flex-wrap">
+              <input class="form-control" type="number" name="amount" step="0.01" min="0.01" value="{{ balance }}" style="max-width:120px" {% if balance <= 0 %}disabled{% endif %}>
+              <input class="form-control" name="notes" placeholder="Optional note" style="max-width:180px" {% if balance <= 0 %}disabled{% endif %}>
+              <button type="submit" class="btn btn-primary btn-sm" {% if balance <= 0 %}disabled{% endif %}>Mark Handover</button>
+            </form>
+          </td>
+          <td>
+            <form method="POST" action="{{ url_for('admin.delivery_cash_recover', agent_id=agent.id) }}" class="flex gap-2 flex-wrap">
+              <input class="form-control" type="number" name="amount" step="0.01" min="0.01" value="{{ balance }}" style="max-width:120px" {% if balance <= 0 %}disabled{% endif %}>
+              <select class="form-control" name="recovery_method" style="max-width:190px" {% if balance <= 0 %}disabled{% endif %}>
+                {% if agent.user_id %}<option value="salary_deduction">Deduct Salary</option>{% endif %}
+                <option value="vendor_payout_deduction">Deduct Vendor Payout</option>
+              </select>
+              <input class="form-control" name="notes" placeholder="Reason" style="max-width:180px" {% if balance <= 0 %}disabled{% endif %}>
+              <button type="submit" class="btn btn-outline btn-sm" {% if balance <= 0 %}disabled{% endif %}>Recover</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted" style="padding:1rem">No delivery agents yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    Recent Ledger Entries{% if selected_agent_id %} · Filtered Rider{% endif %}
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Rider</th>
+          <th>Order</th>
+          <th>Action</th>
+          <th>Amount</th>
+          <th>Balance After</th>
+          <th>Recorded By</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in entries %}
+        <tr>
+          <td>{{ entry.created_at.strftime('%d %b %Y, %I:%M %p') }}</td>
+          <td>{{ entry.agent.name }}</td>
+          <td>
+            {% if entry.order %}
+            <a href="{{ url_for('admin.order_detail', order_id=entry.order.id) }}">#{{ entry.order.order_number }}</a>
+            {% else %}
+            —
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge {% if entry.action == 'cod_collected' %}badge-orange{% elif entry.action in ['cash_handover', 'salary_deduction', 'vendor_payout_deduction'] %}badge-green{% else %}badge-brown{% endif %}">
+              {% if entry.action == 'cod_collected' %}COD Collected{% elif entry.action == 'cash_handover' %}Cash Handover{% else %}
+              {{ entry.action.replace('_', ' ')|title }}
+              {% endif %}
+            </span>
+            {% if entry.recovery_method %}<div class="text-sm text-muted">{{ entry.recovery_method.replace('_', ' ')|title }}</div>{% endif %}
+            {% if entry.notes %}<div class="text-sm text-muted">{{ entry.notes }}</div>{% endif %}
+          </td>
+          <td>₹{{ entry.amount|int }}</td>
+          <td>₹{{ entry.balance_after|int }}</td>
+          <td>{{ entry.recorder.name if entry.recorder else 'System' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted" style="padding:1rem">No cash ledger entries yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

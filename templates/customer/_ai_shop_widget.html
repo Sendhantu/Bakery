@@ -1,0 +1,59 @@
+{% if request.endpoint == 'customer.products' %}
+{% set ai_widget_next = ((request.full_path if request.query_string else request.path) ~ '#ai-shop-panel') %}
+{% set ai_widget_login_url = url_for('auth.login', next=ai_widget_next) %}
+{% set ai_widget_register_url = url_for('auth.register', next=ai_widget_next) %}
+<div class="ai-shop-widget" data-ai-shop-widget
+     data-ai-endpoint="{{ url_for('customer.ai_recommend') }}"
+     data-ai-surface="shop"
+     data-ai-authenticated="{{ 'true' if current_user.is_authenticated else 'false' }}"
+     data-ai-login-url="{{ ai_widget_login_url }}"
+     data-ai-register-url="{{ ai_widget_register_url }}"
+     data-ai-cart-url="{{ url_for('customer.add_to_cart') }}"
+     data-ai-detail-base="{{ url_for('customer.product_detail', product_id=0) }}">
+  <button type="button" class="ai-shop-fab" data-ai-shop-toggle
+          aria-label="Open AI shopping assistant"
+          aria-haspopup="dialog"
+          aria-controls="ai-shop-panel"
+          aria-expanded="false"
+          title="Ask the bakery AI assistant">
+    <span class="ai-shop-fab-icon" aria-hidden="true">🤖</span>
+    <span class="ai-shop-fab-label">Ask AI</span>
+  </button>
+
+  <section class="ai-shop-panel" id="ai-shop-panel" data-ai-shop-panel
+           role="dialog" aria-label="AI shopping assistant" aria-hidden="true">
+    <header class="ai-shop-panel-header">
+      <span class="ai-shop-avatar" aria-hidden="true">🤖</span>
+      <div class="ai-shop-header-copy">
+        <div class="ai-shop-header-title">SweetCrumbs AI Assistant</div>
+        <div class="ai-shop-header-status"><span class="ai-shop-status-dot" aria-hidden="true"></span> Shop help</div>
+      </div>
+      <div class="ai-shop-header-actions">
+        <button type="button" class="ai-shop-icon-btn" data-ai-shop-clear title="Clear chat" aria-label="Clear chat">🗑</button>
+        <button type="button" class="ai-shop-icon-btn" data-ai-shop-minimize title="Minimize chat" aria-label="Minimize chat" aria-controls="ai-shop-panel">–</button>
+        <button type="button" class="ai-shop-icon-btn" data-ai-shop-toggle title="Close chat" aria-label="Close chat" aria-controls="ai-shop-panel">✕</button>
+      </div>
+    </header>
+
+    <div class="ai-shop-messages" data-ai-shop-log aria-live="polite"></div>
+
+    <div class="ai-shop-login-prompt" data-ai-shop-login hidden>
+      <div class="ai-shop-login-card">
+        <div class="ai-shop-login-icon" aria-hidden="true">🔐</div>
+        <h3 class="ai-shop-login-title">Login Required</h3>
+        <p class="ai-shop-login-text">Please log in to use our AI bakery assistant.</p>
+        <a href="{{ ai_widget_login_url }}" class="btn btn-primary btn-block">Login</a>
+        <a href="{{ ai_widget_register_url }}" class="btn btn-outline btn-block mt-1">Create Account</a>
+        <p class="ai-shop-login-note">We'll bring you right back to the Shop page after you sign in.</p>
+      </div>
+    </div>
+
+    <form class="ai-shop-input-area" data-ai-shop-form novalidate>
+      <input type="text" class="form-control" data-ai-shop-input
+             placeholder="Ask about cakes, budgets, eggless…" autocomplete="off"
+             aria-label="Message the AI assistant">
+      <button type="submit" class="btn btn-primary ai-shop-send" data-ai-shop-submit aria-label="Send message">Send</button>
+    </form>
+  </section>
+</div>
+{% endif %}

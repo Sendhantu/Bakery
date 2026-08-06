@@ -33,7 +33,11 @@ jobs:
       FINANCIAL_DATA_ENCRYPTION_KEY: 1iJMwmRr2ZbtgwKO4GaTr7UaO1zND1ndUsH3Lp8RMqQ=
       FLASK_APP: wsgi:app
       FLASK_ENV: testing
+      JWT_SECRET_KEY: ci-test-jwt-secret
+      RATELIMIT_STORAGE_URI: memory://
       SECRET_KEY: ci-test-secret
+      SHOW_DEMO_ACCOUNTS: "false"
+      BOOTSTRAP_SEED_DATA: "false"
 
     strategy:
       matrix:
@@ -50,6 +54,35 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pytest
+      - name: Syntax check
+        run: python -m compileall -q app.py config routes services models scripts
+      - name: Validate Render blueprint
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          blueprint = yaml.safe_load(Path("render.yaml").read_text())
+          services = {service["name"]: service for service in blueprint["services"]}
+          web = services["bakery-customer-portal"]
+          worker = services["bakery-celery-worker"]
+          assert "databases" not in blueprint
+          assert web["healthCheckPath"] == "/livez"
+          assert worker["plan"] != "free"
+          for service in (web, worker):
+              env = {item["key"]: item for item in service["envVars"]}
+              assert env["PYTHON_VERSION"]["value"] == "3.11.9"
+              assert env["FLASK_ENV"]["value"] == "production"
+              assert env["SHOW_DEMO_ACCOUNTS"]["value"] == "false"
+              assert env["DEVELOPMENT_CREDENTIALS_ENABLED"]["value"] == "false"
+              assert env["BOOTSTRAP_SEED_DATA"]["value"] == "false"
+              assert env["AUTO_INIT_DB"]["value"] == "false"
+              assert env["STORAGE_REQUIRED"]["value"] == "true"
+              assert env["AI_ASSISTANT_ENABLED"]["value"] == "false"
+              assert env["AI_SUPPORT_BOT_ENABLED"]["value"] == "false"
+              assert env["AI_PUSH_RECOMMENDATIONS_ENABLED"]["value"] == "false"
+              assert env["SOCKETIO_ASYNC_MODE"]["value"] == "gevent"
+          PY
       - name: Check migration graph
         run: python scripts/check_migration_heads.py
       - name: Run migrations against MySQL

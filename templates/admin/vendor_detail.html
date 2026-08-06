@@ -14,6 +14,7 @@
 <div class="stat-grid" style="margin-bottom:1.5rem">
   <div class="stat-card brown"><div class="stat-value">₹{{ spend.total_spend|int if spend else 0 }}</div><div class="stat-label">Total Spend</div></div>
   <div class="stat-card green"><div class="stat-value">₹{{ spend.gst_paid|int if spend else 0 }}</div><div class="stat-label">GST Paid</div></div>
+  <div class="stat-card orange"><div class="stat-value">₹{{ '%.2f'|format(spend.tds_withheld if spend else 0) }}</div><div class="stat-label">TDS Withheld</div></div>
   <div class="stat-card orange"><div class="stat-value">{{ purchase_orders|length }}</div><div class="stat-label">Purchase Orders</div></div>
   <div class="stat-card {% if vendor.gstin %}green{% else %}rose{% endif %}"><div class="stat-value">{{ 'Yes' if vendor.gstin else 'No' }}</div><div class="stat-label">GST Registered</div></div>
 </div>
@@ -21,6 +22,12 @@
 {% if not vendor.gstin %}
 <div class="flash-msg flash-warning" style="margin-bottom:1rem">
   <span>GSTIN missing: input tax credit likely does not apply for purchases from this vendor.</span>
+</div>
+{% endif %}
+
+{% if vendor.tds_enabled and not vendor.pan %}
+<div class="flash-msg flash-warning" style="margin-bottom:1rem">
+  <span>PAN missing: any applicable TDS will use the fallback 20% rate.</span>
 </div>
 {% endif %}
 
@@ -59,6 +66,31 @@
           <div class="form-group"><label class="form-label">Email</label><input class="form-control" name="email" value="{{ vendor.email or '' }}"></div>
         </div>
         <div class="form-group"><label class="form-label">GSTIN</label><input class="form-control" name="gstin" value="{{ vendor.gstin or '' }}"></div>
+        <div class="form-group"><label class="form-label">PAN</label><input class="form-control" name="pan" maxlength="20" value="{{ vendor.pan or '' }}"></div>
+        <div class="form-group">
+          <label class="flex gap-2 items-center"><input type="checkbox" name="tds_enabled" {% if vendor.tds_enabled %}checked{% endif %}> Deduct TDS for qualifying payments</label>
+          <p class="text-sm text-muted" style="margin:0.35rem 0 0">TDS is deducted from the vendor payment, not collected from them.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">TDS Payment Type</label>
+          <select class="form-control" name="tds_payment_type">
+            {% for value, label in tds_payment_type_choices %}
+            <option value="{{ value }}" {% if vendor.tds_payment_type == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <p class="text-sm text-muted" style="margin:0.35rem 0 0">{{ vendor.tds_config.gate_note }}</p>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Custom TDS Rate %</label>
+            <input class="form-control" name="tds_rate_percent" type="number" step="0.001" min="0" value="{{ vendor.tds_rate_percent or '' }}" placeholder="{{ vendor.tds_config.rate }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Annual Threshold</label>
+            <input class="form-control" name="tds_threshold_amount" type="number" step="0.01" min="0" value="{{ vendor.tds_threshold_amount or '' }}" placeholder="{{ vendor.tds_config.annual_threshold }}">
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label">TDS Notes</label><textarea class="form-control" name="tds_notes" rows="2">{{ vendor.tds_notes or '' }}</textarea></div>
         <div class="form-group"><label class="form-label">Payment Terms</label><input class="form-control" name="payment_terms" value="{{ vendor.payment_terms or '' }}"></div>
         <div class="form-group"><label class="form-label">Address</label><textarea class="form-control" name="address" rows="3">{{ vendor.address or '' }}</textarea></div>
         <label class="flex gap-2 items-center mb-3"><input type="checkbox" name="is_active" {% if vendor.is_active %}checked{% endif %}> Active</label>
@@ -67,11 +99,98 @@
       {% else %}
       <p><strong>Terms:</strong> {{ vendor.payment_terms or '—' }}</p>
       <p><strong>GSTIN:</strong> {{ vendor.gstin or '—' }}</p>
+      <p><strong>PAN:</strong> {{ vendor.pan or '—' }}</p>
+      <p><strong>TDS:</strong> {{ vendor.tds_payment_type_label if vendor.tds_enabled else 'Off' }}</p>
       <p class="text-muted">Manager access is required to edit vendor records.</p>
       {% endif %}
     </div>
   </aside>
 </div>
+
+<section class="card" style="margin-top:1.5rem">
+  <div class="card-header">Payment Details</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Due Generated</th>
+          <th>Amount</th>
+          <th>TDS</th>
+          <th>TDS Deposit</th>
+          <th>Paid On</th>
+          <th>Payment Method</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in payment_history %}
+        <tr>
+          <td>
+            {% if row.purchase_order %}
+            <a href="{{ url_for('admin.purchase_order_detail', order_id=row.purchase_order.id) }}">PO #{{ row.purchase_order.id }}</a>
+            {% elif row.transaction %}
+            Finance #{{ row.transaction.id }}
+            {% else %}
+            —
+            {% endif %}
+          </td>
+          <td>
+            {% if row.due_generated_at %}
+            {{ row.due_generated_at.strftime('%d %b %Y') }}<br><span class="text-muted text-sm">{{ row.due_generated_at.strftime('%I:%M %p') }}</span>
+            {% else %}
+            —
+            {% endif %}
+          </td>
+          <td>
+            ₹{{ '%.2f'|format(row.amount) }}
+            {% if row.payments and row.payments|length > 1 %}
+            <br><span class="text-muted text-sm">({{ row.payments|length }} payments)</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.tds_withheld and row.tds_withheld > 0 %}
+            ₹{{ '%.2f'|format(row.tds_withheld) }}<br><span class="text-sm text-muted">{{ row.tds_section or 'TDS' }}</span>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.tds_deposit_due_date %}
+            <span class="badge {% if row.tds_status == 'Deposited' %}badge-green{% else %}badge-orange{% endif %}">{{ row.tds_status }}</span><br>
+            <span class="text-sm text-muted">Due {{ row.tds_deposit_due_date.strftime('%d %b %Y') }}</span>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.paid_at %}
+            {{ row.paid_at.strftime('%d %b %Y') }}<br><span class="text-muted text-sm">{{ row.paid_at.strftime('%I:%M %p') }}</span>
+            {% if row.status == 'Partially Paid' %}
+            <br><span class="text-sm" style="color:var(--dusty-rose)">₹{{ '%.2f'|format(row.paid_amount) }} paid · ₹{{ '%.2f'|format(row.remaining_amount) }} remaining</span>
+            {% endif %}
+            {% else %}
+            <span class="text-muted">Not paid yet</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.payment_method_label %}
+            {{ row.payment_method_label }}
+            {% elif row.paid_at %}
+            Not recorded
+            {% else %}
+            —
+            {% endif %}
+          </td>
+          <td><span class="badge {% if row.status == 'Paid' %}badge-green{% elif row.status == 'Cancelled' %}badge-brown{% else %}badge-orange{% endif %}">{{ row.status }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted" style="padding:1rem">No vendor payments or dues recorded yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 
 <section class="card" style="margin-top:1.5rem">
   <div class="card-header">Typical Raw Material Costs</div>

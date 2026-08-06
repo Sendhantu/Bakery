@@ -1,0 +1,94 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Collect POS Payment - Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown)">Collect Walk-in Payment</h1>
+    <p class="text-muted">Order {{ order.order_number }} is saved, but the bill is locked until the amount is received.</p>
+  </div>
+  <a class="btn btn-outline" href="{{ url_for('admin.pos') }}">Back to Walk-in Orders</a>
+</div>
+
+<div class="pos-payment-shell">
+  <section class="card">
+    <div class="card-header">Bill Preview</div>
+    <div class="card-body">
+      <div class="text-sm text-muted mb-2">Customer</div>
+      <h3 style="margin-bottom:1rem">{{ order.customer.name if order.customer else 'Walk-in Customer' }}</h3>
+
+      <div class="pos-payment-lines">
+        {% for item in items %}
+        <div class="pos-payment-line">
+          <div>
+            <strong>{{ item.product_name }}</strong>
+            {% if item.variant_name %}<div class="text-sm text-muted">{{ item.variant_name }}</div>{% endif %}
+          </div>
+          <span>{{ item.quantity }} x {{ '%.2f'|format(item.unit_price or 0) }}</span>
+          <strong>{{ '%.2f'|format(item.subtotal or 0) }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="pos-total-row">
+        <span>Amount Due</span>
+        <strong>INR {{ '%.2f'|format(order.total or 0) }}</strong>
+      </div>
+
+      <p class="text-sm text-muted">
+        Receipt generation is disabled until payment is marked as received.
+      </p>
+    </div>
+  </section>
+
+  <section class="card pos-phone-terminal">
+    <div class="card-header">Phone POS Terminal</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.pos_payment', order_id=order.id) }}" class="grid gap-2">
+        <div class="form-group">
+          <label class="form-label">Amount Received</label>
+          <input class="form-control pos-payment-amount" name="amount_received" type="number" min="{{ '%.2f'|format(order.total or 0) }}" step="0.01" value="{{ '%.2f'|format(order.total or 0) }}" required autofocus>
+          <p class="text-sm text-muted mt-1">Enter the amount shown on the phone or POS terminal after the customer pays.</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Payment Method</label>
+          <select class="form-control" name="payment_method">
+            <option value="CASH" {% if order.payment_method == 'CASH' %}selected{% endif %}>Cash</option>
+            <option value="CARD" {% if order.payment_method == 'CARD' %}selected{% endif %}>Card - manual terminal</option>
+            <option value="UPI" {% if order.payment_method == 'UPI' %}selected{% endif %}>UPI - manual terminal</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">After Payment Status</label>
+          <select class="form-control" name="final_status">
+            <option value="DELIVERED" {% if intended_status == 'DELIVERED' %}selected{% endif %}>Completed now</option>
+            <option value="PREPARING" {% if intended_status == 'PREPARING' %}selected{% endif %}>Send to kitchen queue</option>
+            <option value="READY_FOR_PICKUP" {% if intended_status == 'READY_FOR_PICKUP' %}selected{% endif %}>Ready for pickup</option>
+            <option value="PLACED" {% if intended_status == 'PLACED' %}selected{% endif %}>Placed / hold</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Payment Reference</label>
+          <input class="form-control" name="payment_reference" placeholder="Optional terminal approval code">
+        </div>
+
+        <button class="btn btn-primary btn-block" type="submit">Amount Received</button>
+      </form>
+
+      {% if can_admin_manager %}
+      <hr style="margin:1.25rem 0;border:0;border-top:1px solid var(--border)">
+      <form method="POST" action="{{ url_for('admin.void_pos_bill', order_id=order.id) }}" data-confirm="Void this unpaid walk-in bill and restore stock?">
+        <label class="form-label">Admin Void Reason</label>
+        <input class="form-control mb-2" name="reason" placeholder="Customer cancelled before payment">
+        <button class="btn btn-outline btn-block" type="submit">Void Pending Bill</button>
+      </form>
+      {% else %}
+      <p class="text-sm text-muted mt-3">Only a manager/admin can void an unpaid pending bill.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

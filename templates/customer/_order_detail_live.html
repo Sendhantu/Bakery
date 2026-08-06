@@ -30,6 +30,7 @@
       <div class="cart-item">
         <img src="{{ item.product.image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}"
              alt="{{ item.product_name }}" class="cart-item-img"
+             style="--product-image-fit: {{ item.product.image_object_fit if item.product else 'cover' }}; --product-image-position: {{ item.product.image_object_position if item.product else 'center center' }};"
              data-fallback-src="{{ item.product.fallback_image_src if item.product else 'https://images.unsplash.com/photo-1548865164-1f50430ddd6f?auto=format&fit=crop&w=600&q=80' }}">
         <div style="flex:1">
           <h4 style="font-family:var(--font-display);font-size:0.95rem;margin-bottom:0.2rem">{{ item.product_name }}</h4>
@@ -121,12 +122,21 @@
       <div class="card-body">
         {% set earned_entry = order.loyalty_entries.filter_by(reason='order_earned').first() %}
         {% set redeemed_entry = order.loyalty_entries.filter_by(reason='redeemed').first() %}
+        {% set taxable_amount = order.gst_taxable_amount or ((order.subtotal or 0) - (order.discount or 0) - (order.loyalty_discount or 0)) %}
+        {% set cgst_amount = order.cgst_amount or ((order.gst_amount or 0) / 2) %}
+        {% set sgst_amount = order.sgst_amount or ((order.gst_amount or 0) - cgst_amount) %}
         <div class="flex justify-between mb-1"><span class="text-muted">Subtotal</span><span>₹{{ order.subtotal|int }}</span></div>
         {% if order.discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Discount</span><span>−₹{{ order.discount|int }}</span></div>{% endif %}
         {% if order.loyalty_discount > 0 %}<div class="flex justify-between mb-1" style="color:var(--sage)"><span>Loyalty Discount</span><span>−₹{{ order.loyalty_discount|int }}</span></div>{% endif %}
+        <div class="flex justify-between mb-1"><span class="text-muted">Taxable Value</span><span>₹{{ '%.2f'|format(taxable_amount or 0) }}</span></div>
+        <div class="flex justify-between mb-1"><span class="text-muted">CGST ({{ ((order.gst_rate or 0) / 2)|round(3) }}%)</span><span>₹{{ '%.2f'|format(cgst_amount or 0) }}</span></div>
+        <div class="flex justify-between mb-1"><span class="text-muted">SGST ({{ ((order.gst_rate or 0) / 2)|round(3) }}%)</span><span>₹{{ '%.2f'|format(sgst_amount or 0) }}</span></div>
         <div class="flex justify-between mb-1"><span class="text-muted">Delivery</span><span>{% if order.delivery_charge == 0 %}FREE{% else %}₹{{ order.delivery_charge|int }}{% endif %}</span></div>
         <div class="divider"></div>
         <div class="flex justify-between"><span style="font-weight:600">Total</span><span style="font-family:var(--font-display);font-size:1.3rem;font-weight:700;color:var(--caramel)">₹{{ order.total|int }}</span></div>
+      {% if order.gst_invoice_note %}
+      <p class="text-sm text-muted mt-2">{{ order.gst_invoice_note }}</p>
+      {% endif %}
       <div class="mt-2">
         <span class="badge {% if order.payment_status == 'PAID' %}badge-green{% else %}badge-orange{% endif %}">{{ order.payment_status }}</span>
         <span class="text-sm text-muted ml-1">{{ order.payment_method }}</span>
@@ -153,11 +163,11 @@
       <div class="card-header">Actions</div>
       <div class="card-body" style="display:flex;flex-direction:column;gap:0.75rem">
         <a href="{{ url_for('customer.reorder', order_id=order.id) }}" class="btn btn-outline btn-block">🔄 Reorder</a>
-        <a href="{{ url_for('customer.chat') }}" class="btn btn-ghost btn-block">💬 Chat with Bakery</a>
+        <a href="{{ url_for('customer.chat') }}" class="btn btn-ghost btn-block">💬 Contact Support</a>
         <a href="tel:+919999999999" class="btn btn-ghost btn-block">📞 Call Us</a>
         {% if can_cancel %}
         <div class="cancel-window" style="padding:0.75rem;background:#FFF0F0;border-radius:var(--radius-lg);text-align:center;border:1px solid #FFCDD2">
-          <p class="text-sm" style="color:#B71C1C;margin-bottom:0.5rem">Cancel window closes in <strong id="cancel-timer" data-cancel-timer data-placed-at="{{ order.placed_at.isoformat() }}">2:00</strong></p>
+          <p class="text-sm" style="color:#B71C1C;margin-bottom:0.5rem">Cancel window closes in <strong id="cancel-timer" data-cancel-timer data-placed-at="{{ order.placed_at.isoformat() }}" data-cancel-window-seconds="{{ order.customer_cancel_window_seconds() }}">{{ '%d:%02d'|format(order.customer_cancel_seconds_remaining() // 60, order.customer_cancel_seconds_remaining() % 60) }}</strong></p>
           <form method="POST" action="{{ url_for('customer.cancel_order', order_id=order.id) }}">
             <button type="submit" class="btn btn-danger btn-sm cancel-btn" data-confirm="Are you sure you want to cancel this order?">Cancel Order</button>
           </form>
