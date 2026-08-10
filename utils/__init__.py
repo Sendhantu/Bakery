@@ -35,7 +35,12 @@ from .security import (
     should_force_https,
     suspicious_login_window,
 )
-from .validators import validate_address_payload, validate_password
+from .validators import (
+    is_valid_gstin,
+    normalize_gstin,
+    validate_address_payload,
+    validate_password,
+)
 
 __all__ = [
     "address_query",
@@ -47,8 +52,10 @@ __all__ = [
     "get_login_lockout_window",
     "get_saved_addresses_for_user",
     "get_selected_saved_address",
+    "is_valid_gstin",
     "map_embed_url",
     "map_link_url",
+    "normalize_gstin",
     "notify",
     "notify_order_status_change",
     "parse_coordinate",

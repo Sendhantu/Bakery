@@ -1,20 +1,34 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 import uuid
+import secrets
 
 from clock import utcnow
 from .base import db
 
 ORDER_STATUSES = [
     "PLACED",
+    "CONFIRMED",
+    "BAKING",
+    "DECORATING",
     "PREPARING",
     "PACKED",
+    "READY_FOR_DISPATCH",
     "OUT_FOR_DELIVERY",
     "DELIVERED",
     "CANCELLED",
     "REFUNDED",
+    "REFUND_INITIATED",
     "ON_HOLD",
+    "DELAYED",
+    "AWAITING_PAYMENT",
+    "PAYMENT_FAILED",
+    "DELIVERY_ATTEMPTED",
     "READY_FOR_PICKUP",
+    "PICKED_UP",
+    "READY_TO_SERVE",
+    "SERVED",
+    "COMPLETED",
 ]
 PAYMENT_STATES = [
     "PENDING",
@@ -25,27 +39,78 @@ PAYMENT_STATES = [
     "CANCELLED",
 ]
 ORDER_STATUS_TRANSITIONS = {
-    "PLACED": ["PREPARING", "PACKED", "READY_FOR_PICKUP", "ON_HOLD", "CANCELLED"],
-    "PREPARING": ["PACKED", "READY_FOR_PICKUP", "ON_HOLD", "CANCELLED"],
+    "AWAITING_PAYMENT": ["PLACED", "PAYMENT_FAILED", "CANCELLED"],
+    "PAYMENT_FAILED": ["AWAITING_PAYMENT", "CANCELLED"],
+    "PLACED": ["CONFIRMED", "PREPARING", "PACKED", "READY_FOR_PICKUP", "ON_HOLD", "CANCELLED"],
+    "CONFIRMED": ["BAKING", "PREPARING", "ON_HOLD", "DELAYED", "CANCELLED"],
+    "BAKING": ["DECORATING", "PACKED", "READY_FOR_PICKUP", "READY_FOR_DISPATCH", "ON_HOLD", "DELAYED", "CANCELLED"],
+    "DECORATING": ["READY_FOR_PICKUP", "READY_FOR_DISPATCH", "PACKED", "ON_HOLD", "DELAYED", "CANCELLED"],
+    "PREPARING": ["BAKING", "DECORATING", "PACKED", "READY_FOR_PICKUP", "ON_HOLD", "DELAYED", "CANCELLED"],
     "PACKED": [
+        "READY_FOR_DISPATCH",
         "OUT_FOR_DELIVERY",
         "READY_FOR_PICKUP",
         "DELIVERED",
         "ON_HOLD",
+        "DELAYED",
         "CANCELLED",
     ],
-    "READY_FOR_PICKUP": ["DELIVERED", "ON_HOLD", "CANCELLED"],
-    "OUT_FOR_DELIVERY": ["DELIVERED", "ON_HOLD"],
+    "READY_FOR_DISPATCH": ["OUT_FOR_DELIVERY", "DELIVERY_ATTEMPTED", "ON_HOLD", "DELAYED", "CANCELLED"],
+    "READY_FOR_PICKUP": ["PICKED_UP", "DELIVERED", "ON_HOLD", "DELAYED", "CANCELLED"],
+    "READY_TO_SERVE": ["SERVED", "ON_HOLD", "DELAYED", "CANCELLED"],
+    "SERVED": ["COMPLETED"],
+    "COMPLETED": [],
+    "OUT_FOR_DELIVERY": ["DELIVERED", "DELIVERY_ATTEMPTED", "ON_HOLD", "DELAYED"],
+    "DELIVERY_ATTEMPTED": ["OUT_FOR_DELIVERY", "DELIVERED", "ON_HOLD", "CANCELLED"],
+    "DELAYED": ["BAKING", "DECORATING", "PACKED", "READY_FOR_PICKUP", "READY_FOR_DISPATCH", "OUT_FOR_DELIVERY", "CANCELLED"],
     "ON_HOLD": [
+        "CONFIRMED",
+        "BAKING",
         "PREPARING",
         "PACKED",
         "READY_FOR_PICKUP",
+        "READY_FOR_DISPATCH",
         "OUT_FOR_DELIVERY",
         "CANCELLED",
     ],
+    "PICKED_UP": [],
     "DELIVERED": [],
     "CANCELLED": [],
+    "REFUND_INITIATED": ["REFUNDED"],
     "REFUNDED": [],
+}
+ORDER_STATUS_LABELS = {
+    "PLACED": "Order Placed",
+    "CONFIRMED": "Order Confirmed",
+    "BAKING": "Baking / In the Oven",
+    "PREPARING": "Baking / In the Oven",
+    "DECORATING": "Decorating",
+    "PACKED": "Packed",
+    "READY_FOR_PICKUP": "Ready for Pickup",
+    "READY_TO_SERVE": "Ready to Serve",
+    "SERVED": "Served",
+    "COMPLETED": "Completed",
+    "PICKED_UP": "Picked Up",
+    "READY_FOR_DISPATCH": "Ready for Dispatch",
+    "OUT_FOR_DELIVERY": "Out for Delivery",
+    "DELIVERED": "Delivered",
+    "AWAITING_PAYMENT": "Awaiting Payment",
+    "PAYMENT_FAILED": "Payment Failed",
+    "ON_HOLD": "On Hold",
+    "DELAYED": "Delayed",
+    "CANCELLED": "Cancelled",
+    "REFUND_INITIATED": "Refund Initiated",
+    "REFUNDED": "Refunded",
+    "DELIVERY_ATTEMPTED": "Delivery Attempted",
+}
+PICKUP_TRACKING_FLOW = ["PLACED", "CONFIRMED", "BAKING", "DECORATING", "READY_FOR_PICKUP", "PICKED_UP"]
+DELIVERY_TRACKING_FLOW = ["PLACED", "CONFIRMED", "BAKING", "DECORATING", "READY_FOR_DISPATCH", "OUT_FOR_DELIVERY", "DELIVERED"]
+DINE_IN_TRACKING_FLOW = ["PLACED", "CONFIRMED", "PREPARING", "READY_TO_SERVE", "SERVED", "COMPLETED"]
+TRACKING_STATUS_ALIASES = {
+    "PREPARING": "BAKING",
+    "PACKED": "READY_FOR_DISPATCH",
+    "READY_FOR_PICKUP": "READY_FOR_PICKUP",
+    "DELIVERED": "DELIVERED",
 }
 ORDER_CUSTOMER_CANCEL_WINDOW = timedelta(minutes=2)
 ORDER_CUSTOMER_CANCEL_WINDOW_SECONDS = int(
@@ -107,6 +172,20 @@ def can_transition_order_status(current_status, new_status, actor="admin"):
     return new_status in get_allowed_order_statuses(current_status, actor=actor)
 
 
+def order_status_label(status):
+    normalized = (status or "").strip().upper()
+    return ORDER_STATUS_LABELS.get(normalized, normalized.replace("_", " ").title())
+
+
+def tracking_flow_for_fulfillment(fulfillment_type):
+    normalized = (fulfillment_type or "DELIVERY").strip().upper()
+    if normalized == "DINE_IN":
+        return list(DINE_IN_TRACKING_FLOW)
+    if normalized == "PICKUP":
+        return list(PICKUP_TRACKING_FLOW)
+    return list(DELIVERY_TRACKING_FLOW)
+
+
 class Order(db.Model):
     __tablename__ = "orders"
     id = db.Column(db.Integer, primary_key=True)
@@ -152,6 +231,9 @@ class Order(db.Model):
     pincode = db.Column(db.String(10))
     phone = db.Column(db.String(20))
     fulfillment_type = db.Column(db.String(20), default="DELIVERY")
+    dining_table_id = db.Column(db.Integer, db.ForeignKey("dining_tables.id"))
+    table_session_id = db.Column(db.Integer, db.ForeignKey("table_menu_sessions.id"))
+    dine_in_payment_timing = db.Column(db.String(40))
     delivery_latitude = db.Column(db.Float)
     delivery_longitude = db.Column(db.Float)
 
@@ -166,8 +248,34 @@ class Order(db.Model):
     invoice_number = db.Column(db.String(40), unique=True)
     invoice_url = db.Column(db.String(255))
     qr_token = db.Column(db.String(80), unique=True)
+    tracking_token = db.Column(
+        db.String(80),
+        unique=True,
+        nullable=False,
+        default=lambda: secrets.token_urlsafe(32),
+    )
     qr_verified_at = db.Column(db.DateTime)
     qr_verified_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    estimated_ready_at = db.Column(db.DateTime)
+    status_note = db.Column(db.Text)
+    delay_reason = db.Column(db.Text)
+    delayed_until = db.Column(db.DateTime)
+
+    serviceability_status = db.Column(db.String(30))
+    serviceability_message = db.Column(db.String(255))
+    serviceability_distance_km = db.Column(db.Numeric(8, 2))
+    serviceability_rule_source = db.Column(db.String(40))
+
+    b2b_company_name = db.Column(db.String(160))
+    b2b_gstin = db.Column(db.String(15))
+    b2b_billing_address = db.Column(db.Text)
+    b2b_state = db.Column(db.String(80))
+    b2b_pincode = db.Column(db.String(10))
+    b2b_po_number = db.Column(db.String(80))
+    b2b_department = db.Column(db.String(120))
+    b2b_billing_email = db.Column(db.String(120))
+    b2b_contact_person = db.Column(db.String(120))
+    b2b_invoice_notes = db.Column(db.Text)
     version = db.Column(db.Integer, default=1, nullable=False)
     sync_version = db.Column(db.Integer, default=1, nullable=False)
     last_synced_at = db.Column(db.DateTime)
@@ -201,6 +309,14 @@ class Order(db.Model):
         foreign_keys="LoyaltyLedger.order_id",
     )
     branch = db.relationship("Branch", backref="orders")
+    dining_table = db.relationship("DiningTable")
+    table_session = db.relationship("TableMenuSession")
+    status_history = db.relationship(
+        "OrderStatusHistory",
+        backref="order",
+        lazy="dynamic",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         db.Index("idx_order_user", "user_id"),
@@ -232,6 +348,21 @@ class Order(db.Model):
 
     def customer_cancel_window_seconds(self):
         return ORDER_CUSTOMER_CANCEL_WINDOW_SECONDS
+
+    @property
+    def status_label(self):
+        return order_status_label(self.status)
+
+    @property
+    def tracking_flow(self):
+        return tracking_flow_for_fulfillment(self.fulfillment_type)
+
+    @property
+    def normalized_tracking_status(self):
+        status = (self.status or "PLACED").strip().upper()
+        if status == "PACKED" and (self.fulfillment_type or "").upper() == "PICKUP":
+            return "READY_FOR_PICKUP"
+        return TRACKING_STATUS_ALIASES.get(status, status)
 
     @property
     def gst_order_source_label(self):
@@ -327,3 +458,46 @@ class ModificationRequest(db.Model):
     price_diff = db.Column(db.Numeric(10, 2), default=0)
     created_at = db.Column(db.DateTime, default=utcnow)
     resolved_at = db.Column(db.DateTime)
+
+
+class OrderStatusHistory(db.Model):
+    __tablename__ = "order_status_history"
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=False)
+    previous_status = db.Column(db.String(30))
+    new_status = db.Column(db.String(30), nullable=False)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    update_source = db.Column(db.String(40), default="system", nullable=False)
+    customer_note = db.Column(db.Text)
+    internal_note = db.Column(db.Text)
+    related_employee_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    delivery_agent_id = db.Column(db.Integer, db.ForeignKey("delivery_agents.id"))
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    updater = db.relationship("User", foreign_keys=[updated_by])
+    related_employee = db.relationship("User", foreign_keys=[related_employee_id])
+    delivery_agent = db.relationship("DeliveryAgent")
+
+    __table_args__ = (
+        db.Index("idx_order_status_history_order_created", "order_id", "created_at"),
+        db.Index("idx_order_status_history_status", "new_status"),
+    )
+
+
+class OrderStatusNotificationLog(db.Model):
+    __tablename__ = "order_status_notification_logs"
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=False)
+    status = db.Column(db.String(30), nullable=False)
+    channel = db.Column(db.String(30), default="in_app", nullable=False)
+    sent_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    delivery_status = db.Column(db.String(30), default="sent", nullable=False)
+    template = db.Column(db.String(80))
+    error_details = db.Column(db.Text)
+
+    order = db.relationship("Order", backref=db.backref("status_notification_logs", lazy="dynamic"))
+
+    __table_args__ = (
+        db.UniqueConstraint("order_id", "status", "channel", name="uq_order_status_notification_once"),
+        db.Index("idx_order_status_notification_order", "order_id", "sent_at"),
+    )

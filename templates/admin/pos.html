@@ -7,6 +7,7 @@
     <p class="text-muted">Take counter orders, add items by ID or name, then collect payment before the bill is generated.</p>
   </div>
   <div class="flex gap-2 flex-wrap items-center">
+    <a href="{{ url_for('admin.pos_terminal') }}" class="btn btn-primary btn-sm">POS Payment Terminal</a>
     {% if can_admin_manager %}
     <button type="button" class="btn btn-outline btn-sm" data-toggle-target="#pos-gift-card-form" data-toggle-hide-self>Issue Gift Card</button>
     {% endif %}

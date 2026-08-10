@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Corporate Orders — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="container">
+    <div class="flex justify-between items-center mb-4">
+      <div>
+        <h1 class="section-title">Corporate Orders</h1>
+        <p class="text-muted">Office meetings, gifting, bulk breakfasts, launches, hampers, branded cakes, and recurring pantry orders.</p>
+      </div>
+      <a href="tel:{{ store_details.phone_tel }}" class="btn btn-outline btn-sm">Call Bakery</a>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:1rem">
+        <div class="card">
+          <div class="card-header">Product Examples</div>
+          <div class="card-body">
+            {% if product_examples %}
+            <div class="product-grid compact-grid">
+              {% for product in product_examples %}
+              <a href="{{ url_for('customer.product_detail', product_id=product.id) }}" class="product-card" style="text-decoration:none;color:inherit">
+                <img src="{{ product.image_src }}" alt="{{ product.name }}" class="product-img" data-fallback-src="{{ product.fallback_image_src }}">
+                <div class="product-info">
+                  <h3 class="product-name">{{ product.name }}</h3>
+                  <p class="text-sm text-muted">From ₹{{ product.current_price|int }}</p>
+                </div>
+              </a>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted">Active catalogue examples will appear here once products are published.</p>
+            {% endif %}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">Corporate Notes</div>
+          <div class="card-body">
+            <p class="text-sm text-muted">Minimum quantities, production capacity, delivery coverage, GST invoice fields, and lead time are confirmed by the team before quote approval.</p>
+            <p class="text-sm text-muted">Tax treatment and credit eligibility depend on applicable regulations and the customer’s circumstances.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Inquiry Form</div>
+        <div class="card-body">
+          <form method="POST" action="{{ url_for('customer.corporate_orders') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="text" name="website" class="hidden" tabindex="-1" autocomplete="off">
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Contact Name *</label><input class="form-control" name="contact_name" required></div>
+              <div class="form-group"><label class="form-label">Company Name *</label><input class="form-control" name="company_name" required></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Work Email *</label><input class="form-control" type="email" name="work_email" required></div>
+              <div class="form-group"><label class="form-label">Mobile *</label><input class="form-control" name="mobile" required></div>
+            </div>
+            <div class="form-group"><label class="form-label">GSTIN</label><input class="form-control" name="gstin" maxlength="15"></div>
+            <div class="form-group"><label class="form-label">Billing Address</label><textarea class="form-control" name="billing_address"></textarea></div>
+            <div class="form-group"><label class="form-label">Delivery Location *</label><textarea class="form-control" name="delivery_location" required></textarea></div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Required Date *</label><input class="form-control" type="date" name="required_date" min="{{ earliest_required_date }}" required></div>
+              <div class="form-group"><label class="form-label">Preferred Time</label><input class="form-control" name="preferred_delivery_time"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">People Count</label><input class="form-control" type="number" min="1" name="people_count"></div>
+              <div class="form-group"><label class="form-label">Estimated Quantity</label><input class="form-control" type="number" min="1" name="estimated_quantity"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Budget Range</label><input class="form-control" name="budget_range" placeholder="e.g. ₹5,000 - ₹10,000"></div>
+            <div class="form-group"><label class="form-label">Products or Service Required *</label><textarea class="form-control" name="products_required" required></textarea></div>
+            <label style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem"><input type="checkbox" name="custom_branding"> Custom branding required</label>
+            <div class="form-group"><label class="form-label">Dietary Requirements</label><textarea class="form-control" name="dietary_requirements"></textarea></div>
+            <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" name="notes"></textarea></div>
+            <button class="btn btn-primary btn-block" type="submit">Submit Inquiry</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

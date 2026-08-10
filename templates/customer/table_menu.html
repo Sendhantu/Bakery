@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}{{ table.display_name }} Menu — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="container">
+    <div class="flex justify-between items-center gap-2 flex-wrap mb-4">
+      <div>
+        <h1 class="section-title mb-1">Ordering for {{ table.display_name }}</h1>
+        <p class="text-muted">Browse the menu for {{ table.branch.name if table.branch else store_details.name }}{% if table.area %} · {{ table.area.name }}{% endif %}.</p>
+      </div>
+      <a class="btn btn-primary" href="{{ url_for('customer.cart') }}">View Cart</a>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-body flex justify-between gap-2 flex-wrap">
+        <div>
+          <div class="text-sm text-muted">Table session</div>
+          <strong>{{ table.display_name }}</strong>
+        </div>
+        <div>
+          <div class="text-sm text-muted">Fulfilment</div>
+          <strong>Dine-in</strong>
+        </div>
+        <div>
+          <div class="text-sm text-muted">Need help?</div>
+          <a href="tel:{{ store_details.phone_tel }}">{{ store_details.phone }}</a>
+        </div>
+      </div>
+    </div>
+
+    {% for category in categories %}
+      {% set category_products = products|selectattr('category_id', 'equalto', category.id)|list %}
+      {% if category_products %}
+      <section class="mb-5">
+        <h2 class="mb-3" style="font-family:var(--font-display);color:var(--brown)">{{ category.icon }} {{ category.name }}</h2>
+        <div class="products-grid">
+          {% for product in category_products %}
+          <article class="product-card" data-analytics-product-id="{{ product.id }}">
+            <a href="{{ url_for('customer.product_detail', product_id=product.id) }}" class="product-image-wrap">
+              <img src="{{ product.image_src }}" alt="{{ product.name }}" class="product-image" loading="lazy">
+            </a>
+            <div class="product-card-body">
+              <div class="product-title-row">
+                <h3>{{ product.name }}</h3>
+                <span class="badge {% if product.is_eggless %}badge-green{% else %}badge-brown{% endif %}">{{ product.egg_status_label }}</span>
+              </div>
+              <p class="text-muted text-sm">{{ product.description or product.special_ingredient or 'Freshly prepared by the bakery.' }}</p>
+              <div class="flex justify-between items-center gap-2 mt-2">
+                <strong style="color:var(--caramel)">₹{{ product.current_price|int }}</strong>
+                <form method="POST" action="{{ url_for('customer.add_to_cart') }}" class="inline-form" data-conversion-event="add_to_cart" data-product-id="{{ product.id }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="product_id" value="{{ product.id }}">
+                  <input type="hidden" name="variant_id" value="{{ product.default_variant_id or '' }}">
+                  <input type="hidden" name="quantity" value="1">
+                  <button class="btn btn-primary btn-sm" type="submit">Add</button>
+                </form>
+              </div>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

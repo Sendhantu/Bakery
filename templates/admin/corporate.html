@@ -1,0 +1,61 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Corporate Inquiries{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Corporate Inquiries</h1>
+    <p class="text-muted text-sm">Manage B2B inquiries, follow-ups, quotes, and bulk-order approvals.</p>
+  </div>
+</div>
+
+<div class="flex gap-2 flex-wrap mb-4">
+  <a href="{{ url_for('admin.corporate_dashboard') }}" class="btn btn-sm {% if not selected_status %}btn-primary{% else %}btn-ghost{% endif %}">All</a>
+  {% for status in statuses %}
+  <a href="{{ url_for('admin.corporate_dashboard', status=status) }}" class="btn btn-sm {% if selected_status == status %}btn-primary{% else %}btn-ghost{% endif %}">{{ status.replace('_',' ')|title }}</a>
+  {% endfor %}
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">Inquiries</div>
+  <div class="table-responsive">
+    <table class="table">
+      <thead><tr><th>Company</th><th>Contact</th><th>Required</th><th>Status</th><th>Follow-up</th><th></th></tr></thead>
+      <tbody>
+      {% for inquiry in inquiries %}
+      <tr>
+        <td><strong>{{ inquiry.company_name }}</strong><br><span class="text-sm text-muted">{{ inquiry.products_required[:80] }}</span></td>
+        <td>{{ inquiry.contact_name }}<br><span class="text-sm text-muted">{{ inquiry.work_email }}</span></td>
+        <td>{{ inquiry.required_date }}</td>
+        <td><span class="badge badge-orange">{{ inquiry.status.replace('_',' ')|title }}</span></td>
+        <td>{{ inquiry.follow_up_date or '-' }}</td>
+        <td><a class="btn btn-ghost btn-sm" href="{{ url_for('admin.corporate_inquiry_detail', inquiry_id=inquiry.id) }}">View</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-center text-muted">No corporate inquiries yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Recent Quotes</div>
+  <div class="table-responsive">
+    <table class="table">
+      <thead><tr><th>Quote</th><th>Company</th><th>Status</th><th>Total</th></tr></thead>
+      <tbody>
+      {% for quote in quotes %}
+      <tr>
+        <td>v{{ quote.version }} · #{{ quote.id }}</td>
+        <td><a href="{{ url_for('admin.corporate_inquiry_detail', inquiry_id=quote.inquiry_id) }}">{{ quote.inquiry.company_name }}</a></td>
+        <td>{{ quote.status|title }}</td>
+        <td>₹{{ quote.total|int }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-center text-muted">No quotes prepared yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

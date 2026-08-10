@@ -26,6 +26,13 @@
   {% endfor %}
 </div>
 
+<div class="stat-grid" style="margin-bottom:1.5rem">
+  <div class="stat-card green"><div class="stat-value" data-conversion-card="page_views">{{ selected_payload.conversion.page_views }}</div><div class="stat-label">Visitors / Page Views</div></div>
+  <div class="stat-card orange"><div class="stat-value" data-conversion-card="add_to_cart">{{ selected_payload.conversion.add_to_cart }}</div><div class="stat-label">Add to Cart</div></div>
+  <div class="stat-card green"><div class="stat-value" data-conversion-card="purchase_conversion_rate">{{ selected_payload.conversion.purchase_conversion_rate }}%</div><div class="stat-label">Purchase Conversion</div></div>
+  <div class="stat-card orange"><div class="stat-value" data-conversion-card="qr_menu_scans">{{ selected_payload.conversion.qr_menu_scans }}</div><div class="stat-label">QR Menu Scans</div></div>
+</div>
+
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem">
   {% for period, label in period_labels.items() %}
   {% set sellers = best_sellers[period] %}
@@ -196,6 +203,11 @@
     setText(`[data-revenue-value="${payload.period}"]`, formatCurrency(payload.revenue));
     updateBestSeller(payload.period, payload.top_sellers);
     if (updateSelected && payload.period === selectedPeriod) {
+      const conversion = payload.conversion || {};
+      setText('[data-conversion-card="page_views"]', conversion.page_views || 0);
+      setText('[data-conversion-card="add_to_cart"]', conversion.add_to_cart || 0);
+      setText('[data-conversion-card="purchase_conversion_rate"]', `${conversion.purchase_conversion_rate || 0}%`);
+      setText('[data-conversion-card="qr_menu_scans"]', conversion.qr_menu_scans || 0);
       setText('[data-trend-subtitle]', `${payload.period_label} · ${payload.granularity}`);
       setText('[data-units-period-label]', payload.period_label);
       renderChart(payload);

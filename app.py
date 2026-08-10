@@ -372,7 +372,7 @@ def build_socketio_origins(app):
             app.config.get("DELIVERY_PORTAL_URL"),
         ]
         filtered = [origin for origin in origins if origin]
-        return filtered or "*"
+        return filtered
     return "*"
 
 
@@ -801,6 +801,12 @@ def register_context_processors(app):
             bakery_name=app.config["BAKERY_NAME"],
             site_meta_description=app.config.get("SITE_META_DESCRIPTION", ""),
             store_details=app.config["STORE_DETAILS"],
+            analytics_config={
+                "enabled": bool(app.config.get("ANALYTICS_ENABLED")),
+                "require_consent": bool(app.config.get("ANALYTICS_REQUIRE_CONSENT", True)),
+                "ga4_measurement_id": app.config.get("GA4_MEASUREMENT_ID", ""),
+                "clarity_project_id": app.config.get("CLARITY_PROJECT_ID", ""),
+            },
             current_portal_role=current_portal_role,
             parallel_login_url=parallel_login_url,
             parallel_host=parallel_host,

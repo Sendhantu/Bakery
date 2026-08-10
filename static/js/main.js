@@ -39,6 +39,126 @@ document.addEventListener('DOMContentLoaded', () => {
     return token ? {...headers, 'X-CSRFToken': token} : headers;
   };
 
+  const initConsentAnalytics = () => {
+    const config = window.SweetCrumbsAnalytics || {};
+    if (!config.enabled) return;
+    const consentKey = 'sweetcrumbs.analytics.consent';
+    const campaignKey = 'sweetcrumbs.analytics.campaign';
+    const storedConsent = window.localStorage.getItem(consentKey);
+    const banner = document.querySelector('#analytics-consent-banner');
+
+    const currentCampaign = () => {
+      const params = new URLSearchParams(window.location.search);
+      const incoming = {
+        source: params.get('utm_source') || '',
+        medium: params.get('utm_medium') || '',
+        campaign: params.get('utm_campaign') || '',
+        content: params.get('utm_content') || '',
+        term: params.get('utm_term') || '',
+      };
+      if (Object.values(incoming).some(Boolean)) {
+        window.sessionStorage.setItem(campaignKey, JSON.stringify(incoming));
+        return incoming;
+      }
+      try {
+        return JSON.parse(window.sessionStorage.getItem(campaignKey) || '{}');
+      } catch (error) {
+        return {};
+      }
+    };
+
+    const loadScript = (src, id) => {
+      if (!src || document.getElementById(id)) return;
+      const script = document.createElement('script');
+      script.async = true;
+      script.id = id;
+      script.src = src;
+      document.head.appendChild(script);
+    };
+
+    const loadAnalyticsScripts = () => {
+      if (config.ga4MeasurementId) {
+        loadScript(`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(config.ga4MeasurementId)}`, 'ga4-loader');
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = window.gtag || function(){ window.dataLayer.push(arguments); };
+        window.gtag('js', new Date());
+        window.gtag('config', config.ga4MeasurementId, { anonymize_ip: true, send_page_view: false });
+      }
+      if (config.clarityProjectId) {
+        window.clarity = window.clarity || function(){ (window.clarity.q = window.clarity.q || []).push(arguments); };
+        loadScript(`https://www.clarity.ms/tag/${encodeURIComponent(config.clarityProjectId)}`, 'clarity-loader');
+      }
+    };
+
+    const postEvent = (eventName, detail = {}) => {
+      if (config.consentRequired && window.localStorage.getItem(consentKey) !== 'granted') return;
+      const payload = {
+        event_name: eventName,
+        event_id: detail.eventId || `${eventName}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        path: window.location.pathname,
+        product_id: detail.productId || undefined,
+        branch_id: detail.branchId || undefined,
+        amount: detail.amount || undefined,
+        campaign: currentCampaign(),
+        metadata: detail.metadata || {},
+      };
+      try {
+        fetch(config.conversionEndpoint, {
+          method: 'POST',
+          credentials: 'include',
+          headers: withCsrfHeaders({'Content-Type': 'application/json', Accept: 'application/json'}),
+          body: JSON.stringify(payload),
+          keepalive: true,
+        }).catch(() => {});
+      } catch (error) {}
+      if (window.gtag) {
+        window.gtag('event', eventName, payload.metadata || {});
+      }
+    };
+
+    window.SweetCrumbsTrack = postEvent;
+
+    const applyConsent = (status) => {
+      window.localStorage.setItem(consentKey, status);
+      if (banner) banner.style.display = 'none';
+      try {
+        fetch(config.consentEndpoint, {
+          method: 'POST',
+          credentials: 'include',
+          headers: withCsrfHeaders({'Content-Type': 'application/json', Accept: 'application/json'}),
+          body: JSON.stringify({category: 'analytics', status}),
+        }).catch(() => {});
+      } catch (error) {}
+      if (status === 'granted') {
+        loadAnalyticsScripts();
+        postEvent('page_view', {eventId: `page-${window.location.pathname}-${Date.now()}`});
+      }
+    };
+
+    document.querySelectorAll('[data-consent-choice]').forEach((button) => {
+      button.addEventListener('click', () => applyConsent(button.dataset.consentChoice || 'declined'));
+    });
+
+    if (!storedConsent && config.consentRequired && banner) {
+      banner.style.display = '';
+    } else if (!config.consentRequired || storedConsent === 'granted') {
+      loadAnalyticsScripts();
+      postEvent('page_view', {eventId: `page-${window.location.pathname}-${Date.now()}`});
+    }
+
+    document.querySelectorAll('[data-conversion-event]').forEach((element) => {
+      if (element.dataset.conversionBound === 'true') return;
+      element.dataset.conversionBound = 'true';
+      element.addEventListener('submit', () => {
+        postEvent(element.dataset.conversionEvent, {
+          productId: element.dataset.productId,
+        });
+      });
+    });
+  };
+
+  initConsentAnalytics();
+
   const applyCsrfToForms = (root = document) => {
     root.querySelectorAll('form[method="POST"], form[method="post"]').forEach((form) => {
       if (form.querySelector('input[name="csrf_token"]')) return;
@@ -2088,7 +2208,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const memberDiscount = parseFloat(checkoutTotalEl.dataset.memberDiscount || 0);
     const deliveryCharge = parseFloat(checkoutTotalEl.dataset.deliveryCharge || 0);
     const gstRate = parseFloat(checkoutTotalEl.dataset.gstRate || 0);
-    const fulfillmentCharge = pricingState.fulfillmentType === 'PICKUP' ? 0 : deliveryCharge;
+    const fulfillmentCharge = ['PICKUP', 'DINE_IN'].includes(pricingState.fulfillmentType) ? 0 : deliveryCharge;
     const taxableAmount = Math.max(0, subtotal - memberDiscount - pricingState.couponDiscount - pricingState.loyaltyDiscount);
     const taxAmount = Math.round((taxableAmount * gstRate / 100) * 100) / 100;
     const total = Math.max(0, taxableAmount + taxAmount + fulfillmentCharge);
@@ -2120,8 +2240,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const fulfillmentChargeLabel = document.querySelector('#checkout-fulfillment-charge-label');
     const fulfillmentChargeValue = document.querySelector('#checkout-fulfillment-charge-value');
     if (fulfillmentChargeLabel && fulfillmentChargeValue) {
-      if (pricingState.fulfillmentType === 'PICKUP') {
-        fulfillmentChargeLabel.textContent = 'Pickup';
+      if (pricingState.fulfillmentType === 'PICKUP' || pricingState.fulfillmentType === 'DINE_IN') {
+        fulfillmentChargeLabel.textContent = pricingState.fulfillmentType === 'DINE_IN' ? 'Dine-in' : 'Pickup';
         fulfillmentChargeValue.innerHTML = '<span style="color:var(--sage)">FREE</span>';
       } else {
         fulfillmentChargeLabel.textContent = 'Delivery';
@@ -2133,7 +2253,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const checkoutFreeDelivery = document.querySelector('#checkout-free-delivery-note');
     if (checkoutFreeDelivery) {
-      if (pricingState.fulfillmentType === 'PICKUP') {
+      if (pricingState.fulfillmentType === 'PICKUP' || pricingState.fulfillmentType === 'DINE_IN') {
         checkoutFreeDelivery.innerHTML = '';
       } else {
         const deliveryThreshold = parseFloat(checkoutTotalEl.dataset.deliveryThreshold || 500);
@@ -2488,6 +2608,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const initCheckoutFulfillment = () => {
     const deliverySection = document.querySelector('#delivery-schedule-fields');
     const pickupSection = document.querySelector('#pickup-schedule-fields');
+    const dineInSection = document.querySelector('#dine-in-schedule-fields');
     const addressCard = document.querySelector('#checkout-address-card');
     const deliverySlot = document.querySelector('#delivery_time_slot');
     const pickupSlot = document.querySelector('#pickup_slot');
@@ -2498,17 +2619,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const selectedValue = document.querySelector('input[name="fulfillment_type"]:checked')?.value || 'DELIVERY';
       pricingState.fulfillmentType = selectedValue;
       const isPickup = selectedValue === 'PICKUP';
+      const isDineIn = selectedValue === 'DINE_IN';
+      const needsDelivery = !isPickup && !isDineIn;
 
-      if (deliverySection) deliverySection.classList.toggle('hidden', isPickup);
+      if (deliverySection) deliverySection.classList.toggle('hidden', !needsDelivery);
       if (pickupSection) pickupSection.classList.toggle('hidden', !isPickup);
-      if (addressCard) addressCard.classList.toggle('hidden', isPickup);
+      if (dineInSection) dineInSection.classList.toggle('hidden', !isDineIn);
+      if (addressCard) addressCard.classList.toggle('hidden', !needsDelivery);
 
-      if (deliveryDate) deliveryDate.required = !isPickup;
-      if (deliverySlot) deliverySlot.required = !isPickup;
+      if (deliveryDate) deliveryDate.required = needsDelivery;
+      if (deliverySlot) deliverySlot.required = needsDelivery;
       if (pickupDate) pickupDate.required = isPickup;
       if (pickupPhone) pickupPhone.required = isPickup;
 
-      if (isPickup) {
+      if (!needsDelivery) {
         deliveryDate?.removeAttribute('aria-required');
         deliverySlot?.removeAttribute('aria-required');
       }
@@ -2549,6 +2673,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const checkoutMapToggle = document.querySelector('#checkout-address-map-toggle');
     const checkoutLocationStatus = document.querySelector('#checkout-location-status');
     const checkoutUseLocationButton = document.querySelector('#checkout-use-location');
+    const checkoutServiceabilityButton = document.querySelector('#checkout-check-serviceability');
+    const checkoutServiceabilityStatus = document.querySelector('#checkout-serviceability-status');
     let selectedAddressCard = null;
     let suppressExactLocationReset = false;
 
@@ -2632,6 +2758,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
+    const setServiceabilityStatus = (message, state = 'muted') => {
+      if (!checkoutServiceabilityStatus) return;
+      checkoutServiceabilityStatus.textContent = message;
+      checkoutServiceabilityStatus.className = `text-sm mt-2 ${state === 'ok' ? 'badge badge-green' : state === 'blocked' ? 'badge badge-red' : 'text-muted'}`;
+    };
+
     const fillAddressFromReverseGeocode = (location) => {
       if (!location) return;
 
@@ -2699,11 +2831,57 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
+    const checkServiceability = async () => {
+      if (!checkoutServiceabilityButton) return;
+      const selectedValue = document.querySelector('input[name="fulfillment_type"]:checked')?.value || 'DELIVERY';
+      if (selectedValue === 'PICKUP') {
+        setServiceabilityStatus('Pickup is available from the bakery. Delivery radius does not apply.', 'ok');
+        return;
+      }
+      const exactLocation = getExactLocation();
+      const subtotal = Number(checkoutServiceabilityButton.dataset.subtotal || checkoutTotalEl?.dataset.subtotal || 0);
+      const payload = {
+        pincode: selectedAddressCard && !isNewAddressCard(selectedAddressCard)
+          ? selectedAddressCard.dataset.pincode || ''
+          : addressInputs.pincode?.value || '',
+        latitude: exactLocation?.latitude,
+        longitude: exactLocation?.longitude,
+        subtotal,
+      };
+      const originalLabel = checkoutServiceabilityButton.textContent;
+      checkoutServiceabilityButton.disabled = true;
+      checkoutServiceabilityButton.textContent = 'Checking...';
+      setServiceabilityStatus('Checking delivery availability...', 'muted');
+      try {
+        const response = await fetch('/api/delivery/serviceability', {
+          method: 'POST',
+          headers: withCsrfHeaders({'Content-Type': 'application/json', Accept: 'application/json'}),
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (data.serviceable) {
+          if (checkoutTotalEl) checkoutTotalEl.dataset.deliveryCharge = String(data.delivery_fee || 0);
+          setServiceabilityStatus(data.message || 'Delivery is available.', 'ok');
+        } else {
+          if (checkoutTotalEl) checkoutTotalEl.dataset.deliveryCharge = '0';
+          setServiceabilityStatus(data.message || 'Delivery is unavailable here. Store pickup is still available.', 'blocked');
+        }
+        renderCheckoutPricing();
+      } catch (error) {
+        console.error(error);
+        setServiceabilityStatus('Unable to check delivery right now. Store pickup is still available.', 'blocked');
+      } finally {
+        checkoutServiceabilityButton.disabled = false;
+        checkoutServiceabilityButton.textContent = originalLabel;
+      }
+    };
+
     const applyAddressCard = (card) => {
       if (!card) return;
       const manualAddress = isNewAddressCard(card);
       selectedAddressCard = card;
       setManualAddressFieldsEnabled(manualAddress);
+      setServiceabilityStatus('Address changed. Recheck delivery availability before placing a delivery order.', 'muted');
       if (!manualAddress) {
         clearManualAddressFields();
         updateCheckoutAddressMap();
@@ -2761,12 +2939,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!suppressExactLocationReset) {
           clearExactLocation();
         }
+        setServiceabilityStatus('Address changed. Recheck delivery availability before placing a delivery order.', 'muted');
         updateCheckoutAddressMap();
       });
       input?.addEventListener('change', () => {
         if (!suppressExactLocationReset) {
           clearExactLocation();
         }
+        setServiceabilityStatus('Address changed. Recheck delivery availability before placing a delivery order.', 'muted');
         updateCheckoutAddressMap();
       });
     });
@@ -2840,8 +3020,18 @@ document.addEventListener('DOMContentLoaded', () => {
       );
     });
 
+    checkoutServiceabilityButton?.addEventListener('click', checkServiceability);
+
     updateCheckoutAddressMap();
   }
+
+  document.querySelector('#remind-next-year')?.addEventListener('change', (event) => {
+    document.querySelector('#occasion-reminder-fields')?.classList.toggle('hidden', !event.target.checked);
+  });
+
+  document.querySelector('#business-purchase')?.addEventListener('change', (event) => {
+    document.querySelector('#business-billing-fields')?.classList.toggle('hidden', !event.target.checked);
+  });
 
   // ─── Auto dismiss alerts ─────────────────────────
   setTimeout(() => {

@@ -166,6 +166,17 @@ def notify_order_status_change(order, new_status, old_status=None):
         current_app.logger.exception(
             "Failed to send WhatsApp status update for order %s", order.id
         )
+    try:
+        from bootstrap import get_container
+
+        get_container().notification_engine.notify_order_status(order, new_status)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Failed to record notification engine status update for order %s",
+            order.id,
+        )
 
 
 def check_and_send_inventory_alerts():

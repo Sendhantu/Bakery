@@ -101,8 +101,17 @@ class SubscriptionService:
             raise ValidationError("Subscription has no items.")
 
         address = user.saved_addresses.filter_by(is_default=True).first()
+        if subscription.saved_address_id:
+            address = db.session.get(type(address), subscription.saved_address_id) if address else None
+            if address is None:
+                from models import SavedAddress
+
+                address = db.session.get(SavedAddress, subscription.saved_address_id)
         store_details = get_container().app.config.get("STORE_DETAILS") or {}
-        if address:
+        fulfillment_type = (subscription.fulfillment_type or "DELIVERY").upper()
+        serviceability_result = None
+        delivery_charge = Decimal("0.00")
+        if fulfillment_type == "DELIVERY" and address:
             address_line1 = address.address_line1
             address_line2 = address.address_line2
             city = address.city
@@ -110,7 +119,17 @@ class SubscriptionService:
             phone = address.phone
             latitude = address.latitude
             longitude = address.longitude
+            serviceability_result = get_container().delivery_zone_service.validate_delivery(
+                branch_id=subscription.branch_id
+                or get_container().app.config.get("DEFAULT_BRANCH_ID"),
+                pincode=pincode,
+                latitude=latitude,
+                longitude=longitude,
+                order_subtotal=subtotal,
+            )
+            delivery_charge = Decimal(str(serviceability_result.delivery_fee or 0))
         else:
+            fulfillment_type = "PICKUP"
             address_line1 = store_details.get("address_line1", "")
             address_line2 = store_details.get("address_line2", "")
             city = store_details.get("city", "")
@@ -125,13 +144,13 @@ class SubscriptionService:
             or get_container().app.config.get("DEFAULT_BRANCH_ID"),
             lines=lines,
             subtotal=subtotal,
-            total=subtotal,
+            total=(subtotal + delivery_charge).quantize(Decimal("0.01")),
             payment_method="PAYMENT_LINK",
             payment_status="PENDING",
             status="PLACED",
             channel="subscription",
             source="SUBSCRIPTION",
-            fulfillment_type="DELIVERY",
+            fulfillment_type=fulfillment_type,
             address_line1=address_line1,
             address_line2=address_line2,
             city=city,
@@ -139,6 +158,8 @@ class SubscriptionService:
             phone=phone,
             delivery_latitude=latitude,
             delivery_longitude=longitude,
+            serviceability_result=serviceability_result,
+            delivery_charge=delivery_charge,
             delivery_slot=subscription.delivery_window or "Subscription delivery",
             delivery_date=today,
             special_note=subscription.notes,

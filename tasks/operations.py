@@ -28,6 +28,13 @@ def generate_subscription_orders():
 
 
 @celery.task
+def send_occasion_reminders():
+    return current_app.extensions[
+        "service_container"
+    ].occasion_reminder_service.send_due_reminders()
+
+
+@celery.task
 def capture_queue_metrics():
     service = current_app.extensions["service_container"].offline_sync_service
     pending = service.pending_actions(limit=500) if service.enabled else []

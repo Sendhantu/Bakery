@@ -240,6 +240,30 @@
 {% endblock %}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+{% if current_portal_role == 'customer' and analytics_config.enabled %}
+<div class="card" id="analytics-consent-banner" style="position:fixed;left:1rem;right:1rem;bottom:1rem;z-index:1000;max-width:720px;margin:auto;display:none">
+  <div class="card-body flex justify-between items-center gap-2 flex-wrap">
+    <div>
+      <strong>Privacy preferences</strong>
+      <p class="text-sm text-muted" style="margin:0.25rem 0 0">Analytics helps improve the menu and checkout. Essential features keep working either way.</p>
+    </div>
+    <div class="flex gap-2">
+      <button type="button" class="btn btn-outline btn-sm" data-consent-choice="declined">Decline</button>
+      <button type="button" class="btn btn-primary btn-sm" data-consent-choice="granted">Allow Analytics</button>
+    </div>
+  </div>
+</div>
+<script>
+  window.SweetCrumbsAnalytics = {
+    enabled: {{ analytics_config.enabled|tojson }},
+    ga4MeasurementId: {{ analytics_config.ga4_measurement_id|tojson }},
+    clarityProjectId: {{ analytics_config.clarity_project_id|tojson }},
+    consentRequired: {{ analytics_config.require_consent|tojson }},
+    consentEndpoint: {{ url_for('api.update_consent')|tojson }},
+    conversionEndpoint: {{ url_for('api.record_conversion')|tojson }}
+  };
+</script>
+{% endif %}
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script>
   (function () {

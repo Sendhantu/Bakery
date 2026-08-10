@@ -114,6 +114,7 @@ class User(UserMixin, db.Model):
     referred_customers = db.relationship(
         "User",
         backref=db.backref("referrer", remote_side=[id]),
+        foreign_keys=[referred_by_user_id],
         lazy="dynamic",
     )
 

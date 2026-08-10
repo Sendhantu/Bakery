@@ -5,9 +5,11 @@ from services import (
     AIAssistantService,
     AuthService,
     BakeryMCPContextService,
+    ConversionService,
     DemandService,
     DeliveryCashService,
     DeliveryService,
+    DeliveryZoneService,
     FinanceExportService,
     FinanceService,
     ForecastService,
@@ -17,19 +19,23 @@ from services import (
     InvoiceService,
     LoyaltyService,
     OfflineSyncService,
+    OccasionReminderService,
     OrderReversalService,
     OrderService,
     OfferRecommendationService,
     PaymentService,
+    NotificationEngine,
     PricingService,
     PurchaseOrderService,
     PushService,
     QRService,
     RbacService,
     RoutePlanningService,
+    SecurityService,
     SlotService,
     StorageService,
     SubscriptionService,
+    TableQRService,
     WeatherService,
 )
 
@@ -69,18 +75,24 @@ class ServiceContainer:
             pickup_buffer_minutes=app.config.get("PICKUP_BUFFER_MINUTES", 20),
         )
         self.delivery_cash_service = DeliveryCashService()
+        self.conversion_service = ConversionService(app.config)
         self.delivery_service = DeliveryService(
             self.order_repository,
             self.audit_service,
             self.delivery_cash_service,
         )
+        self.delivery_zone_service = DeliveryZoneService(app.config)
         self.storage_service = StorageService(app.config)
         self.pricing_service = PricingService()
         self.qr_service = QRService()
+        self.table_qr_service = TableQRService(app.config)
+        self.security_service = SecurityService(app.config)
         self.forecast_service = ForecastService()
         self.route_planning_service = RoutePlanningService(app.config)
         self.subscription_service = SubscriptionService()
+        self.occasion_reminder_service = OccasionReminderService()
         self.push_service = PushService(app.config)
+        self.notification_engine = NotificationEngine(app.config, self.push_service)
         self.invoice_service = InvoiceService(self.storage_service)
         self.finance_service = FinanceService()
         self.gift_card_service = GiftCardService()

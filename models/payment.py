@@ -245,3 +245,36 @@ class PaymentTransitionLog(db.Model):
     created_at = db.Column(db.DateTime, default=utcnow)
 
     actor = db.relationship("User")
+
+
+class PosPaymentTransaction(db.Model):
+    __tablename__ = "pos_payment_transactions"
+    id = db.Column(db.Integer, primary_key=True)
+    transaction_id = db.Column(db.String(80), unique=True, nullable=False)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"))
+    payment_id = db.Column(db.Integer, db.ForeignKey("payments.id"))
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    currency = db.Column(db.String(3), default="INR", nullable=False)
+    payment_method = db.Column(db.String(40), nullable=False)
+    payment_status = db.Column(db.String(30), default="PENDING", nullable=False)
+    cash_received = db.Column(db.Numeric(10, 2))
+    change_returned = db.Column(db.Numeric(10, 2))
+    transaction_reference = db.Column(db.String(120))
+    method_details_json = db.Column(db.Text)
+    notes = db.Column(db.Text)
+    cashier_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
+    idempotency_key = db.Column(db.String(120), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    order = db.relationship("Order")
+    payment = db.relationship("Payment")
+    cashier = db.relationship("User")
+    branch = db.relationship("Branch")
+
+    __table_args__ = (
+        db.Index("idx_pos_payment_created", "created_at"),
+        db.Index("idx_pos_payment_cashier_created", "cashier_id", "created_at"),
+        db.Index("idx_pos_payment_order", "order_id"),
+    )

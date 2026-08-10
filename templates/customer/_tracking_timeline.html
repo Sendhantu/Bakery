@@ -1,0 +1,35 @@
+{% set current_status = tracking_current_status or order.normalized_tracking_status %}
+{% set flow = tracking_steps or order.tracking_flow %}
+{% if order.status != 'CANCELLED' %}
+<div class="card mb-4">
+  <div class="card-header">Order Tracking</div>
+  <div class="card-body">
+    <div class="order-tracker">
+      {% for s in flow %}
+      {% set is_active = s == current_status %}
+      {% set is_done = flow.index(s) < flow.index(current_status) if current_status in flow else false %}
+      <div class="tracker-step {% if is_active %}active{% elif is_done %}completed{% endif %}" data-tracker-status="{{ s }}">
+        <div class="tracker-icon">
+          {% if s in ['PLACED'] %}1{% elif s in ['CONFIRMED'] %}2{% elif s in ['BAKING','PREPARING'] %}3{% elif s == 'DECORATING' %}4{% elif s in ['READY_FOR_PICKUP','READY_FOR_DISPATCH'] %}5{% elif s in ['OUT_FOR_DELIVERY'] %}6{% else %}✓{% endif %}
+        </div>
+        <div class="tracker-label">{{ order_status_label(s) if order_status_label is defined else s.replace('_',' ').title() }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if status_history %}
+    <div style="margin-top:1rem;display:flex;flex-direction:column;gap:0.5rem">
+      {% for event in status_history[-5:] %}
+      <div class="text-sm text-muted">
+        {{ event.created_at.strftime('%d %b, %I:%M %p') }} · {{ event.new_status.replace('_',' ').title() }}
+        {% if event.customer_note %} · {{ event.customer_note }}{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div style="padding:1rem 1.5rem;background:#FFF0F0;border:1px solid #FFCDD2;border-radius:var(--radius-lg);color:#B71C1C;margin-bottom:1.5rem">
+  This order has been <strong>CANCELLED</strong>.
+</div>
+{% endif %}

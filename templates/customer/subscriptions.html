@@ -94,6 +94,24 @@
                       <label class="form-label">Delivery Window</label>
                       <input class="form-control" name="delivery_window" value="{{ subscription.delivery_window or '' }}">
                     </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label">Fulfilment</label>
+                        <select class="form-control" name="fulfillment_type">
+                          <option value="DELIVERY" {% if subscription.fulfillment_type != 'PICKUP' %}selected{% endif %}>Home Delivery</option>
+                          <option value="PICKUP" {% if subscription.fulfillment_type == 'PICKUP' %}selected{% endif %}>Store Pickup</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Delivery Address</label>
+                        <select class="form-control" name="saved_address_id">
+                          <option value="">Use default or pickup fallback</option>
+                          {% for address in saved_addresses %}
+                          <option value="{{ address.id }}" {% if subscription.saved_address_id == address.id %}selected{% endif %}>{{ address.label }} - {{ address.pincode }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                    </div>
                     <div class="form-group">
                       <label class="form-label">Notes</label>
                       <input class="form-control" name="notes" value="{{ subscription.notes or '' }}">
@@ -173,6 +191,22 @@
             <div class="form-group">
               <label class="form-label">Delivery Window</label>
               <input class="form-control" name="delivery_window" placeholder="Morning, evening, etc.">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Fulfilment</label>
+              <select class="form-control" name="fulfillment_type">
+                <option value="DELIVERY">Home Delivery</option>
+                <option value="PICKUP">Store Pickup</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Delivery Address</label>
+              <select class="form-control" name="saved_address_id">
+                <option value="">Use default or pickup fallback</option>
+                {% for address in saved_addresses %}
+                <option value="{{ address.id }}">{{ address.label }} - {{ address.pincode }}</option>
+                {% endfor %}
+              </select>
             </div>
             <div class="form-group">
               <label class="form-label">Notes</label>

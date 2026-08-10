@@ -1,0 +1,69 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Notifications — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">Notifications</h1>
+    <p class="text-muted text-sm">Transactional templates, delivery queue logs, and kitchen alerts.</p>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(280px,0.8fr) minmax(0,1.2fr);gap:1.5rem;align-items:start">
+  <div class="card">
+    <div class="card-header">Template</div>
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('admin.notifications_admin') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group"><label class="form-label">Event</label><input class="form-control" name="event_type" placeholder="order_placed" required></div>
+        <div class="form-group"><label class="form-label">Channel</label><select class="form-control" name="channel"><option>in_app</option><option>email</option><option>sms</option><option>whatsapp</option><option>push</option></select></div>
+        <div class="form-group"><label class="form-label">Name</label><input class="form-control" name="name" required></div>
+        <div class="form-group"><label class="form-label">Subject</label><input class="form-control" name="subject"></div>
+        <div class="form-group"><label class="form-label">Provider Template ID</label><input class="form-control" name="provider_template_id"></div>
+        <div class="form-group"><label class="form-label">Body</label><textarea class="form-control" name="body" rows="5" required></textarea></div>
+        <button class="btn btn-primary btn-block" type="submit">Save Template</button>
+      </form>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:1.5rem">
+    <div class="card">
+      <div class="card-header">Active Templates</div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Event</th><th>Channel</th><th>Version</th><th>Status</th></tr></thead><tbody>
+          {% for template in templates %}
+          <tr><td>{{ template.event_type }}</td><td>{{ template.channel }}</td><td>{{ template.version }}</td><td>{{ 'Active' if template.is_active else 'Archived' }}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted">No templates saved.</td></tr>
+          {% endfor %}
+        </tbody></table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Delivery Logs</div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Event</th><th>Channel</th><th>Recipient</th><th>Status</th><th>Queued</th></tr></thead><tbody>
+          {% for log in logs %}
+          <tr><td>{{ log.event_type }}</td><td>{{ log.channel }}</td><td>{{ log.recipient_masked or '-' }}</td><td>{{ log.status }}</td><td>{{ log.queued_at.strftime('%d %b %H:%M') }}</td></tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted">No notification deliveries logged.</td></tr>
+          {% endfor %}
+        </tbody></table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Kitchen Alerts</div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Order</th><th>Status</th><th>Print</th><th>Created</th></tr></thead><tbody>
+          {% for alert in kitchen_alerts %}
+          <tr><td>{{ alert.order.order_number if alert.order else alert.order_id }}</td><td>{{ alert.status }}</td><td>{{ alert.print_status }}</td><td>{{ alert.created_at.strftime('%d %b %H:%M') }}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted">No kitchen alerts yet.</td></tr>
+          {% endfor %}
+        </tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,6 +1,64 @@
 from clock import utcnow
 from .base import db
 
+
+PINCODE_SERVICE_STATUSES = ("supported", "partial", "blocked")
+
+
+class DeliveryZoneSetting(db.Model):
+    __tablename__ = "delivery_zone_settings"
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), unique=True)
+    max_radius_km = db.Column(db.Numeric(8, 2), default=7, nullable=False)
+    free_radius_km = db.Column(db.Numeric(8, 2), default=3, nullable=False)
+    min_order_value = db.Column(db.Numeric(10, 2), default=0, nullable=False)
+    extra_fee = db.Column(db.Numeric(10, 2), default=0, nullable=False)
+    is_delivery_enabled = db.Column(db.Boolean, default=True, nullable=False)
+    is_pickup_enabled = db.Column(db.Boolean, default=True, nullable=False)
+    availability_json = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    branch = db.relationship("Branch", backref=db.backref("delivery_zone_setting", uselist=False))
+
+
+class DeliveryDistanceBand(db.Model):
+    __tablename__ = "delivery_distance_bands"
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
+    min_distance_km = db.Column(db.Numeric(8, 2), default=0, nullable=False)
+    max_distance_km = db.Column(db.Numeric(8, 2), nullable=False)
+    delivery_fee = db.Column(db.Numeric(10, 2), default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    branch = db.relationship("Branch", backref=db.backref("delivery_distance_bands", lazy="dynamic"))
+
+    __table_args__ = (
+        db.Index("idx_delivery_band_branch_distance", "branch_id", "min_distance_km", "max_distance_km"),
+    )
+
+
+class DeliveryPincodeRule(db.Model):
+    __tablename__ = "delivery_pincode_rules"
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"))
+    pincode = db.Column(db.String(10), nullable=False)
+    status = db.Column(db.String(20), default="supported", nullable=False)
+    delivery_fee_override = db.Column(db.Numeric(10, 2))
+    estimated_delivery_minutes = db.Column(db.Integer)
+    notes = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    branch = db.relationship("Branch", backref=db.backref("delivery_pincode_rules", lazy="dynamic"))
+
+    __table_args__ = (
+        db.UniqueConstraint("branch_id", "pincode", name="uq_delivery_pincode_branch"),
+        db.Index("idx_delivery_pincode_status", "pincode", "status"),
+    )
+
 class DeliveryAgent(db.Model):
     __tablename__ = 'delivery_agents'
     id           = db.Column(db.Integer, primary_key=True)

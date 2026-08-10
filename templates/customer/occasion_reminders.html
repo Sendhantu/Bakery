@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}Occasion Reminders — {{ bakery_name }}{% endblock %}
+{% block content %}
+<div class="page-wrap">
+  <div class="container">
+    <div class="flex justify-between items-center mb-4">
+      <div>
+        <h1 class="section-title">Occasion Reminders</h1>
+        <p class="text-muted">Manage annual reminders and promotional consent.</p>
+      </div>
+      <a href="{{ url_for('customer.products') }}" class="btn btn-outline btn-sm">Shop</a>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      {% for reminder in reminders %}
+      <details class="card" {% if loop.first %}open{% endif %}>
+        <summary class="card-header" style="cursor:pointer">{{ reminder.occasion_type }} · {{ reminder.occasion_date.strftime('%d %b') }} · {% if reminder.is_active %}Active{% else %}Disabled{% endif %}</summary>
+        <div class="card-body">
+          <form method="POST" action="{{ url_for('customer.occasion_reminders') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="reminder_id" value="{{ reminder.id }}">
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Occasion Type</label><input class="form-control" name="occasion_type" value="{{ reminder.occasion_type }}"></div>
+              <div class="form-group"><label class="form-label">Occasion Date</label><input class="form-control" type="date" name="occasion_date" value="{{ reminder.occasion_date.isoformat() }}"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Recipient</label><input class="form-control" name="recipient_name" value="{{ reminder.recipient_name or '' }}"></div>
+              <div class="form-group"><label class="form-label">Relationship</label><input class="form-control" name="relationship" value="{{ reminder.relationship or '' }}"></div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Channel</label>
+              <select class="form-control" name="preferred_channel">
+                {% for channel in ['email','sms','whatsapp','in_app'] %}
+                <option value="{{ channel }}" {% if reminder.preferred_channel == channel %}selected{% endif %}>{{ channel.replace('_',' ')|title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <label style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem"><input type="checkbox" name="marketing_consent" {% if reminder.marketing_consent %}checked{% endif %}> Allow product recommendations or coupons</label>
+            <label style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem"><input type="checkbox" name="is_active" {% if reminder.is_active %}checked{% endif %}> Reminder active</label>
+            <div class="flex gap-2 flex-wrap">
+              <button class="btn btn-primary btn-sm" name="action" value="update">Save</button>
+              <button class="btn btn-outline btn-sm" name="action" value="disable">Withdraw Consent</button>
+              <button class="btn btn-danger btn-sm" name="action" value="delete" data-confirm="Delete this reminder?">Delete</button>
+            </div>
+          </form>
+        </div>
+      </details>
+      {% else %}
+      <div class="card"><div class="card-body text-center text-muted">No occasion reminders yet.</div></div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

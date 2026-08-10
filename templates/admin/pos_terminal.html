@@ -1,0 +1,235 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}POS Terminal — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">POS Terminal</h1>
+    <p class="text-muted text-sm">Record cashier-confirmed payments. No bank, card, or UPI charge is initiated from this screen.</p>
+  </div>
+  <a href="{{ url_for('admin.pos') }}" class="btn btn-outline btn-sm">Walk-in Orders</a>
+</div>
+
+<form method="GET" action="{{ url_for('admin.pos_terminal') }}" class="card mb-4">
+  <div class="card-body form-row">
+    <div class="form-group">
+      <label class="form-label">Existing Order Number</label>
+      <input class="form-control" name="order_number" value="{{ order_number }}" placeholder="Optional, e.g. SC20260809ABC123">
+    </div>
+    <div class="form-group" style="align-self:end">
+      <button class="btn btn-outline" type="submit">Load Order Amount</button>
+    </div>
+    {% if order_number and not selected_order %}
+    <div class="form-group" style="align-self:end"><span class="badge badge-orange">Order not found</span></div>
+    {% endif %}
+  </div>
+</form>
+
+<form method="POST" action="{{ url_for('admin.pos_terminal') }}" class="pos-payment-terminal" data-pos-terminal data-transaction-limit="{{ transaction_limit }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+  <input type="hidden" name="order_id" value="{{ selected_order.id if selected_order else '' }}">
+  <input type="hidden" name="order_number" value="{{ selected_order.order_number if selected_order else order_number }}">
+
+  <div style="display:grid;grid-template-columns:minmax(280px,0.8fr) minmax(0,1.2fr) minmax(280px,0.8fr);gap:1.5rem;align-items:start">
+    <section class="card">
+      <div class="card-header">Amount to be Paid</div>
+      <div class="card-body">
+        {% if selected_order %}
+        <div class="badge badge-green mb-2">Order {{ selected_order.order_number }}</div>
+        <input class="form-control" type="number" name="amount" min="0.01" step="0.01" max="{{ transaction_limit }}" value="{{ '%.2f'|format(selected_order.total or 0) }}" readonly data-pos-amount>
+        {% else %}
+        <input class="form-control" type="number" name="amount" min="0.01" step="0.01" max="{{ transaction_limit }}" placeholder="525.00" required data-pos-amount>
+        {% endif %}
+        <div class="mt-3" style="font-family:var(--font-display);font-size:2rem;color:var(--brown);font-weight:700" data-pos-amount-display>₹0.00</div>
+        <p class="text-sm text-muted mt-1">Maximum transaction: ₹{{ '%.2f'|format(transaction_limit) }}</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">Payment Method</div>
+      <div class="card-body">
+        <div class="grid gap-2" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+          {% for value, label in payment_methods.items() %}
+          <label class="payment-option pos-method-option" data-pos-method-option>
+            <input type="radio" name="payment_method" value="{{ value }}" {% if loop.first %}checked{% endif %}>
+            <span style="font-weight:700">{{ label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+
+        <div class="mt-4" data-pos-method-panel="CASH">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Cash Received</label>
+              <input class="form-control" type="number" name="cash_received" min="0.01" step="0.01" data-pos-cash-received>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Change to Return</label>
+              <input class="form-control" value="₹0.00" readonly data-pos-change>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 hidden" data-pos-method-panel="UPI">
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">UPI Reference</label><input class="form-control" name="transaction_reference"></div>
+            <div class="form-group"><label class="form-label">Payment App</label><select class="form-control" name="upi_app"><option>Google Pay</option><option>PhonePe</option><option>Paytm</option><option>Other</option></select></div>
+          </div>
+        </div>
+
+        <div class="mt-4 hidden" data-pos-method-panel="CREDIT_CARD,DEBIT_CARD">
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Terminal Reference</label><input class="form-control" name="transaction_reference"></div>
+            <div class="form-group"><label class="form-label">Last Four Digits</label><input class="form-control" name="card_last4" inputmode="numeric" maxlength="4" pattern="[0-9]{4}"></div>
+          </div>
+          <div class="form-group"><label class="form-label">Card Type</label><input class="form-control" name="card_type" placeholder="Visa, Mastercard, RuPay"></div>
+        </div>
+
+        <div class="mt-4 hidden" data-pos-method-panel="BANK_TRANSFER">
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Transaction Reference</label><input class="form-control" name="transaction_reference"></div>
+            <div class="form-group"><label class="form-label">Bank Name</label><input class="form-control" name="bank_name"></div>
+          </div>
+          <div class="form-group"><label class="form-label">Payment Date</label><input class="form-control" type="date" name="payment_date"></div>
+        </div>
+
+        <div class="mt-4 hidden" data-pos-method-panel="OTHER">
+          <div class="form-group"><label class="form-label">Payment Note</label><input class="form-control" name="other_note" data-pos-other-note></div>
+        </div>
+
+        <div class="form-group mt-3">
+          <label class="form-label">Notes</label>
+          <input class="form-control" name="notes" placeholder="Optional cashier note">
+        </div>
+      </div>
+    </section>
+
+    <aside class="card">
+      <div class="card-header">Payment Summary</div>
+      <div class="card-body">
+        <div class="pos-total-row"><span>Amount</span><strong data-pos-summary-amount>₹0.00</strong></div>
+        <div class="pos-total-row"><span>Method</span><strong data-pos-summary-method>Cash</strong></div>
+        <div class="pos-total-row" data-pos-summary-cash-row><span>Cash Received</span><strong data-pos-summary-cash>₹0.00</strong></div>
+        <div class="pos-total-row" data-pos-summary-change-row><span>Change</span><strong data-pos-summary-change>₹0.00</strong></div>
+        <div class="pos-total-row"><span>Cashier</span><strong>{{ current_user.name }}</strong></div>
+        <div class="pos-total-row"><span>Date and Time</span><strong data-pos-now></strong></div>
+        <p class="text-sm text-muted mt-3" data-pos-validation role="status" aria-live="polite"></p>
+        <button class="btn btn-primary btn-block mt-3" type="submit" data-pos-confirm>Confirm Payment</button>
+      </div>
+    </aside>
+  </div>
+</form>
+
+<div class="card mt-4">
+  <div class="card-header">Recent POS Transactions</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Transaction</th><th>Amount</th><th>Method</th><th>Cashier</th><th>Time</th></tr></thead>
+      <tbody>
+      {% for transaction in recent_transactions %}
+        <tr>
+          <td><a href="{{ url_for('admin.pos_terminal_success', transaction_id=transaction.id) }}">{{ transaction.transaction_id }}</a></td>
+          <td>₹{{ '%.2f'|format(transaction.amount or 0) }}</td>
+          <td>{{ payment_methods.get(transaction.payment_method, transaction.payment_method) }}</td>
+          <td>{{ transaction.cashier.name if transaction.cashier else transaction.cashier_id }}</td>
+          <td>{{ transaction.created_at.strftime('%d %b %H:%M') }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="text-center text-muted" style="padding:1.25rem">No POS payments recorded yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const form = document.querySelector('[data-pos-terminal]');
+  if (!form) return;
+  const amountInput = form.querySelector('[data-pos-amount]');
+  const cashInput = form.querySelector('[data-pos-cash-received]');
+  const confirmButton = form.querySelector('[data-pos-confirm]');
+  const validation = form.querySelector('[data-pos-validation]');
+  const methodLabels = {{ payment_methods|tojson }};
+  const limit = Number(form.dataset.transactionLimit || 100000);
+  const money = (value) => `₹${Number(value || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+
+  const selectedMethod = () => form.querySelector('input[name="payment_method"]:checked')?.value || 'CASH';
+  const amount = () => Number(amountInput?.value || 0);
+  const cash = () => Number(cashInput?.value || 0);
+
+  const panelMatches = (panel, method) => (panel.dataset.posMethodPanel || '').split(',').includes(method);
+
+  const sync = () => {
+    const method = selectedMethod();
+    const payable = amount();
+    const cashReceived = cash();
+    const change = Math.max(0, cashReceived - payable);
+    let message = '';
+    let valid = payable > 0 && payable <= limit;
+    if (!valid) message = payable > limit ? `Amount cannot exceed ${money(limit)}.` : 'Enter a valid positive amount.';
+    if (method === 'CASH' && cashReceived < payable) {
+      valid = false;
+      message = 'Cash received must be at least the amount payable.';
+    }
+    if (method === 'OTHER' && !(form.querySelector('[data-pos-other-note]')?.value || '').trim()) {
+      valid = false;
+      message = 'Add a short note for Other payment method.';
+    }
+
+    form.querySelector('[data-pos-amount-display]').textContent = money(payable);
+    form.querySelector('[data-pos-summary-amount]').textContent = money(payable);
+    form.querySelector('[data-pos-summary-method]').textContent = methodLabels[method] || method;
+    form.querySelector('[data-pos-summary-cash]').textContent = money(cashReceived);
+    form.querySelector('[data-pos-summary-change]').textContent = money(change);
+    form.querySelector('[data-pos-change]').value = money(change);
+    form.querySelector('[data-pos-now]').textContent = new Date().toLocaleString('en-IN');
+    form.querySelector('[data-pos-summary-cash-row]').classList.toggle('hidden', method !== 'CASH');
+    form.querySelector('[data-pos-summary-change-row]').classList.toggle('hidden', method !== 'CASH');
+    form.querySelectorAll('[data-pos-method-panel]').forEach((panel) => {
+      const active = panelMatches(panel, method);
+      panel.classList.toggle('hidden', !active);
+      panel.querySelectorAll('input, select, textarea').forEach((field) => {
+        field.disabled = !active;
+      });
+    });
+    form.querySelectorAll('[data-pos-method-option]').forEach((option) => {
+      option.classList.toggle('is-selected', Boolean(option.querySelector('input')?.checked));
+    });
+    validation.textContent = message;
+    confirmButton.disabled = !valid;
+    return valid;
+  };
+
+  form.querySelectorAll('input, select, textarea').forEach((field) => {
+    field.addEventListener('input', sync);
+    field.addEventListener('change', sync);
+  });
+  form.querySelectorAll('[data-pos-method-option]').forEach((option) => {
+    option.addEventListener('click', () => {
+      const input = option.querySelector('input[type="radio"]');
+      if (input) {
+        input.checked = true;
+        input.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+    });
+  });
+  form.addEventListener('submit', (event) => {
+    if (!sync()) {
+      event.preventDefault();
+      return;
+    }
+    const method = methodLabels[selectedMethod()] || selectedMethod();
+    if (!window.confirm(`Confirm payment of ${money(amount())} by ${method}?`)) {
+      event.preventDefault();
+      return;
+    }
+    confirmButton.disabled = true;
+    confirmButton.textContent = 'Recording Payment...';
+  });
+  sync();
+})();
+</script>
+{% endblock %}

@@ -1,11 +1,99 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, session
 from flask_login import login_required, current_user
+from app import csrf
 from bootstrap import get_container
-from models import Product, ProductVariant, Coupon, Notification, calculate_loyalty_redemption, get_loyalty_config
+from models import Product, ProductVariant, Coupon, Notification, db, calculate_loyalty_redemption, get_loyalty_config
 from decimal import Decimal, InvalidOperation
 from utils import reverse_geocode
 
 api_bp = Blueprint('api', __name__)
+
+
+@api_bp.route('/consent', methods=['POST'])
+def update_consent():
+    data = request.get_json(silent=True) or {}
+    category = data.get('category', 'analytics')
+    status = data.get('status', 'declined')
+    try:
+        get_container().conversion_service.record_consent(
+            user_id=current_user.id if current_user.is_authenticated else None,
+            category=category,
+            status=status,
+            source='preference_center',
+        )
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({'ok': False, 'message': str(exc)}), 400
+    return jsonify({'ok': True, 'category': category, 'status': status})
+
+
+@api_bp.route('/analytics/conversion', methods=['POST'])
+def record_conversion():
+    data = request.get_json(silent=True) or {}
+    event_name = data.get('event_name') or data.get('name')
+    campaign = data.get('campaign') or {}
+    try:
+        event = get_container().conversion_service.record_event(
+            event_name,
+            user_id=current_user.id if current_user.is_authenticated else None,
+            event_id=data.get('event_id'),
+            product_id=data.get('product_id'),
+            order_id=data.get('order_id'),
+            table_id=session.get('table_menu', {}).get('table_id') if isinstance(session.get('table_menu'), dict) else None,
+            branch_id=data.get('branch_id'),
+            amount=data.get('amount'),
+            path=data.get('path') or request.path,
+            source=campaign.get('source') or data.get('source'),
+            medium=campaign.get('medium') or data.get('medium'),
+            campaign=campaign.get('campaign') or data.get('campaign_name'),
+            content=campaign.get('content') or data.get('content'),
+            term=campaign.get('term') or data.get('term'),
+            metadata=data.get('metadata') or {},
+        )
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({'ok': False, 'message': str(exc)}), 400
+    return jsonify({'ok': True, 'recorded': bool(event)})
+
+
+@api_bp.route('/webhooks/<provider>', methods=['POST'])
+@csrf.exempt
+def signed_webhook(provider):
+    payload = request.get_data(cache=False) or b''
+    signature = (
+        request.headers.get('X-Webhook-Signature')
+        or request.headers.get('X-Signature')
+        or request.headers.get('X-Hub-Signature-256')
+        or ''
+    )
+    event_id = (
+        request.headers.get('X-Webhook-Event-Id')
+        or request.headers.get('X-Event-Id')
+        or request.headers.get('Idempotency-Key')
+        or ''
+    )
+    event_type = request.headers.get('X-Webhook-Event-Type') or request.headers.get('X-Event-Type')
+    timestamp = request.headers.get('X-Webhook-Timestamp') or request.headers.get('X-Timestamp')
+    log, valid = get_container().security_service.verify_webhook(
+        provider,
+        payload,
+        signature,
+        event_id=event_id,
+        event_type=event_type,
+        timestamp=timestamp,
+    )
+    db.session.commit()
+    if not valid:
+        current_app.logger.warning(
+            'webhook_rejected provider=%s event_id=%s status=%s',
+            provider,
+            event_id,
+            log.signature_status,
+        )
+        return jsonify({'ok': False, 'message': 'Webhook verification failed.'}), 401
+    return jsonify({'ok': True, 'status': 'verified'})
 
 
 @api_bp.route('/validate-coupon', methods=['POST'])
@@ -72,6 +160,21 @@ def reverse_geocode_location():
             'message': 'Exact location captured and address fields updated.',
         }
     )
+
+
+@api_bp.route('/delivery/serviceability', methods=['POST'])
+@login_required
+def delivery_serviceability():
+    data = request.get_json() or {}
+    result = get_container().delivery_zone_service.check_serviceability(
+        branch_id=data.get('branch_id'),
+        pincode=data.get('pincode'),
+        latitude=data.get('latitude'),
+        longitude=data.get('longitude'),
+        order_subtotal=data.get('subtotal', 0),
+    )
+    status_code = 200 if result.serviceable else 422
+    return jsonify({'ok': result.serviceable, **result.as_dict()}), status_code
 
 
 @api_bp.route('/search/suggestions')

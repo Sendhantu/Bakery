@@ -23,8 +23,11 @@ from models import (
     GST_SUPPLY_RESTAURANT_SERVICE,
     Order,
     OrderItem,
+    OrderStatusHistory,
+    OrderStatusNotificationLog,
     Payment,
     ProductVariant,
+    Notification,
     db,
 )
 from repositories import OrderRepository
@@ -106,10 +109,21 @@ class OrderService:
         phone="",
         delivery_latitude=None,
         delivery_longitude=None,
+        serviceability_result=None,
         delivery_slot="",
         delivery_date=None,
         special_note=None,
         occasion=None,
+        b2b_company_name=None,
+        b2b_gstin=None,
+        b2b_billing_address=None,
+        b2b_state=None,
+        b2b_pincode=None,
+        b2b_po_number=None,
+        b2b_department=None,
+        b2b_billing_email=None,
+        b2b_contact_person=None,
+        b2b_invoice_notes=None,
         coupon_code=None,
         actor_id=None,
         payment_reason="order_created",
@@ -185,16 +199,54 @@ class OrderService:
             phone=phone,
             delivery_latitude=delivery_latitude,
             delivery_longitude=delivery_longitude,
+            serviceability_status=(
+                getattr(serviceability_result, "status", None)
+                if serviceability_result is not None
+                else None
+            ),
+            serviceability_message=(
+                getattr(serviceability_result, "message", None)
+                if serviceability_result is not None
+                else None
+            ),
+            serviceability_distance_km=(
+                getattr(serviceability_result, "distance_km", None)
+                if serviceability_result is not None
+                else None
+            ),
+            serviceability_rule_source=(
+                getattr(serviceability_result, "rule_source", None)
+                if serviceability_result is not None
+                else None
+            ),
             delivery_slot=delivery_slot,
             delivery_date=delivery_date,
             special_note=special_note,
             occasion=occasion,
+            b2b_company_name=(b2b_company_name or "").strip() or None,
+            b2b_gstin=(b2b_gstin or "").strip().upper() or None,
+            b2b_billing_address=(b2b_billing_address or "").strip() or None,
+            b2b_state=(b2b_state or "").strip() or None,
+            b2b_pincode=(b2b_pincode or "").strip() or None,
+            b2b_po_number=(b2b_po_number or "").strip() or None,
+            b2b_department=(b2b_department or "").strip() or None,
+            b2b_billing_email=(b2b_billing_email or "").strip() or None,
+            b2b_contact_person=(b2b_contact_person or "").strip() or None,
+            b2b_invoice_notes=(b2b_invoice_notes or "").strip() or None,
             payment_method=(payment_method or "COD").upper(),
             payment_status="PENDING",
             coupon_code=coupon_code,
         )
         db.session.add(order)
         db.session.flush()
+        self._record_status_history(
+            order,
+            None,
+            order.status,
+            actor_id=actor_id,
+            source=payment_reason or "order_created",
+            customer_note="Order placed successfully.",
+        )
 
         for line in normalized_lines:
             db.session.add(
@@ -442,7 +494,16 @@ class OrderService:
         )
 
     def update_order_status(
-        self, order_id, new_status, actor="admin", actor_id=None, expected_version=None
+        self,
+        order_id,
+        new_status,
+        actor="admin",
+        actor_id=None,
+        expected_version=None,
+        customer_note=None,
+        internal_note=None,
+        delay_reason=None,
+        delayed_until=None,
     ):
         order = self.order_repository.get_or_404(order_id)
         # optimistic check if caller provided expected_version
@@ -454,7 +515,27 @@ class OrderService:
 
         with db.session.begin_nested():
             order.status = status
+            if status == "DELAYED":
+                if not delay_reason:
+                    raise ValidationError("Please provide a delay reason.")
+                if delayed_until is None:
+                    raise ValidationError("Please provide the updated estimated time.")
+                order.delay_reason = delay_reason
+                order.delayed_until = delayed_until
+                order.estimated_ready_at = delayed_until
+            if customer_note:
+                order.status_note = customer_note
             order.mark_status_change()
+            self._record_status_history(
+                order,
+                old_status,
+                status,
+                actor_id=actor_id,
+                source=actor,
+                customer_note=customer_note,
+                internal_note=internal_note,
+            )
+            self._record_status_notification(order, status, channel="in_app")
             self._sync_delivery_status(order, status)
             if self.audit_service is not None:
                 self.audit_service.log(
@@ -480,6 +561,59 @@ class OrderService:
                 )
             )
         return order
+
+    def _record_status_history(
+        self,
+        order,
+        previous_status,
+        new_status,
+        *,
+        actor_id=None,
+        source="system",
+        customer_note=None,
+        internal_note=None,
+    ):
+        db.session.add(
+            OrderStatusHistory(
+                order_id=order.id,
+                previous_status=previous_status,
+                new_status=new_status,
+                updated_by=actor_id,
+                update_source=source or "system",
+                customer_note=customer_note,
+                internal_note=internal_note,
+                related_employee_id=actor_id,
+            )
+        )
+
+    def _record_status_notification(self, order, status, *, channel="in_app"):
+        exists = OrderStatusNotificationLog.query.filter_by(
+            order_id=order.id,
+            status=status,
+            channel=channel,
+        ).first()
+        if exists is not None:
+            return
+        db.session.add(
+            OrderStatusNotificationLog(
+                order_id=order.id,
+                status=status,
+                channel=channel,
+                delivery_status="queued" if channel != "in_app" else "sent",
+                template="order_status_update",
+            )
+        )
+        db.session.add(
+            Notification(
+                user_id=order.user_id,
+                title=f"Order {order.status_label}",
+                message=f"Order #{order.order_number} is now {order.status_label}.",
+                type="order",
+                priority="normal",
+                channel=channel,
+                link=f"/track/{order.tracking_token}",
+            )
+        )
 
     def _award_loyalty_points(self, order):
         service = self.loyalty_service

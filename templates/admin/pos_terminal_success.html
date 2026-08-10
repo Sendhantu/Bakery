@@ -1,0 +1,36 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Payment Successful — POS{% endblock %}
+{% block content %}
+<div class="card" style="max-width:760px;margin:0 auto">
+  <div class="card-body text-center" style="padding:2rem">
+    <div class="badge badge-green mb-3">Payment Successful</div>
+    <h1 style="font-family:var(--font-display);font-size:2rem;color:var(--brown);margin-bottom:0.5rem">{{ transaction.transaction_id }}</h1>
+    <p class="text-muted">Recorded at {{ transaction.created_at.strftime('%d %b %Y, %I:%M %p') }}</p>
+
+    <div class="table-wrap mt-4">
+      <table>
+        <tbody>
+          <tr><th>Amount Paid</th><td>₹{{ '%.2f'|format(transaction.amount or 0) }}</td></tr>
+          <tr><th>Payment Method</th><td>{{ transaction.payment_method|replace('_', ' ')|title }}</td></tr>
+          {% if transaction.cash_received is not none %}
+          <tr><th>Cash Received</th><td>₹{{ '%.2f'|format(transaction.cash_received or 0) }}</td></tr>
+          <tr><th>Change Returned</th><td>₹{{ '%.2f'|format(transaction.change_returned or 0) }}</td></tr>
+          {% endif %}
+          {% if transaction.transaction_reference %}
+          <tr><th>Reference</th><td>{{ transaction.transaction_reference }}</td></tr>
+          {% endif %}
+          <tr><th>Cashier</th><td>{{ transaction.cashier.name if transaction.cashier else transaction.cashier_id }}</td></tr>
+          {% if transaction.order %}
+          <tr><th>Related Order</th><td>{{ transaction.order.order_number }}</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex justify-center gap-2 flex-wrap mt-4">
+      <a class="btn btn-primary" href="{{ url_for('admin.pos_terminal') }}">New Payment</a>
+      <a class="btn btn-outline" href="{{ url_for('admin.pos_terminal_receipt', transaction_id=transaction.id) }}" target="_blank" rel="noopener">Print Receipt</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

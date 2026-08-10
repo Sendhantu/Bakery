@@ -14,6 +14,8 @@ class RecurringSubscription(db.Model):
     payment_method_reference = db.Column(
         db.String(80), default="manual_payment_link", nullable=False
     )
+    fulfillment_type = db.Column(db.String(20), default="DELIVERY", nullable=False)
+    saved_address_id = db.Column(db.Integer, db.ForeignKey("saved_addresses.id"))
     paused_until = db.Column(db.Date)
     delivery_window = db.Column(db.String(50))
     notes = db.Column(db.Text)
@@ -25,6 +27,7 @@ class RecurringSubscription(db.Model):
         backref=db.backref("recurring_order_subscriptions", lazy="dynamic"),
     )
     branch = db.relationship("Branch", backref="recurring_order_subscriptions")
+    saved_address = db.relationship("SavedAddress")
     items = db.relationship(
         "SubscriptionItem",
         backref="subscription",

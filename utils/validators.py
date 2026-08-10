@@ -36,3 +36,25 @@ def validate_address_payload(payload):
         errors.append("Exact location must include both latitude and longitude.")
 
     return errors
+
+
+def is_valid_gstin(value):
+    value = (value or "").strip().upper()
+    if not value:
+        return True
+    if len(value) != 15:
+        return False
+    if not value[:2].isdigit():
+        return False
+    if not value[2:7].isalpha():
+        return False
+    if not value[7:11].isdigit():
+        return False
+    if not value[11].isalpha():
+        return False
+    return value[12].isalnum() and value[13] == "Z" and value[14].isalnum()
+
+
+def normalize_gstin(value):
+    value = (value or "").strip().upper()
+    return value if is_valid_gstin(value) else ""

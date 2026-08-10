@@ -17,6 +17,8 @@ from exceptions import ConflictError, ValidationError
 from functools import wraps
 import json
 import os
+import re
+import secrets
 from decimal import Decimal
 from datetime import date, timedelta
 from sqlalchemy.orm import selectinload
@@ -42,7 +44,9 @@ from models import (
     Category,
     Order,
     OrderItem,
+    OrderStatusHistory,
     Payment,
+    PosPaymentTransaction,
     Refund,
     Coupon,
     COUPON_AUDIENCE_CHOICES,
@@ -54,6 +58,9 @@ from models import (
     DeliveryAgent,
     Delivery,
     DeliveryCashLedger,
+    DeliveryZoneSetting,
+    DeliveryDistanceBand,
+    DeliveryPincodeRule,
     GST_ORDER_SOURCE_CHOICES,
     GST_ORDER_SOURCE_COUNTER_TAKEAWAY,
     GST_ORDER_SOURCE_ECOMMERCE_SWIGGY,
@@ -92,6 +99,21 @@ from models import (
     GiftCardTransaction,
     RecurringSubscription,
     SubscriptionOrderLog,
+    OccasionReminder,
+    CorporateInquiry,
+    CorporateInquiryStatusHistory,
+    CorporateQuote,
+    CustomerConsent,
+    ConversionEvent,
+    WebhookEventLog,
+    SecurityEvent,
+    NotificationTemplate,
+    NotificationDeliveryLog,
+    KitchenAlert,
+    DiningArea,
+    DiningTable,
+    TableMenuScan,
+    TableMenuSession,
     LoyaltyLedger,
     AuditLog,
     ApiUsageLog,
@@ -164,6 +186,9 @@ LIVE_ORDER_STATUSES = (
 )
 PAST_ORDER_STATUSES = ("DELIVERED", "CANCELLED", "REFUNDED")
 ORDER_SCREEN_ALLOWED_ENDPOINTS = {
+    "admin.pos_terminal",
+    "admin.pos_terminal_success",
+    "admin.pos_terminal_receipt",
     "admin.pos",
     "admin.pos_payment",
     "admin.pos_receipt",
@@ -457,6 +482,9 @@ STAFF_PORTAL_ACCESS_CHOICES = (
     ("delivery_agents", "Delivery Agents"),
     ("delivery_cash", "Delivery Cash Ledger"),
     ("analytics", "Analytics and Demand Insights"),
+    ("security", "Security"),
+    ("notifications", "Notifications"),
+    ("qr_menu", "Table QR Codes"),
     ("pricing", "Pricing and AI Offer Provision"),
     ("coupons", "Coupons"),
     ("gift_cards", "Gift Cards"),
@@ -488,6 +516,9 @@ STAFF_ROLE_DEFAULT_ACCESS = {
         "delivery_agents",
         "delivery_cash",
         "analytics",
+        "security",
+        "notifications",
+        "qr_menu",
         "pricing",
         "coupons",
         "gift_cards",
@@ -511,6 +542,7 @@ STAFF_ACCESS_PATH_SLUGS = {
     "modifications": "orders",
     "reviews": "customers",
     "customers": "customers",
+    "corporate": "customers",
     "support": "support",
     "chat": "support",
     "inventory": "inventory",
@@ -519,11 +551,16 @@ STAFF_ACCESS_PATH_SLUGS = {
     "vendors": "vendors",
     "purchase-orders": "purchase_orders",
     "branches": "branches",
+    "delivery-settings": "branches",
     "production": "production",
     "batches": "production",
     "coupons": "coupons",
     "agents": "delivery_agents",
     "analytics": "analytics",
+    "security": "security",
+    "notifications": "notifications",
+    "table-qr": "qr_menu",
+    "qr-menu": "qr_menu",
     "demand-insights": "analytics",
     "loyalty": "loyalty",
     "gift-cards": "gift_cards",
@@ -1735,6 +1772,9 @@ def order_detail(order_id):
         "admin/order_detail.html",
         order=order,
         items=items,
+        status_history=order.status_history.order_by(
+            OrderStatusHistory.created_at.desc()
+        ).limit(8).all(),
         agents=agents,
         mod_reqs=mod_reqs,
         addr_hist=addr_hist,
@@ -1768,15 +1808,23 @@ def update_order_status(order_id):
         return redirect(url_for("admin.order_detail", order_id=order_id))
     try:
         expected_version = request.form.get("expected_version")
+        delayed_until = None
+        delayed_until_raw = (request.form.get("delayed_until") or "").strip()
+        if delayed_until_raw:
+            delayed_until = datetime.strptime(delayed_until_raw, "%Y-%m-%dT%H:%M")
         order = get_container().order_service.update_order_status(
             order_id,
             status,
             actor="admin",
             actor_id=current_user.id,
             expected_version=expected_version,
+            customer_note=(request.form.get("customer_note") or "").strip() or None,
+            internal_note=(request.form.get("internal_note") or "").strip() or None,
+            delay_reason=(request.form.get("delay_reason") or "").strip() or None,
+            delayed_until=delayed_until,
         )
     except ValueError:
-        flash("Please choose a valid status.", "danger")
+        flash("Please choose a valid status and estimated time.", "danger")
         return redirect(url_for("admin.order_detail", order_id=order_id))
     except ValidationError as exc:
         message = str(exc) or "That status change is not allowed right now."
@@ -4013,6 +4061,151 @@ def record_purchase_payment(order_id):
     return redirect(url_for("admin.purchase_order_detail", order_id=purchase_order.id))
 
 
+@admin_bp.route("/delivery-settings", methods=["GET", "POST"])
+@admin_required
+@manager_required
+def delivery_settings():
+    service = get_container().delivery_zone_service
+    if request.method == "POST":
+        branch_id = request.form.get("branch_id", type=int)
+        if branch_id:
+            scoped_branch_or_404(branch_id)
+        before = {}
+        setting = service.ensure_default_rules(branch_id)
+        before = {
+            "max_radius_km": float(setting.max_radius_km or 0),
+            "free_radius_km": float(setting.free_radius_km or 0),
+            "min_order_value": float(setting.min_order_value or 0),
+            "extra_fee": float(setting.extra_fee or 0),
+            "is_delivery_enabled": bool(setting.is_delivery_enabled),
+            "is_pickup_enabled": bool(setting.is_pickup_enabled),
+        }
+        setting.max_radius_km = Decimal(str(request.form.get("max_radius_km") or 7))
+        setting.free_radius_km = Decimal(str(request.form.get("free_radius_km") or 3))
+        setting.min_order_value = Decimal(str(request.form.get("min_order_value") or 0))
+        setting.extra_fee = Decimal(str(request.form.get("extra_fee") or 0))
+        setting.is_delivery_enabled = bool(request.form.get("is_delivery_enabled"))
+        setting.is_pickup_enabled = bool(request.form.get("is_pickup_enabled"))
+
+        paid_fee = Decimal(str(request.form.get("paid_band_fee") or 50))
+        free_radius = Decimal(str(setting.free_radius_km or 3))
+        max_radius = Decimal(str(setting.max_radius_km or 7))
+        DeliveryDistanceBand.query.filter_by(branch_id=branch_id).delete()
+        db.session.add_all(
+            [
+                DeliveryDistanceBand(
+                    branch_id=branch_id,
+                    min_distance_km=Decimal("0.00"),
+                    max_distance_km=free_radius,
+                    delivery_fee=Decimal("0.00"),
+                ),
+                DeliveryDistanceBand(
+                    branch_id=branch_id,
+                    min_distance_km=free_radius,
+                    max_distance_km=max_radius,
+                    delivery_fee=paid_fee,
+                ),
+            ]
+        )
+        get_container().audit_service.log(
+            current_user,
+            "delivery_rule_changed",
+            "DeliveryZoneSetting",
+            setting.id,
+            before=before,
+            after={
+                "max_radius_km": float(setting.max_radius_km or 0),
+                "free_radius_km": float(setting.free_radius_km or 0),
+                "min_order_value": float(setting.min_order_value or 0),
+                "extra_fee": float(setting.extra_fee or 0),
+                "paid_band_fee": float(paid_fee or 0),
+            },
+            branch_id=branch_id,
+            change_summary="Delivery zone settings updated.",
+        )
+        db.session.commit()
+        flash("Delivery settings saved.", "success")
+        return redirect(url_for("admin.delivery_settings"))
+
+    branch_id = request.args.get("branch_id", type=int)
+    branches = scoped_branch_query(Branch.query).order_by(Branch.name.asc()).all()
+    if not branch_id and branches:
+        branch_id = branches[0].id
+    if branch_id:
+        scoped_branch_or_404(branch_id)
+    setting = service.ensure_default_rules(branch_id)
+    db.session.commit()
+    bands = (
+        DeliveryDistanceBand.query.filter_by(branch_id=branch_id)
+        .order_by(DeliveryDistanceBand.min_distance_km.asc())
+        .all()
+    )
+    pincode_rules = (
+        DeliveryPincodeRule.query.filter(
+            or_(DeliveryPincodeRule.branch_id == branch_id, DeliveryPincodeRule.branch_id.is_(None))
+        )
+        .order_by(DeliveryPincodeRule.pincode.asc())
+        .all()
+    )
+    return render_template(
+        "admin/delivery_settings.html",
+        branches=branches,
+        selected_branch_id=branch_id,
+        setting=setting,
+        bands=bands,
+        pincode_rules=pincode_rules,
+    )
+
+
+@admin_bp.route("/delivery-settings/pincode", methods=["POST"])
+@admin_required
+@manager_required
+def add_delivery_pincode_rule():
+    branch_id = request.form.get("branch_id", type=int)
+    if branch_id:
+        scoped_branch_or_404(branch_id)
+    pincode = re.sub(r"\D+", "", request.form.get("pincode") or "")
+    if len(pincode) != 6:
+        flash("Enter a valid 6-digit pincode.", "danger")
+        return redirect(url_for("admin.delivery_settings", branch_id=branch_id))
+    status = (request.form.get("status") or "supported").strip().lower()
+    if status not in {"supported", "partial", "blocked"}:
+        status = "supported"
+    rule = DeliveryPincodeRule.query.filter_by(
+        branch_id=branch_id,
+        pincode=pincode,
+    ).first()
+    before = None
+    if rule is None:
+        rule = DeliveryPincodeRule(branch_id=branch_id, pincode=pincode)
+        db.session.add(rule)
+    else:
+        before = {"status": rule.status, "delivery_fee_override": float(rule.delivery_fee_override or 0)}
+    rule.status = status
+    rule.delivery_fee_override = (
+        Decimal(str(request.form.get("delivery_fee_override")))
+        if (request.form.get("delivery_fee_override") or "").strip()
+        else None
+    )
+    rule.estimated_delivery_minutes = request.form.get("estimated_delivery_minutes", type=int)
+    rule.notes = (request.form.get("notes") or "").strip() or None
+    rule.is_active = True
+    db.session.flush()
+    get_container().audit_service.log(
+        current_user,
+        "delivery_pincode_rule_changed",
+        "DeliveryPincodeRule",
+        rule.id,
+        before=before,
+        after={"pincode": pincode, "status": status},
+        branch_id=branch_id,
+        change_summary=f"Delivery pincode rule saved for {pincode}.",
+    )
+    db.session.commit()
+    flash("Pincode rule saved.", "success")
+    return redirect(url_for("admin.delivery_settings", branch_id=branch_id))
+
+
 @admin_bp.route("/branches")
 @admin_required
 @manager_required
@@ -5314,6 +5507,217 @@ def analytics_revenue_api():
     return jsonify({"ok": True, **payload})
 
 
+@admin_bp.route("/security")
+@admin_required
+@owner_required
+def security_admin():
+    recent_events = SecurityEvent.query.order_by(SecurityEvent.created_at.desc()).limit(50).all()
+    webhook_failures = (
+        WebhookEventLog.query.filter(WebhookEventLog.signature_status != "valid")
+        .order_by(WebhookEventLog.received_at.desc())
+        .limit(25)
+        .all()
+    )
+    locked_users = (
+        User.query.filter(
+            User.is_active.is_(True),
+            or_(User.email_locked.is_(True), User.force_logout_before.isnot(None)),
+        )
+        .order_by(User.updated_at.desc() if hasattr(User, "updated_at") else User.created_at.desc())
+        .limit(25)
+        .all()
+    )
+    recent_logins = (
+        LoginHistory.query.order_by(LoginHistory.login_time.desc())
+        .limit(60)
+        .all()
+    )
+    return render_template(
+        "admin/security.html",
+        infrastructure=get_container().security_service.infrastructure_status(),
+        recent_events=recent_events,
+        webhook_failures=webhook_failures,
+        locked_users=locked_users,
+        recent_logins=recent_logins,
+    )
+
+
+@admin_bp.route("/notifications", methods=["GET", "POST"])
+@admin_required
+@manager_required
+def notifications_admin():
+    if request.method == "POST":
+        try:
+            template = get_container().notification_engine.upsert_template(
+                event_type=request.form.get("event_type"),
+                channel=request.form.get("channel"),
+                name=request.form.get("name"),
+                subject=request.form.get("subject"),
+                body=request.form.get("body"),
+                provider_template_id=request.form.get("provider_template_id"),
+                actor_id=current_user.id,
+            )
+            get_container().audit_service.log(
+                current_user,
+                "notification_template_changed",
+                "NotificationTemplate",
+                template.event_type,
+                after={
+                    "channel": template.channel,
+                    "version": template.version,
+                    "provider_template_id": template.provider_template_id,
+                },
+                change_summary=f"Notification template {template.event_type}/{template.channel} updated.",
+            )
+            db.session.commit()
+            flash("Notification template saved.", "success")
+        except ValidationError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+        return redirect(url_for("admin.notifications_admin"))
+
+    templates = (
+        NotificationTemplate.query.order_by(
+            NotificationTemplate.event_type.asc(),
+            NotificationTemplate.channel.asc(),
+            NotificationTemplate.version.desc(),
+        )
+        .limit(200)
+        .all()
+    )
+    logs = (
+        NotificationDeliveryLog.query.order_by(NotificationDeliveryLog.queued_at.desc())
+        .limit(100)
+        .all()
+    )
+    kitchen_alerts = (
+        KitchenAlert.query.order_by(KitchenAlert.created_at.desc()).limit(50).all()
+    )
+    return render_template(
+        "admin/notifications.html",
+        templates=templates,
+        logs=logs,
+        kitchen_alerts=kitchen_alerts,
+    )
+
+
+@admin_bp.route("/table-qr", methods=["GET", "POST"])
+@admin_required
+@manager_required
+def table_qr():
+    if request.method == "POST":
+        try:
+            branch_id = request.form.get("branch_id", type=int)
+            scoped_branch_or_404(branch_id)
+            area_name = (request.form.get("area_name") or "").strip()
+            area = None
+            if area_name:
+                area = get_container().table_qr_service.create_area(
+                    branch_id=branch_id,
+                    name=area_name,
+                )
+                db.session.flush()
+            table = get_container().table_qr_service.create_table(
+                branch_id=branch_id,
+                table_number=request.form.get("table_number"),
+                display_name=request.form.get("display_name"),
+                area_id=area.id if area else request.form.get("area_id", type=int),
+                seating_capacity=request.form.get("seating_capacity", type=int) or 2,
+                notes=request.form.get("notes"),
+            )
+            get_container().audit_service.log(
+                current_user,
+                "qr_table_created",
+                "DiningTable",
+                table.table_number,
+                after={
+                    "branch_id": branch_id,
+                    "display_name": table.display_name,
+                    "area_id": table.area_id,
+                },
+                change_summary=f"Table QR created for {table.display_name}.",
+            )
+            db.session.commit()
+            flash("Table QR code created.", "success")
+        except ValidationError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+        return redirect(url_for("admin.table_qr"))
+
+    table_query = scope_query_to_admin_branch(
+        DiningTable.query,
+        DiningTable.branch_id,
+        include_unassigned=False,
+    )
+    tables = table_query.order_by(DiningTable.branch_id.asc(), DiningTable.table_number.asc()).all()
+    for table in tables:
+        table.qr_data_uri = get_container().table_qr_service.build_qr_data_uri(table)
+        table.qr_url = get_container().table_qr_service.table_url(table)
+        table.scan_count = table.menu_scans.count()
+        table.order_count = Order.query.filter_by(dining_table_id=table.id).count()
+    branches = scoped_branch_query().order_by(Branch.name.asc()).all()
+    areas = scope_query_to_admin_branch(
+        DiningArea.query,
+        DiningArea.branch_id,
+        include_unassigned=False,
+    ).order_by(DiningArea.name.asc()).all()
+    return render_template(
+        "admin/table_qr.html",
+        tables=tables,
+        branches=branches,
+        areas=areas,
+    )
+
+
+@admin_bp.route("/table-qr/<int:table_id>/regenerate", methods=["POST"])
+@admin_required
+@manager_required
+def regenerate_table_qr(table_id):
+    table = db.get_or_404(DiningTable, table_id)
+    abort_if_no_branch_access(table.branch_id)
+    before = {"qr_token": "redacted", "last_regenerated_at": table.last_regenerated_at}
+    get_container().table_qr_service.regenerate_token(table)
+    get_container().audit_service.log(
+        current_user,
+        "qr_token_regenerated",
+        "DiningTable",
+        table.id,
+        before=before,
+        after={"qr_token": "redacted", "last_regenerated_at": table.last_regenerated_at},
+        change_summary=f"QR token regenerated for {table.display_name}.",
+    )
+    db.session.commit()
+    flash("QR token regenerated. Reprint the table code.", "success")
+    return redirect(url_for("admin.table_qr"))
+
+
+@admin_bp.route("/table-qr/<int:table_id>/status", methods=["POST"])
+@admin_required
+@manager_required
+def update_table_qr_status(table_id):
+    table = db.get_or_404(DiningTable, table_id)
+    abort_if_no_branch_access(table.branch_id)
+    status = (request.form.get("status") or "").strip().lower()
+    if status not in {"active", "inactive", "occupied", "available", "temporarily_unavailable"}:
+        flash("Unsupported table status.", "danger")
+        return redirect(url_for("admin.table_qr"))
+    before = {"status": table.status}
+    table.status = status
+    table.updated_at = utcnow()
+    get_container().audit_service.log(
+        current_user,
+        "qr_table_status_changed",
+        "DiningTable",
+        table.id,
+        before=before,
+        after={"status": status},
+        change_summary=f"Table {table.display_name} status changed to {status}.",
+    )
+    db.session.commit()
+    flash("Table status updated.", "success")
+    return redirect(url_for("admin.table_qr"))
+
+
 # ── CATEGORIES ───────────────────────────────────────────────
 @admin_bp.route("/categories")
 @admin_required
@@ -6028,6 +6432,144 @@ def clock_staff_attendance():
     return redirect(url_for("admin.staff"))
 
 
+POS_MVP_PAYMENT_METHOD_LABELS = {
+    "CASH": "Cash",
+    "UPI": "UPI",
+    "CREDIT_CARD": "Credit Card",
+    "DEBIT_CARD": "Debit Card",
+    "BANK_TRANSFER": "Bank Transfer",
+    "OTHER": "Other",
+}
+
+
+@admin_bp.route("/pos/terminal", methods=["GET", "POST"])
+@admin_required
+@operations_required
+def pos_terminal():
+    selected_order = None
+    order_number = (request.values.get("order_number") or "").strip()
+    if order_number:
+        selected_order = Order.query.filter_by(order_number=order_number).first()
+        if selected_order is not None:
+            abort_if_no_branch_access(selected_order.branch_id, include_unassigned=True)
+
+    if request.method == "POST":
+        idempotency_key = (request.form.get("idempotency_key") or "").strip()
+        terminal_branch_id = current_admin_branch_id()
+        if terminal_branch_id is None:
+            configured_branch_id = current_app.config.get("DEFAULT_BRANCH_ID")
+            terminal_branch_id = (
+                configured_branch_id
+                if configured_branch_id and db.session.get(Branch, configured_branch_id)
+                else None
+            )
+        try:
+            transaction, created = get_container().payment_service.record_pos_mvp_payment(
+                amount=request.form.get("amount"),
+                payment_method=request.form.get("payment_method"),
+                cashier_id=current_user.id,
+                branch_id=terminal_branch_id,
+                order_id=request.form.get("order_id", type=int),
+                order_number=request.form.get("order_number"),
+                cash_received=request.form.get("cash_received"),
+                transaction_reference=request.form.get("transaction_reference"),
+                upi_app=request.form.get("upi_app"),
+                card_last4=request.form.get("card_last4"),
+                card_type=request.form.get("card_type"),
+                bank_name=request.form.get("bank_name"),
+                payment_date=request.form.get("payment_date"),
+                other_note=request.form.get("other_note"),
+                notes=request.form.get("notes"),
+                idempotency_key=idempotency_key,
+                transaction_limit=current_app.config.get("POS_MVP_TRANSACTION_LIMIT", 100000),
+            )
+            get_container().audit_service.log(
+                current_user,
+                "pos_mvp_payment_completed",
+                "PosPaymentTransaction",
+                transaction.id,
+                after={
+                    "transaction_id": transaction.transaction_id,
+                    "order_id": transaction.order_id,
+                    "amount": str(transaction.amount),
+                    "payment_method": transaction.payment_method,
+                    "payment_status": transaction.payment_status,
+                    "created": created,
+                },
+                branch_id=transaction.branch_id,
+                request_id=f"pos-mvp-completed-{idempotency_key}",
+                change_summary=f"POS payment {transaction.transaction_id} completed.",
+            )
+            db.session.commit()
+            return redirect(url_for("admin.pos_terminal_success", transaction_id=transaction.id))
+        except ValidationError as exc:
+            db.session.rollback()
+            try:
+                get_container().audit_service.log(
+                    current_user,
+                    "pos_mvp_payment_failed",
+                    "PosPaymentTransaction",
+                    idempotency_key or "missing",
+                    after={
+                        "amount": request.form.get("amount"),
+                        "payment_method": request.form.get("payment_method"),
+                        "order_number": request.form.get("order_number"),
+                        "reason": str(exc),
+                    },
+                    branch_id=current_admin_branch_id(),
+                    request_id=f"pos-mvp-failed-{idempotency_key or secrets.token_urlsafe(8)}",
+                    change_summary="POS payment attempt failed validation.",
+                )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+            flash(str(exc), "danger")
+        except SQLAlchemyError:
+            db.session.rollback()
+            flash("Unable to record this payment right now.", "danger")
+
+    recent_transactions = (
+        PosPaymentTransaction.query.order_by(PosPaymentTransaction.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return render_template(
+        "admin/pos_terminal.html",
+        idempotency_key=secrets.token_urlsafe(32),
+        payment_methods=POS_MVP_PAYMENT_METHOD_LABELS,
+        selected_order=selected_order,
+        order_number=order_number,
+        transaction_limit=current_app.config.get("POS_MVP_TRANSACTION_LIMIT", 100000),
+        recent_transactions=recent_transactions,
+    )
+
+
+def _pos_transaction_or_404(transaction_id):
+    transaction = db.get_or_404(PosPaymentTransaction, transaction_id)
+    abort_if_no_branch_access(transaction.branch_id, include_unassigned=True)
+    return transaction
+
+
+@admin_bp.route("/pos/transactions/<int:transaction_id>")
+@admin_required
+@operations_required
+def pos_terminal_success(transaction_id):
+    return render_template(
+        "admin/pos_terminal_success.html",
+        transaction=_pos_transaction_or_404(transaction_id),
+    )
+
+
+@admin_bp.route("/pos/transactions/<int:transaction_id>/receipt")
+@admin_required
+@operations_required
+def pos_terminal_receipt(transaction_id):
+    return render_template(
+        "admin/pos_terminal_receipt.html",
+        transaction=_pos_transaction_or_404(transaction_id),
+    )
+
+
 @admin_bp.route("/walk-in-orders", methods=["GET", "POST"])
 @admin_bp.route("/pos", methods=["GET", "POST"])
 @admin_required
@@ -6510,6 +7052,185 @@ def subscriptions_admin():
         failed_logs=failed_logs,
         schedules=schedules,
     )
+
+
+@admin_bp.route("/corporate")
+@admin_required
+@manager_required
+def corporate_dashboard():
+    status = (request.args.get("status") or "").strip().lower()
+    query = CorporateInquiry.query
+    if status:
+        query = query.filter(CorporateInquiry.status == status)
+    inquiries = query.order_by(
+        CorporateInquiry.created_at.desc(),
+        CorporateInquiry.id.desc(),
+    ).all()
+    quotes = CorporateQuote.query.order_by(CorporateQuote.created_at.desc()).limit(25).all()
+    return render_template(
+        "admin/corporate.html",
+        inquiries=inquiries,
+        quotes=quotes,
+        selected_status=status,
+        statuses=[
+            "new",
+            "contacted",
+            "requirements_confirmed",
+            "quote_prepared",
+            "quote_sent",
+            "negotiation",
+            "approved",
+            "order_created",
+            "completed",
+            "rejected",
+            "cancelled",
+            "no_response",
+            "expired",
+        ],
+    )
+
+
+@admin_bp.route("/corporate/<int:inquiry_id>")
+@admin_required
+@manager_required
+def corporate_inquiry_detail(inquiry_id):
+    inquiry = db.get_or_404(CorporateInquiry, inquiry_id)
+    return render_template(
+        "admin/corporate_detail.html",
+        inquiry=inquiry,
+        quotes=inquiry.quotes.order_by(CorporateQuote.version.desc()).all(),
+        status_events=inquiry.status_history.order_by(
+            CorporateInquiryStatusHistory.created_at.desc()
+        ).all(),
+        statuses=[
+            "new",
+            "contacted",
+            "requirements_confirmed",
+            "quote_prepared",
+            "quote_sent",
+            "negotiation",
+            "approved",
+            "order_created",
+            "completed",
+            "rejected",
+            "cancelled",
+            "no_response",
+            "expired",
+        ],
+    )
+
+
+@admin_bp.route("/corporate/<int:inquiry_id>/status", methods=["POST"])
+@admin_required
+@manager_required
+def update_corporate_inquiry_status(inquiry_id):
+    inquiry = db.get_or_404(CorporateInquiry, inquiry_id)
+    old_status = inquiry.status
+    new_status = (request.form.get("status") or "").strip().lower()
+    allowed = {
+        "new",
+        "contacted",
+        "requirements_confirmed",
+        "quote_prepared",
+        "quote_sent",
+        "negotiation",
+        "approved",
+        "order_created",
+        "completed",
+        "rejected",
+        "cancelled",
+        "no_response",
+        "expired",
+    }
+    if new_status not in allowed:
+        flash("Choose a valid corporate inquiry status.", "danger")
+        return redirect(url_for("admin.corporate_inquiry_detail", inquiry_id=inquiry.id))
+    inquiry.status = new_status
+    inquiry.owner_id = request.form.get("owner_id", type=int) or inquiry.owner_id or current_user.id
+    inquiry.follow_up_date = None
+    follow_up_raw = (request.form.get("follow_up_date") or "").strip()
+    if follow_up_raw:
+        try:
+            inquiry.follow_up_date = datetime.strptime(follow_up_raw, "%Y-%m-%d").date()
+        except ValueError:
+            flash("Follow-up date was invalid and was ignored.", "warning")
+    inquiry.customer_visible_note = (request.form.get("customer_visible_note") or "").strip() or None
+    inquiry.internal_notes = (request.form.get("internal_note") or "").strip() or inquiry.internal_notes
+    db.session.add(
+        CorporateInquiryStatusHistory(
+            inquiry_id=inquiry.id,
+            previous_status=old_status,
+            new_status=new_status,
+            updated_by=current_user.id,
+            customer_visible_note=inquiry.customer_visible_note,
+            internal_note=(request.form.get("internal_note") or "").strip() or None,
+        )
+    )
+    get_container().audit_service.log(
+        current_user,
+        "corporate_inquiry_status_changed",
+        "CorporateInquiry",
+        inquiry.id,
+        before={"status": old_status},
+        after={"status": new_status},
+        change_summary=f"Corporate inquiry status changed to {new_status}.",
+    )
+    db.session.commit()
+    flash("Corporate inquiry updated.", "success")
+    return redirect(url_for("admin.corporate_inquiry_detail", inquiry_id=inquiry.id))
+
+
+@admin_bp.route("/corporate/<int:inquiry_id>/quotes", methods=["POST"])
+@admin_required
+@manager_required
+def create_corporate_quote(inquiry_id):
+    inquiry = db.get_or_404(CorporateInquiry, inquiry_id)
+    latest = inquiry.quotes.order_by(CorporateQuote.version.desc()).first()
+    subtotal = Decimal(str(request.form.get("subtotal") or 0))
+    customization = Decimal(str(request.form.get("customization_charges") or 0))
+    packaging = Decimal(str(request.form.get("packaging_charges") or 0))
+    delivery = Decimal(str(request.form.get("delivery_charges") or 0))
+    discount = Decimal(str(request.form.get("discount") or 0))
+    tax = Decimal(str(request.form.get("tax_amount") or 0))
+    total = (subtotal + customization + packaging + delivery - discount + tax).quantize(Decimal("0.01"))
+    quote = CorporateQuote(
+        inquiry_id=inquiry.id,
+        version=(latest.version + 1) if latest else 1,
+        status=(request.form.get("status") or "draft").strip().lower(),
+        line_items_json=request.form.get("line_items_json") or "[]",
+        subtotal=subtotal,
+        customization_charges=customization,
+        packaging_charges=packaging,
+        delivery_charges=delivery,
+        discount=discount,
+        tax_amount=tax,
+        total=total,
+        advance_required=Decimal(str(request.form.get("advance_required") or 0)),
+        payment_terms=(request.form.get("payment_terms") or "").strip() or None,
+        delivery_schedule=(request.form.get("delivery_schedule") or "").strip() or None,
+        terms=(request.form.get("terms") or "").strip() or None,
+        created_by=current_user.id,
+    )
+    validity_raw = (request.form.get("validity_date") or "").strip()
+    if validity_raw:
+        try:
+            quote.validity_date = datetime.strptime(validity_raw, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    inquiry.status = "quote_prepared"
+    db.session.add(quote)
+    db.session.flush()
+    get_container().audit_service.log(
+        current_user,
+        "corporate_quote_created",
+        "CorporateQuote",
+        quote.id,
+        after={"inquiry_id": inquiry.id, "total": float(total)},
+        change_summary=f"Corporate quote v{quote.version} prepared.",
+    )
+    db.session.commit()
+    flash("Corporate quote saved.", "success")
+    return redirect(url_for("admin.corporate_inquiry_detail", inquiry_id=inquiry.id))
 
 
 @admin_bp.route("/audit")

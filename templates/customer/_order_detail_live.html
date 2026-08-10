@@ -1,26 +1,4 @@
-{% set statuses = ['PLACED','PREPARING','PACKED','OUT_FOR_DELIVERY','DELIVERED'] %}
-{% set icons = ['📋','👩‍🍳','📦','🚚','✅'] %}
-{% if order.status != 'CANCELLED' %}
-<div class="card mb-4">
-  <div class="card-header">Order Tracking</div>
-  <div class="card-body">
-    <div class="order-tracker">
-      {% for s in statuses %}
-      {% set is_active = s == order.status %}
-      {% set is_done = statuses.index(s) < statuses.index(order.status) if order.status in statuses else false %}
-      <div class="tracker-step {% if is_active %}active{% elif is_done %}completed{% endif %}" data-tracker-status="{{ s }}">
-        <div class="tracker-icon">{{ icons[loop.index0] }}</div>
-        <div class="tracker-label">{{ s.replace('_',' ') }}</div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-</div>
-{% else %}
-<div style="padding:1rem 1.5rem;background:#FFF0F0;border:1px solid #FFCDD2;border-radius:var(--radius-lg);color:#B71C1C;margin-bottom:1.5rem">
-  ❌ This order has been <strong>CANCELLED</strong>.
-</div>
-{% endif %}
+{% include 'customer/_tracking_timeline.html' %}
 
 <div style="display:grid;grid-template-columns:1fr 360px;gap:2rem;align-items:start">
   <div style="display:flex;flex-direction:column;gap:1.5rem">

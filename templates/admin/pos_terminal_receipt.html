@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Receipt {{ transaction.transaction_id }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; color:#1f1a17; margin:0; padding:24px; }
+    .receipt { max-width:360px; margin:0 auto; }
+    h1, h2, p { margin:0; }
+    h1 { font-size:1.25rem; text-align:center; }
+    h2 { font-size:1rem; text-align:center; margin-top:4px; font-weight:500; }
+    .muted { color:#666; font-size:0.85rem; text-align:center; margin-top:4px; }
+    .line { border-top:1px dashed #aaa; margin:16px 0; }
+    .row { display:flex; justify-content:space-between; gap:16px; margin:8px 0; font-size:0.95rem; }
+    .row strong { text-align:right; }
+    .actions { display:flex; justify-content:center; gap:8px; margin-top:20px; }
+    button, a { border:1px solid #6b3f1a; color:#6b3f1a; background:white; padding:8px 12px; text-decoration:none; border-radius:6px; cursor:pointer; }
+    @media print { .actions { display:none; } body { padding:0; } }
+  </style>
+</head>
+<body>
+  <main class="receipt">
+    <h1>{{ bakery_name }}</h1>
+    <h2>{{ transaction.branch.name if transaction.branch else store_details.name }}</h2>
+    <p class="muted">{{ store_details.address_line1 }}, {{ store_details.city }}</p>
+    <div class="line"></div>
+    <div class="row"><span>Transaction ID</span><strong>{{ transaction.transaction_id }}</strong></div>
+    {% if transaction.order %}
+    <div class="row"><span>Order Number</span><strong>{{ transaction.order.order_number }}</strong></div>
+    {% endif %}
+    <div class="row"><span>Amount Paid</span><strong>₹{{ '%.2f'|format(transaction.amount or 0) }}</strong></div>
+    <div class="row"><span>Payment Method</span><strong>{{ transaction.payment_method|replace('_', ' ')|title }}</strong></div>
+    {% if transaction.cash_received is not none %}
+    <div class="row"><span>Cash Received</span><strong>₹{{ '%.2f'|format(transaction.cash_received or 0) }}</strong></div>
+    <div class="row"><span>Change Returned</span><strong>₹{{ '%.2f'|format(transaction.change_returned or 0) }}</strong></div>
+    {% endif %}
+    <div class="row"><span>Status</span><strong>{{ transaction.payment_status|title }}</strong></div>
+    <div class="row"><span>Date</span><strong>{{ transaction.created_at.strftime('%d %b %Y %I:%M %p') }}</strong></div>
+    <div class="row"><span>Cashier</span><strong>{{ transaction.cashier.name if transaction.cashier else transaction.cashier_id }}</strong></div>
+    <div class="line"></div>
+    <p class="muted">Thank you for visiting.</p>
+    <div class="actions">
+      <button onclick="window.print()">Print Receipt</button>
+      <a href="{{ url_for('admin.pos_terminal') }}">New Payment</a>
+    </div>
+  </main>
+  <script>window.addEventListener('load', () => setTimeout(() => window.print(), 250));</script>
+</body>
+</html>

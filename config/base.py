@@ -116,7 +116,15 @@ class BaseConfig:
     REDIS_CLIENT_OPTIONS = build_redis_client_options()
 
     SOCKETIO_ASYNC_MODE = os.environ.get("SOCKETIO_ASYNC_MODE", "threading")
-    SOCKETIO_CORS_ALLOWED_ORIGINS = os.environ.get("SOCKETIO_CORS_ALLOWED_ORIGINS", "*")
+    ALLOWED_CORS_ORIGINS = [
+        origin.strip()
+        for origin in os.environ.get("ALLOWED_CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    SOCKETIO_CORS_ALLOWED_ORIGINS = os.environ.get(
+        "SOCKETIO_CORS_ALLOWED_ORIGINS",
+        ",".join(ALLOWED_CORS_ORIGINS) if ALLOWED_CORS_ORIGINS else "",
+    )
 
     MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
     MAIL_PORT = int(os.environ.get("MAIL_PORT", 587))
@@ -148,6 +156,13 @@ class BaseConfig:
     SLOW_QUERY_THRESHOLD_MS = int(os.environ.get("SLOW_QUERY_THRESHOLD_MS", 250))
 
     GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    GA4_MEASUREMENT_ID = os.environ.get("GA4_MEASUREMENT_ID", "").strip()
+    CLARITY_PROJECT_ID = os.environ.get("CLARITY_PROJECT_ID", "").strip()
+    ANALYTICS_ENABLED = env_flag("ANALYTICS_ENABLED", default=False)
+    ANALYTICS_REQUIRE_CONSENT = env_flag("ANALYTICS_REQUIRE_CONSENT", default=True)
+    WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = int(
+        os.environ.get("WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS", "300")
+    )
     ROUTE_CACHE_TTL_SECONDS = int(os.environ.get("ROUTE_CACHE_TTL_SECONDS", 900))
     OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY", "")
     WEATHER_API_URL = os.environ.get(
@@ -216,12 +231,12 @@ class BaseConfig:
         "default-src 'self'; "
         "base-uri 'self'; "
         "frame-ancestors 'none'; "
-        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://www.gstatic.com; "
+        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://www.gstatic.com https://www.googletagmanager.com https://www.clarity.ms; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
         "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
         "img-src 'self' data: https:; "
         "frame-src 'self' https://www.google.com https://maps.google.com; "
-        "connect-src 'self' https: wss: ws:; "
+        "connect-src 'self' https://www.google-analytics.com https://analytics.google.com https://www.clarity.ms wss: ws:; "
         "object-src 'none'; "
         "upgrade-insecure-requests"
     )
@@ -256,6 +271,19 @@ class BaseConfig:
     PICKUP_BUFFER_MINUTES = int(os.environ.get("PICKUP_BUFFER_MINUTES", 20))
     DELIVERY_FREE_THRESHOLD = int(os.environ.get("DELIVERY_FREE_THRESHOLD", 500))
     DELIVERY_CHARGE = int(os.environ.get("DELIVERY_CHARGE", 50))
+    TABLE_QR_SESSION_TTL_MINUTES = int(
+        os.environ.get("TABLE_QR_SESSION_TTL_MINUTES", "180")
+    )
+    DINE_IN_PAYMENT_METHODS = [
+        method.strip().upper()
+        for method in os.environ.get(
+            "DINE_IN_PAYMENT_METHODS", "COD,UPI,CARD,COUNTER"
+        ).split(",")
+        if method.strip()
+    ]
+    POS_MVP_TRANSACTION_LIMIT = Decimal(
+        os.environ.get("POS_MVP_TRANSACTION_LIMIT", "100000")
+    )
     GST_RESTAURANT_SERVICE_NO_ITC = (
         os.environ.get("GST_RESTAURANT_SERVICE_NO_ITC", "true").strip().lower()
         not in {"0", "false", "no", "off"}

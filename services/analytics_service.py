@@ -5,7 +5,7 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy import desc, func
 
 from clock import utcnow
-from models import Order, OrderItem, Product, db
+from models import ConversionEvent, Order, OrderItem, Product, TableMenuScan, db
 
 
 REVENUE_ORDER_STATUSES = ("DELIVERED",)
@@ -241,6 +241,32 @@ def revenue_trend(period="month", granularity=None, start_date=None, end_date=No
 
 def analytics_payload(period="month", granularity=None, start_date=None, end_date=None):
     granularity = granularity or default_granularity(period)
+    start, end = period_bounds(period, start_date=start_date, end_date=end_date)
+    event_counts = dict(
+        db.session.query(ConversionEvent.event_name, func.count(ConversionEvent.id))
+        .filter(ConversionEvent.created_at >= start, ConversionEvent.created_at < end)
+        .group_by(ConversionEvent.event_name)
+        .all()
+    )
+    order_count = (
+        Order.query.filter(Order.placed_at >= start, Order.placed_at < end).count()
+    )
+    delivered_paid_orders = (
+        Order.query.filter(*_revenue_order_filters(start, end)).count()
+    )
+    qr_scan_count = (
+        TableMenuScan.query.filter(
+            TableMenuScan.created_at >= start,
+            TableMenuScan.created_at < end,
+        ).count()
+    )
+    dine_in_orders = (
+        Order.query.filter(
+            Order.placed_at >= start,
+            Order.placed_at < end,
+            Order.fulfillment_type == "DINE_IN",
+        ).count()
+    )
     return {
         "period": period,
         "period_label": PERIOD_LABELS.get(period, "Custom Range"),
@@ -262,4 +288,32 @@ def analytics_payload(period="month", granularity=None, start_date=None, end_dat
             start_date=start_date,
             end_date=end_date,
         ),
+        "conversion": {
+            "page_views": int(event_counts.get("page_view", 0)),
+            "product_views": int(
+                event_counts.get("view_item", 0)
+                + event_counts.get("product_view", 0)
+            ),
+            "add_to_cart": int(event_counts.get("add_to_cart", 0)),
+            "checkout_starts": int(event_counts.get("begin_checkout", 0)),
+            "purchases": int(event_counts.get("purchase", 0) or delivered_paid_orders),
+            "purchase_conversion_rate": round(
+                (delivered_paid_orders / max(int(event_counts.get("page_view", 0)), 1)) * 100,
+                2,
+            ),
+            "cart_abandonment": max(
+                int(event_counts.get("add_to_cart", 0))
+                - int(event_counts.get("begin_checkout", 0)),
+                0,
+            ),
+            "checkout_abandonment": max(
+                int(event_counts.get("begin_checkout", 0)) - delivered_paid_orders,
+                0,
+            ),
+            "orders_created": order_count,
+            "qr_menu_scans": qr_scan_count,
+            "dine_in_orders": dine_in_orders,
+            "corporate_leads": int(event_counts.get("corporate_inquiry_submitted", 0)),
+            "subscription_conversions": int(event_counts.get("subscription_started", 0)),
+        },
     }

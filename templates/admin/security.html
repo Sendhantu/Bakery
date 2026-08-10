@@ -1,0 +1,68 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Security — Admin{% endblock %}
+{% block content %}
+<div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
+  <div>
+    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">Security</h1>
+    <p class="text-muted text-sm">Infrastructure posture, verification failures, and recent access activity.</p>
+  </div>
+</div>
+
+<div class="stat-grid mb-4">
+  <div class="stat-card green"><div class="stat-value">{{ 'On' if infrastructure.force_https else 'Off' }}</div><div class="stat-label">HTTPS Enforcement</div></div>
+  <div class="stat-card orange"><div class="stat-value">{{ 'On' if infrastructure.secure_cookies else 'Off' }}</div><div class="stat-label">Secure Cookies</div></div>
+  <div class="stat-card green"><div class="stat-value">{{ 'On' if infrastructure.csrf_enabled else 'Off' }}</div><div class="stat-label">CSRF Protection</div></div>
+  <div class="stat-card orange"><div class="stat-value">{{ infrastructure.backup_recent }}</div><div class="stat-label">Verified Backups 24h</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1.5rem">
+  <div class="card">
+    <div class="card-header">Recent Security Events</div>
+    <div class="table-wrap">
+      <table><thead><tr><th>Event</th><th>Severity</th><th>Path</th><th>Time</th></tr></thead><tbody>
+        {% for event in recent_events %}
+        <tr><td>{{ event.event_type }}</td><td>{{ event.severity }}</td><td>{{ event.path or '-' }}</td><td>{{ event.created_at.strftime('%d %b %H:%M') }}</td></tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted">No security events recorded.</td></tr>
+        {% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Webhook Failures</div>
+    <div class="table-wrap">
+      <table><thead><tr><th>Provider</th><th>Event</th><th>Status</th><th>Received</th></tr></thead><tbody>
+        {% for event in webhook_failures %}
+        <tr><td>{{ event.provider }}</td><td>{{ event.event_id }}</td><td>{{ event.signature_status }}</td><td>{{ event.received_at.strftime('%d %b %H:%M') }}</td></tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted">No failed webhook verifications.</td></tr>
+        {% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Recent Login Attempts</div>
+    <div class="table-wrap">
+      <table><thead><tr><th>User</th><th>Status</th><th>IP</th><th>Time</th></tr></thead><tbody>
+        {% for login in recent_logins %}
+        <tr><td>{{ login.user.email if login.user else login.user_id }}</td><td>{{ login.status }}</td><td>{{ login.ip_address or '-' }}</td><td>{{ login.login_time.strftime('%d %b %H:%M') }}</td></tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted">No login activity recorded.</td></tr>
+        {% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Locked or Revoked Accounts</div>
+    <div class="table-wrap">
+      <table><thead><tr><th>User</th><th>Role</th><th>State</th></tr></thead><tbody>
+        {% for user in locked_users %}
+        <tr><td>{{ user.email }}</td><td>{{ user.role }}</td><td>{{ 'Email locked' if user.email_locked else 'Session revoked' }}</td></tr>
+        {% else %}
+        <tr><td colspan="3" class="text-center text-muted">No locked accounts.</td></tr>
+        {% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+</div>
+{% endblock %}

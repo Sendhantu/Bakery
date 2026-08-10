@@ -77,6 +77,12 @@
       {% if can_admin_manager %}
       <li><a href="{{ url_for('admin.analytics') }}" class="{{ 'active' if request.endpoint == 'admin.analytics' }}">
         <span class="icon">📈</span>Analytics</a></li>
+      <li><a href="{{ url_for('admin.notifications_admin') }}" class="{{ 'active' if 'notification' in request.endpoint }}">
+        <span class="icon">🔔</span>Notifications</a></li>
+      {% endif %}
+      {% if can_admin_owner %}
+      <li><a href="{{ url_for('admin.security_admin') }}" class="{{ 'active' if 'security' in request.endpoint }}">
+        <span class="icon">🔐</span>Security</a></li>
       {% endif %}
 
       {% if not is_order_screen_user %}
@@ -156,6 +162,8 @@
         <span class="icon">🚚</span>Agents</a></li>
       <li><a href="{{ url_for('admin.delivery_cash_ledger') }}" class="{{ 'active' if 'delivery_cash' in request.endpoint }}">
         <span class="icon">💵</span>Delivery Cash</a></li>
+      <li><a href="{{ url_for('admin.delivery_settings') }}" class="{{ 'active' if 'delivery_settings' in request.endpoint }}">
+        <span class="icon">📍</span>Delivery Settings</a></li>
       <li><a href="{{ url_for('admin.branches') }}" class="{{ 'active' if 'branches' in request.endpoint }}">
         <span class="icon">🏬</span>Branches</a></li>
       <li><a href="{{ url_for('admin.suppliers') }}" class="{{ 'active' if 'suppliers' in request.endpoint }}">
@@ -170,6 +178,8 @@
       <li><a href="{{ url_for('admin.kitchen_display') }}" class="{{ 'active' if 'kitchen_display' in request.endpoint }}">
         <span class="icon">🔥</span>KDS</a></li>
       {% endif %}
+      <li><a href="{{ url_for('admin.pos_terminal') }}" class="{{ 'active' if 'pos_terminal' in request.endpoint }}">
+        <span class="icon">₹</span>POS Terminal</a></li>
       <li><a href="{{ url_for('admin.pos') }}" class="{{ 'active' if request.endpoint == 'admin.pos' }}">
         <span class="icon">🧾</span>Walk-in Orders</a></li>
       {% if not is_order_screen_user %}
@@ -188,6 +198,10 @@
       {% if can_admin_manager %}
       <li><a href="{{ url_for('admin.subscriptions_admin') }}" class="{{ 'active' if 'subscription' in request.endpoint }}">
         <span class="icon">📆</span>Subscriptions</a></li>
+      <li><a href="{{ url_for('admin.corporate_dashboard') }}" class="{{ 'active' if 'corporate' in request.endpoint }}">
+        <span class="icon">🏢</span>Corporate</a></li>
+      <li><a href="{{ url_for('admin.table_qr') }}" class="{{ 'active' if 'table_qr' in request.endpoint }}">
+        <span class="icon">▦</span>Table QR Codes</a></li>
       <li><a href="{{ url_for('admin.pricing') }}" class="{{ 'active' if request.endpoint == 'admin.pricing' }}">
         <span class="icon">🏷️</span>Pricing</a></li>
       {% endif %}

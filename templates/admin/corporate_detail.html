@@ -1,0 +1,103 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Corporate Inquiry #{{ inquiry.id }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ inquiry.company_name }}</h1>
+    <p class="text-muted text-sm">{{ inquiry.contact_name }} · {{ inquiry.work_email }} · {{ inquiry.mobile }}</p>
+  </div>
+  <a href="{{ url_for('admin.corporate_dashboard') }}" class="btn btn-ghost btn-sm">Back</a>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 360px;gap:1.5rem;align-items:start">
+  <div style="display:flex;flex-direction:column;gap:1rem">
+    <div class="card">
+      <div class="card-header">Inquiry Details</div>
+      <div class="card-body">
+        <p><strong>Delivery:</strong> {{ inquiry.delivery_location }}</p>
+        <p><strong>Required:</strong> {{ inquiry.required_date }}{% if inquiry.preferred_delivery_time %} · {{ inquiry.preferred_delivery_time }}{% endif %}</p>
+        <p><strong>People / Quantity:</strong> {{ inquiry.people_count or '-' }} / {{ inquiry.estimated_quantity or '-' }}</p>
+        <p><strong>Budget:</strong> {{ inquiry.budget_range or '-' }}</p>
+        <p><strong>Products:</strong> {{ inquiry.products_required }}</p>
+        <p><strong>Branding:</strong> {{ 'Yes' if inquiry.custom_branding else 'No' }}</p>
+        <p><strong>Dietary:</strong> {{ inquiry.dietary_requirements or '-' }}</p>
+        <p><strong>GSTIN:</strong> {{ inquiry.gstin or 'Not provided' }}</p>
+        {% if inquiry.notes %}<p><strong>Notes:</strong> {{ inquiry.notes }}</p>{% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Quotes</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin.create_corporate_quote', inquiry_id=inquiry.id) }}" class="mb-4">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Subtotal</label><input class="form-control" type="number" step="0.01" name="subtotal" required></div>
+            <div class="form-group"><label class="form-label">Tax Amount</label><input class="form-control" type="number" step="0.01" name="tax_amount" value="0"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Customization</label><input class="form-control" type="number" step="0.01" name="customization_charges" value="0"></div>
+            <div class="form-group"><label class="form-label">Packaging</label><input class="form-control" type="number" step="0.01" name="packaging_charges" value="0"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Delivery</label><input class="form-control" type="number" step="0.01" name="delivery_charges" value="0"></div>
+            <div class="form-group"><label class="form-label">Discount</label><input class="form-control" type="number" step="0.01" name="discount" value="0"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Advance Required</label><input class="form-control" type="number" step="0.01" name="advance_required" value="0"></div>
+            <div class="form-group"><label class="form-label">Validity Date</label><input class="form-control" type="date" name="validity_date"></div>
+          </div>
+          <div class="form-group"><label class="form-label">Line Items JSON</label><textarea class="form-control" name="line_items_json" placeholder='[{"name":"Brownie box","qty":20,"unit_price":250}]'></textarea></div>
+          <div class="form-group"><label class="form-label">Payment Terms</label><textarea class="form-control" name="payment_terms"></textarea></div>
+          <div class="form-group"><label class="form-label">Delivery Schedule</label><textarea class="form-control" name="delivery_schedule"></textarea></div>
+          <div class="form-group"><label class="form-label">Terms</label><textarea class="form-control" name="terms"></textarea></div>
+          <button class="btn btn-primary" type="submit">Save Quote Revision</button>
+        </form>
+
+        {% for quote in quotes %}
+        <div style="padding:0.75rem;border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:0.75rem">
+          <strong>Quote v{{ quote.version }}</strong> · {{ quote.status|title }} · ₹{{ quote.total|int }}
+          <div class="text-sm text-muted">Subtotal ₹{{ quote.subtotal|int }} · Tax ₹{{ quote.tax_amount|int }} · Valid {{ quote.validity_date or '-' }}</div>
+        </div>
+        {% else %}
+        <p class="text-muted">No quote revisions yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:1rem">
+    <div class="card">
+      <div class="card-header">Status</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin.update_corporate_inquiry_status', inquiry_id=inquiry.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-control" name="status">
+              {% for status in statuses %}
+              <option value="{{ status }}" {% if inquiry.status == status %}selected{% endif %}>{{ status.replace('_',' ')|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Follow-up Date</label><input class="form-control" type="date" name="follow_up_date" value="{{ inquiry.follow_up_date.isoformat() if inquiry.follow_up_date else '' }}"></div>
+          <div class="form-group"><label class="form-label">Customer-visible Note</label><textarea class="form-control" name="customer_visible_note">{{ inquiry.customer_visible_note or '' }}</textarea></div>
+          <div class="form-group"><label class="form-label">Internal Note</label><textarea class="form-control" name="internal_note"></textarea></div>
+          <button class="btn btn-primary btn-block" type="submit">Update Status</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">History</div>
+      <div class="card-body">
+        {% for event in status_events %}
+        <p class="text-sm"><strong>{{ event.new_status.replace('_',' ')|title }}</strong><br><span class="text-muted">{{ event.created_at.strftime('%d %b %Y, %I:%M %p') }}</span></p>
+        {% else %}
+        <p class="text-muted">No status history yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

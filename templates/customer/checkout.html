@@ -4,7 +4,7 @@
 <div class="page-wrap">
 <div class="container">
   <h1 class="section-title mb-1">Checkout</h1>
-  <p class="text-muted mb-4">Almost there! Just fill in your delivery details.</p>
+  <p class="text-muted mb-4">Almost there! Confirm how this order should be fulfilled.</p>
 
   <form method="POST" action="{{ url_for('customer.checkout') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -18,7 +18,7 @@
         <div class="card-body">
           <div class="flex gap-2 flex-wrap" id="checkout-fulfillment-options">
             <label class="payment-option" data-payment-option style="max-width:none">
-              <input type="radio" name="fulfillment_type" value="DELIVERY" {% if fulfillment_type != 'PICKUP' %}checked{% endif %}>
+              <input type="radio" name="fulfillment_type" value="DELIVERY" {% if fulfillment_type == 'DELIVERY' %}checked{% endif %}>
               <span style="font-size:1.25rem">🚚</span>
               <span style="font-weight:500">Delivery</span>
             </label>
@@ -27,8 +27,20 @@
               <span style="font-size:1.25rem">🏪</span>
               <span style="font-weight:500">Pickup from Store</span>
             </label>
+            {% if dine_in_context %}
+            <label class="payment-option" data-payment-option style="max-width:none">
+              <input type="radio" name="fulfillment_type" value="DINE_IN" checked>
+              <span style="font-size:1.25rem">🍽</span>
+              <span style="font-weight:500">Dine-in</span>
+            </label>
+            {% endif %}
           </div>
+          {% if dine_in_context %}
+          <div class="badge badge-green mt-2">Ordering for {{ dine_in_context.table.display_name }}</div>
+          <p class="text-sm text-muted mt-1">Dine-in is available only for the validated QR table session. Delivery charges and radius checks are not applied.</p>
+          {% else %}
           <p class="text-sm text-muted mt-1">Delivery keeps the address form active. Pickup removes delivery charges and lets the customer choose a pickup slot or exact pickup time.</p>
+          {% endif %}
         </div>
       </div>
 
@@ -117,7 +129,11 @@
           <input type="hidden" id="checkout-longitude" name="longitude" value="{{ '' if selected_address_id else (checkout_address.longitude or '') }}"{% if selected_address_id %} disabled{% endif %}>
           <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-top:1rem">
             <button type="button" class="btn btn-outline btn-sm" id="checkout-use-location"{% if selected_address_id %} disabled{% endif %}>Use Exact Location</button>
+            <button type="button" class="btn btn-outline btn-sm" id="checkout-check-serviceability" data-check-serviceability data-subtotal="{{ subtotal }}">Check Delivery</button>
             <span class="text-sm text-muted" id="checkout-location-status">Share your live location to place the map pin exactly on your address.</span>
+          </div>
+          <div id="checkout-serviceability-status" class="text-sm text-muted mt-2" role="status" aria-live="polite">
+            Check your pincode or live location before placing a home-delivery order.
           </div>
           </div>
           {% set customer_map_query = address_query(checkout_address.address_line1, checkout_address.address_line2, checkout_address.city, checkout_address.pincode) %}
@@ -211,6 +227,28 @@
               </div>
             </div>
           </div>
+          {% if dine_in_context %}
+          <div id="dine-in-schedule-fields" class="{% if fulfillment_type != 'DINE_IN' %}hidden{% endif %}">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Table</label>
+                <input class="form-control" value="{{ dine_in_context.table.display_name }}" disabled>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Contact Phone</label>
+                <input class="form-control" name="dine_in_phone" value="{{ current_user.phone or '' }}" placeholder="+91 9999999999">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Payment Timing</label>
+              <select class="form-control" name="dine_in_payment_timing">
+                <option value="PAY_AT_COUNTER">Pay at counter</option>
+                <option value="PAY_AFTER_DINING">Pay after dining</option>
+                <option value="PAY_ONLINE">Pay online</option>
+              </select>
+            </div>
+          </div>
+          {% endif %}
           <div class="form-group">
             <label class="form-label">Occasion (optional)</label>
             <select class="form-control" name="occasion">
@@ -221,8 +259,79 @@
             </select>
           </div>
           <div class="form-group">
+            <label style="display:flex;align-items:center;gap:0.55rem;font-size:0.95rem;color:var(--text)">
+              <input type="checkbox" name="remind_next_year" id="remind-next-year" style="accent-color:var(--brown)">
+              Remind me next year for this occasion.
+            </label>
+            <div id="occasion-reminder-fields" class="hidden" style="margin-top:0.75rem">
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">Occasion Type</label>
+                  <select class="form-control" name="occasion_type">
+                    <option value="Birthday">Birthday</option>
+                    <option value="Anniversary">Anniversary</option>
+                    <option value="Celebration">Celebration</option>
+                    <option value="Custom occasion">Custom occasion</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Occasion Date</label>
+                  <input class="form-control" type="date" name="occasion_date">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label class="form-label">Recipient Name</label><input class="form-control" name="occasion_recipient_name"></div>
+                <div class="form-group"><label class="form-label">Relationship</label><input class="form-control" name="occasion_relationship"></div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Reminder Channel</label>
+                <select class="form-control" name="occasion_reminder_channel">
+                  <option value="email">Email</option>
+                  <option value="sms">SMS</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="in_app">Account notification</option>
+                </select>
+              </div>
+              <label style="display:flex;align-items:center;gap:0.55rem;font-size:0.9rem;color:var(--text-muted)">
+                <input type="checkbox" name="occasion_marketing_consent" style="accent-color:var(--brown)">
+                Send product recommendations or coupon offers for this reminder.
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
             <label class="form-label">Special Instructions</label>
             <textarea class="form-control" name="special_note" placeholder="Write message on cake, allergen info, etc."></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Corporate Billing</div>
+        <div class="card-body">
+          <label style="display:flex;align-items:center;gap:0.55rem;font-size:0.95rem;color:var(--text)">
+            <input type="checkbox" name="business_purchase" id="business-purchase" style="accent-color:var(--brown)">
+            This is a business or corporate purchase.
+          </label>
+          <div id="business-billing-fields" class="hidden" style="margin-top:0.9rem">
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Company Legal Name</label><input class="form-control" name="b2b_company_name"></div>
+              <div class="form-group"><label class="form-label">GSTIN</label><input class="form-control" name="b2b_gstin" maxlength="15" placeholder="22AAAAA0000A1Z5"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Billing Address</label><textarea class="form-control" name="b2b_billing_address"></textarea></div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">State</label><input class="form-control" name="b2b_state"></div>
+              <div class="form-group"><label class="form-label">Pincode</label><input class="form-control" name="b2b_pincode" maxlength="6"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Purchase Order Number</label><input class="form-control" name="b2b_po_number"></div>
+              <div class="form-group"><label class="form-label">Department or Cost Centre</label><input class="form-control" name="b2b_department"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Billing Email</label><input class="form-control" type="email" name="b2b_billing_email"></div>
+              <div class="form-group"><label class="form-label">Contact Person</label><input class="form-control" name="b2b_contact_person"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Invoice Notes</label><textarea class="form-control" name="b2b_invoice_notes"></textarea></div>
+            <p class="text-sm text-muted">Tax treatment and credit eligibility depend on applicable regulations and the customer’s circumstances.</p>
           </div>
         </div>
       </div>

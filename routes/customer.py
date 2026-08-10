@@ -26,6 +26,7 @@ from models import (
     Wishlist,
     Order,
     OrderItem,
+    OrderStatusHistory,
     Payment,
     Refund,
     User,
@@ -42,7 +43,12 @@ from models import (
     SubscriptionItem,
     SubscriptionOrderLog,
     LoyaltyLedger,
+    OccasionReminder,
+    CorporateInquiry,
+    CorporateInquiryStatusHistory,
     FraudAlert,
+    DiningTable,
+    TableMenuSession,
     RawMaterial,
     calculate_loyalty_redemption,
     get_loyalty_config,
@@ -73,6 +79,7 @@ from utils import (
     send_order_placed_email,
     send_order_sms,
     send_order_whatsapp,
+    is_valid_gstin,
     validate_address_payload,
 )
 from datetime import datetime, timedelta
@@ -99,7 +106,7 @@ def redirect_delivery_users_to_delivery_portal():
             )
         abort(404)
 
-    if request.endpoint == "customer.ai_recommend":
+    if request.endpoint in {"customer.ai_recommend", "customer.table_menu"}:
         return None
 
     if current_user.is_authenticated and has_role(current_user, "delivery"):
@@ -207,9 +214,15 @@ def ai_auth_required_payload(surface=None, *, expired=False):
 
 
 def build_order_detail_context(order):
+    status_history = order.status_history.order_by(
+        OrderStatusHistory.created_at.asc()
+    ).all() if hasattr(order, "status_history") else []
     return {
         "order": order,
         "items": order.items.all(),
+        "status_history": status_history,
+        "tracking_steps": order.tracking_flow,
+        "tracking_current_status": order.normalized_tracking_status,
         "can_cancel": order.can_cancel(),
         "can_modify": order.can_modify(),
         "can_change_addr": order.can_change_address(),
@@ -648,6 +661,26 @@ def build_cart_summary(user_id=None, added_item=None):
     return payload
 
 
+def current_table_menu_context():
+    table_payload = session.get("table_menu")
+    if not isinstance(table_payload, dict):
+        return None
+    session_token = table_payload.get("session_token")
+    if not session_token:
+        return None
+    try:
+        menu_session = get_container().table_qr_service.validate_session(session_token)
+    except ValidationError:
+        session.pop("table_menu", None)
+        session.modified = True
+        return None
+    return {
+        "session": menu_session,
+        "table": menu_session.table,
+        "branch": menu_session.branch,
+    }
+
+
 def create_order_payment_link(order):
     return PaymentLink.create_pending(
         user_id=order.user_id,
@@ -780,6 +813,64 @@ def products():
         occasion=occasion,
         sort=sort,
         page_url=page_url,
+    )
+
+
+@customer_bp.route("/menu/<token>")
+def table_menu(token):
+    try:
+        table = get_container().table_qr_service.validate_token(token)
+        menu_session = get_container().table_qr_service.open_session(
+            table,
+            user_id=current_user.id if current_user.is_authenticated else None,
+        )
+        session["table_menu"] = {
+            "table_id": table.id,
+            "branch_id": table.branch_id,
+            "session_token": menu_session.session_token,
+        }
+        get_container().table_qr_service.record_scan(
+            table,
+            menu_session,
+            ip_address=request.headers.get("X-Forwarded-For", request.remote_addr),
+            user_agent=request.headers.get("User-Agent", ""),
+        )
+        get_container().conversion_service.record_event(
+            "qr_menu_opened",
+            user_id=current_user.id if current_user.is_authenticated else None,
+            consent_required=False,
+            event_id=f"qr-open-{menu_session.session_token}",
+            table_id=table.id,
+            branch_id=table.branch_id,
+            metadata={
+                "table_label": table.display_name,
+                "dining_area": table.area.name if table.area else "",
+                "branch_id": table.branch_id,
+            },
+        )
+        db.session.commit()
+    except ValidationError as exc:
+        db.session.rollback()
+        categories = Category.query.all()
+        return render_template(
+            "customer/table_menu_invalid.html",
+            message=str(exc),
+            categories=categories,
+        ), 404
+
+    products = (
+        Product.query.filter_by(is_active=True)
+        .order_by(Product.category_id.asc(), Product.name.asc())
+        .all()
+    )
+    enrich_products(products)
+    categories = Category.query.order_by(Category.name.asc()).all()
+    return render_template(
+        "customer/table_menu.html",
+        table=table,
+        table_session=menu_session,
+        products=products,
+        categories=categories,
     )
 
 
@@ -1205,8 +1296,12 @@ def checkout():
         (addr for addr in saved_addresses if addr.is_default),
         saved_addresses[0] if saved_addresses else None,
     )
+    dine_in_context = current_table_menu_context()
     selected_address_id = default_saved_address.id if default_saved_address else None
-    fulfillment_type = "DELIVERY"
+    fulfillment_type = "DINE_IN" if dine_in_context else "DELIVERY"
+    if dine_in_context:
+        delivery_charge = Decimal("0")
+        total = subtotal - discount + gst_amount
     checkout_address = (
         extract_address_payload(
             {},
@@ -1230,11 +1325,16 @@ def checkout():
         fulfillment_type = (
             (request.form.get("fulfillment_type") or "DELIVERY").strip().upper()
         )
-        if fulfillment_type not in {"DELIVERY", "PICKUP"}:
+        if fulfillment_type not in {"DELIVERY", "PICKUP", "DINE_IN"}:
             flash(
-                "Please choose whether this order is for delivery or pickup.", "danger"
+                "Please choose whether this order is for delivery, pickup, or dine-in.", "danger"
             )
             return redirect(url_for("customer.checkout"))
+        if fulfillment_type == "DINE_IN":
+            dine_in_context = current_table_menu_context()
+            if not dine_in_context:
+                flash("Please scan the table QR code again before dine-in checkout.", "danger")
+                return redirect(url_for("customer.cart"))
 
         coupon_code = request.form.get("coupon_code", "").strip().upper()
         coupon_discount = Decimal("0")
@@ -1266,6 +1366,12 @@ def checkout():
         ).strip()
         delivery_target_date = None
         applied_delivery_charge = delivery_charge
+        default_branch_id = (
+            dine_in_context["branch"].id
+            if fulfillment_type == "DINE_IN" and dine_in_context
+            else current_app.config.get("DEFAULT_BRANCH_ID")
+        )
+        serviceability_result = None
 
         if fulfillment_type == "DELIVERY":
             delivery_date_raw = request.form.get("delivery_date", "").strip()
@@ -1291,6 +1397,23 @@ def checkout():
                 flash(address_errors[0], "danger")
                 return redirect(url_for("customer.checkout"))
 
+            try:
+                serviceability_result = (
+                    get_container().delivery_zone_service.validate_delivery(
+                        branch_id=default_branch_id,
+                        pincode=checkout_address.get("pincode"),
+                        latitude=checkout_address.get("latitude"),
+                        longitude=checkout_address.get("longitude"),
+                        order_subtotal=subtotal,
+                    )
+                )
+            except ValidationError as exc:
+                flash(str(exc), "danger")
+                return redirect(url_for("customer.checkout"))
+            applied_delivery_charge = Decimal(
+                str(serviceability_result.delivery_fee or 0)
+            ).quantize(Decimal("0.01"))
+
             order_contact_phone = (
                 checkout_address.get("phone") or current_user.phone or ""
             ).strip()
@@ -1298,7 +1421,7 @@ def checkout():
                 delivery_target_date,
                 selected_slot=selected_time_slot,
             )
-        else:
+        elif fulfillment_type == "PICKUP":
             pickup_date_raw = request.form.get("pickup_date", "").strip()
             custom_pickup_time = request.form.get("custom_pickup_time", "").strip()
             pickup_phone = (
@@ -1331,6 +1454,15 @@ def checkout():
                 return redirect(url_for("customer.checkout"))
 
             order_contact_phone = pickup_phone
+            applied_delivery_charge = Decimal("0")
+        else:
+            table = dine_in_context["table"]
+            delivery_target_date = utcnow().date()
+            selected_time_slot = "Dine-in"
+            scheduled_for = utcnow()
+            order_contact_phone = (
+                request.form.get("dine_in_phone") or current_user.phone or ""
+            ).strip()
             applied_delivery_charge = Decimal("0")
 
         try:
@@ -1404,6 +1536,12 @@ def checkout():
                 "warning",
             )
             return redirect(url_for("customer.checkout"))
+
+        business_purchase = bool(request.form.get("business_purchase"))
+        b2b_gstin = (request.form.get("b2b_gstin") or "").strip().upper()
+        if business_purchase and b2b_gstin and not is_valid_gstin(b2b_gstin):
+            flash("Please enter a valid GSTIN for corporate billing.", "danger")
+            return redirect(url_for("customer.checkout"))
         if loyalty_points_requested and loyalty_points_applied <= 0:
             flash("Those loyalty points cannot be applied to this order.", "warning")
             return redirect(url_for("customer.checkout"))
@@ -1427,7 +1565,6 @@ def checkout():
         gift_card_redemption_amount = Decimal("0")
         final_total = payable_before_gift_card
 
-        default_branch_id = current_app.config.get("DEFAULT_BRANCH_ID")
         stock_update_variant_ids = []
         stock_update_material_ids = []
 
@@ -1461,7 +1598,7 @@ def checkout():
                     for item in cart_items
                 ]
                 store_details = current_app.config["STORE_DETAILS"]
-                if fulfillment_type == "PICKUP":
+                if fulfillment_type in {"PICKUP", "DINE_IN"}:
                     address_line1 = store_details.get("address_line1", "")
                     address_line2 = store_details.get("address_line2", "")
                     city = store_details.get("city", "")
@@ -1536,10 +1673,47 @@ def checkout():
                     phone=order_contact_phone,
                     delivery_latitude=delivery_latitude,
                     delivery_longitude=delivery_longitude,
+                    serviceability_result=serviceability_result,
                     delivery_slot=selected_time_slot,
                     delivery_date=delivery_target_date,
                     special_note=request.form.get("special_note"),
                     occasion=request.form.get("occasion"),
+                    b2b_company_name=(
+                        request.form.get("b2b_company_name") if business_purchase else None
+                    ),
+                    b2b_gstin=b2b_gstin if business_purchase else None,
+                    b2b_billing_address=(
+                        request.form.get("b2b_billing_address")
+                        if business_purchase
+                        else None
+                    ),
+                    b2b_state=(
+                        request.form.get("b2b_state") if business_purchase else None
+                    ),
+                    b2b_pincode=(
+                        request.form.get("b2b_pincode") if business_purchase else None
+                    ),
+                    b2b_po_number=(
+                        request.form.get("b2b_po_number") if business_purchase else None
+                    ),
+                    b2b_department=(
+                        request.form.get("b2b_department") if business_purchase else None
+                    ),
+                    b2b_billing_email=(
+                        request.form.get("b2b_billing_email")
+                        if business_purchase
+                        else None
+                    ),
+                    b2b_contact_person=(
+                        request.form.get("b2b_contact_person")
+                        if business_purchase
+                        else None
+                    ),
+                    b2b_invoice_notes=(
+                        request.form.get("b2b_invoice_notes")
+                        if business_purchase
+                        else None
+                    ),
                     payment_method=payment_method,
                     payment_status=payment_status,
                     status="PLACED",
@@ -1549,6 +1723,12 @@ def checkout():
                     payment_reason="online_checkout",
                 )
                 order = creation.order
+                if fulfillment_type == "DINE_IN" and dine_in_context:
+                    order.dining_table_id = dine_in_context["table"].id
+                    order.table_session_id = dine_in_context["session"].id
+                    order.dine_in_payment_timing = (
+                        request.form.get("dine_in_payment_timing") or "PAY_AT_COUNTER"
+                    ).strip().upper()[:40]
                 stock_update_variant_ids = creation.stock_update_variant_ids
                 stock_update_material_ids = creation.stock_update_material_ids
 
@@ -1621,6 +1801,54 @@ def checkout():
                         make_default=bool(request.form.get("make_default")),
                     )
 
+                if request.form.get("remind_next_year"):
+                    occasion_date_raw = (
+                        request.form.get("occasion_date") or ""
+                    ).strip()
+                    try:
+                        occasion_date = (
+                            datetime.strptime(occasion_date_raw, "%Y-%m-%d").date()
+                            if occasion_date_raw
+                            else delivery_target_date
+                        )
+                    except ValueError:
+                        raise ValidationError("Please choose a valid occasion date.")
+                    occasion_type = (
+                        request.form.get("occasion_type")
+                        or request.form.get("occasion")
+                        or "Custom occasion"
+                    ).strip()
+                    if not occasion_date:
+                        raise ValidationError(
+                            "Please provide the occasion date for the reminder."
+                        )
+                    db.session.add(
+                        OccasionReminder(
+                            user_id=current_user.id,
+                            order_id=order.id,
+                            occasion_type=occasion_type,
+                            occasion_date=occasion_date,
+                            recipient_name=(
+                                request.form.get("occasion_recipient_name") or ""
+                            ).strip()
+                            or None,
+                            relationship=(
+                                request.form.get("occasion_relationship") or ""
+                            ).strip()
+                            or None,
+                            preferred_channel=(
+                                request.form.get("occasion_reminder_channel")
+                                or "email"
+                            ).strip(),
+                            marketing_consent=bool(
+                                request.form.get("occasion_marketing_consent")
+                            ),
+                            recommendations_enabled=bool(
+                                request.form.get("occasion_marketing_consent")
+                            ),
+                        )
+                    )
+
                 Cart.query.filter_by(user_id=current_user.id).delete()
         except ValidationError as exc:
             db.session.rollback()
@@ -1646,6 +1874,17 @@ def checkout():
             if material:
                 emit_stock_updated(material)
 
+        try:
+            get_container().notification_engine.notify_order_event(order, "order_placed")
+            get_container().notification_engine.create_kitchen_alert(order)
+            get_container().conversion_service.record_purchase_once(order)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Failed to record notification/conversion side effects for %s",
+                order.id,
+            )
         try:
             from tasks.operations import generate_invoice_pdf
 
@@ -1705,6 +1944,7 @@ def checkout():
         earliest_pickup_date=utcnow().date().isoformat(),
         earliest_delivery_date=utcnow().date().isoformat(),
         checkout_addons=checkout_addons,
+        dine_in_context=dine_in_context,
     )
 
 
@@ -1747,6 +1987,13 @@ def order_detail(order_id):
             }
         )
     return render_template("customer/order_detail.html", **context)
+
+
+@customer_bp.route("/track/<token>")
+def track_order(token):
+    order = Order.query.filter_by(tracking_token=token).first_or_404()
+    context = build_order_detail_context(order)
+    return render_template("customer/order_tracking.html", **context)
 
 
 @customer_bp.route("/payments/<token>")
@@ -1888,10 +2135,38 @@ def change_address(order_id):
     old_addr = (
         f"{order.address_line1}, {order.address_line2}, {order.city} - {order.pincode}"
     )
-    order.address_line1 = request.form.get("address_line1", order.address_line1)
-    order.address_line2 = request.form.get("address_line2", order.address_line2)
-    order.city = request.form.get("city", order.city)
-    order.pincode = request.form.get("pincode", order.pincode)
+    new_payload = {
+        "address_line1": request.form.get("address_line1", order.address_line1),
+        "address_line2": request.form.get("address_line2", order.address_line2),
+        "city": request.form.get("city", order.city),
+        "pincode": request.form.get("pincode", order.pincode),
+        "phone": order.phone or current_user.phone or "",
+    }
+    address_errors = validate_address_payload(new_payload)
+    if address_errors:
+        flash(address_errors[0], "danger")
+        return redirect(url_for("customer.order_detail", order_id=order_id))
+    serviceability_result = get_container().delivery_zone_service.validate_delivery(
+        branch_id=order.branch_id,
+        pincode=new_payload["pincode"],
+        latitude=None,
+        longitude=None,
+        order_subtotal=order.subtotal,
+    )
+    order.address_line1 = new_payload["address_line1"]
+    order.address_line2 = new_payload["address_line2"]
+    order.city = new_payload["city"]
+    order.pincode = new_payload["pincode"]
+    old_delivery_charge = Decimal(str(order.delivery_charge or 0))
+    new_delivery_charge = Decimal(str(serviceability_result.delivery_fee or 0))
+    order.delivery_charge = new_delivery_charge
+    order.total = (
+        Decimal(str(order.total or 0)) - old_delivery_charge + new_delivery_charge
+    ).quantize(Decimal("0.01"))
+    order.serviceability_status = serviceability_result.status
+    order.serviceability_message = serviceability_result.message
+    order.serviceability_distance_km = serviceability_result.distance_km
+    order.serviceability_rule_source = serviceability_result.rule_source
     order.address_changes += 1
 
     new_addr = (
@@ -2162,6 +2437,157 @@ def notifications():
 # ────────────────────────────────────────
 # SUBSCRIPTIONS
 # ────────────────────────────────────────
+
+
+@customer_bp.route("/occasion-reminders", methods=["GET", "POST"])
+@login_required
+def occasion_reminders():
+    if request.method == "POST":
+        reminder_id = request.form.get("reminder_id", type=int)
+        reminder = OccasionReminder.query.filter_by(
+            id=reminder_id,
+            user_id=current_user.id,
+        ).first_or_404()
+        action = (request.form.get("action") or "update").strip().lower()
+        if action == "delete":
+            db.session.delete(reminder)
+            flash("Occasion reminder deleted.", "success")
+        elif action == "disable":
+            reminder.is_active = False
+            reminder.marketing_consent = False
+            reminder.recommendations_enabled = False
+            flash("Occasion reminder disabled.", "success")
+        else:
+            try:
+                reminder.occasion_date = datetime.strptime(
+                    request.form.get("occasion_date", ""),
+                    "%Y-%m-%d",
+                ).date()
+            except ValueError:
+                flash("Please choose a valid occasion date.", "danger")
+                return redirect(url_for("customer.occasion_reminders"))
+            reminder.occasion_type = (
+                request.form.get("occasion_type") or reminder.occasion_type
+            ).strip()
+            reminder.recipient_name = (
+                request.form.get("recipient_name") or ""
+            ).strip() or None
+            reminder.relationship = (
+                request.form.get("relationship") or ""
+            ).strip() or None
+            reminder.preferred_channel = (
+                request.form.get("preferred_channel") or "email"
+            ).strip()
+            reminder.marketing_consent = bool(
+                request.form.get("marketing_consent")
+            )
+            reminder.recommendations_enabled = reminder.marketing_consent
+            reminder.is_active = bool(request.form.get("is_active"))
+            flash("Occasion reminder updated.", "success")
+        db.session.commit()
+        return redirect(url_for("customer.occasion_reminders"))
+
+    reminders = (
+        OccasionReminder.query.filter_by(user_id=current_user.id)
+        .order_by(OccasionReminder.occasion_date.asc())
+        .all()
+    )
+    return render_template(
+        "customer/occasion_reminders.html",
+        reminders=reminders,
+    )
+
+
+@customer_bp.route("/corporate-orders", methods=["GET", "POST"])
+def corporate_orders():
+    product_examples = (
+        Product.query.filter_by(is_active=True)
+        .order_by(Product.is_featured.desc(), Product.name.asc())
+        .limit(8)
+        .all()
+    )
+    if request.method == "POST":
+        if (request.form.get("website") or "").strip():
+            abort(400)
+        gstin = (request.form.get("gstin") or "").strip().upper()
+        if gstin and not is_valid_gstin(gstin):
+            flash("Please enter a valid GSTIN or leave it blank for now.", "danger")
+            return redirect(url_for("customer.corporate_orders"))
+        try:
+            required_date = datetime.strptime(
+                request.form.get("required_date", ""),
+                "%Y-%m-%d",
+            ).date()
+        except ValueError:
+            flash("Please choose a valid required date.", "danger")
+            return redirect(url_for("customer.corporate_orders"))
+        if required_date < utcnow().date():
+            flash("Required date cannot be in the past.", "danger")
+            return redirect(url_for("customer.corporate_orders"))
+
+        required_fields = [
+            "contact_name",
+            "company_name",
+            "work_email",
+            "mobile",
+            "delivery_location",
+            "products_required",
+        ]
+        missing = [field for field in required_fields if not request.form.get(field)]
+        if missing:
+            flash("Please complete all required corporate inquiry fields.", "danger")
+            return redirect(url_for("customer.corporate_orders"))
+
+        inquiry = CorporateInquiry(
+            status="new",
+            contact_name=(request.form.get("contact_name") or "").strip(),
+            company_name=(request.form.get("company_name") or "").strip(),
+            work_email=(request.form.get("work_email") or "").strip(),
+            mobile=(request.form.get("mobile") or "").strip(),
+            gstin=gstin or None,
+            billing_address=(request.form.get("billing_address") or "").strip()
+            or None,
+            delivery_location=(request.form.get("delivery_location") or "").strip(),
+            required_date=required_date,
+            preferred_delivery_time=(
+                request.form.get("preferred_delivery_time") or ""
+            ).strip()
+            or None,
+            people_count=request.form.get("people_count", type=int),
+            estimated_quantity=request.form.get("estimated_quantity", type=int),
+            budget_range=(request.form.get("budget_range") or "").strip() or None,
+            products_required=(request.form.get("products_required") or "").strip(),
+            custom_branding=bool(request.form.get("custom_branding")),
+            dietary_requirements=(
+                request.form.get("dietary_requirements") or ""
+            ).strip()
+            or None,
+            notes=(request.form.get("notes") or "").strip() or None,
+        )
+        db.session.add(inquiry)
+        db.session.flush()
+        db.session.add(
+            CorporateInquiryStatusHistory(
+                inquiry_id=inquiry.id,
+                previous_status=None,
+                new_status="new",
+                customer_visible_note="Corporate inquiry received.",
+            )
+        )
+        db.session.commit()
+        flash(
+            "Corporate inquiry received. Our team will follow up with requirements and quote options.",
+            "success",
+        )
+        return redirect(url_for("customer.corporate_orders"))
+
+    return render_template(
+        "customer/corporate_orders.html",
+        product_examples=product_examples,
+        earliest_required_date=(utcnow().date() + timedelta(days=1)).isoformat(),
+    )
+
+
 @customer_bp.route("/subscription")
 @login_required
 def subscription():
@@ -2222,11 +2648,13 @@ def recurring_subscriptions():
         .order_by(Product.name.asc(), ProductVariant.name.asc())
         .all()
     )
+    saved_addresses = get_saved_addresses_for_user(current_user.id)
     return render_template(
         "customer/subscriptions.html",
         subscriptions=subscriptions,
         logs=logs,
         variants=variants,
+        saved_addresses=saved_addresses,
     )
 
 
@@ -2256,6 +2684,25 @@ def create_recurring_subscription():
     if variant is None or variant.product is None:
         flash("Choose a valid product for the recurring order.", "danger")
         return redirect(url_for("customer.recurring_subscriptions"))
+    fulfillment_type = (
+        request.form.get("fulfillment_type") or "DELIVERY"
+    ).strip().upper()
+    if fulfillment_type not in {"DELIVERY", "PICKUP"}:
+        fulfillment_type = "DELIVERY"
+    saved_address_id = request.form.get("saved_address_id", type=int)
+    saved_address = get_selected_saved_address(current_user.id, saved_address_id)
+    if fulfillment_type == "DELIVERY" and saved_address is not None:
+        try:
+            get_container().delivery_zone_service.validate_delivery(
+                branch_id=current_app.config.get("DEFAULT_BRANCH_ID"),
+                pincode=saved_address.pincode,
+                latitude=saved_address.latitude,
+                longitude=saved_address.longitude,
+                order_subtotal=Decimal(str(variant.price or variant.product.base_price or 0)) * quantity,
+            )
+        except ValidationError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("customer.recurring_subscriptions"))
 
     subscription = RecurringSubscription(
         user_id=current_user.id,
@@ -2265,6 +2712,8 @@ def create_recurring_subscription():
         days_of_week=days_of_week if frequency == "custom" else None,
         next_scheduled_date=next_date,
         payment_method_reference="manual_payment_link",
+        fulfillment_type=fulfillment_type,
+        saved_address_id=saved_address.id if saved_address else None,
         delivery_window=(request.form.get("delivery_window") or "").strip()
         or "Subscription delivery",
         notes=(request.form.get("notes") or "").strip() or None,
@@ -2312,6 +2761,26 @@ def update_recurring_subscription(subscription_id):
     )
     if frequency in {"daily", "weekly", "monthly", "custom"}:
         subscription.frequency = frequency
+    fulfillment_type = (
+        request.form.get("fulfillment_type") or subscription.fulfillment_type
+    ).strip().upper()
+    if fulfillment_type in {"DELIVERY", "PICKUP"}:
+        subscription.fulfillment_type = fulfillment_type
+    saved_address_id = request.form.get("saved_address_id", type=int)
+    saved_address = get_selected_saved_address(current_user.id, saved_address_id)
+    if subscription.fulfillment_type == "DELIVERY" and saved_address is not None:
+        try:
+            get_container().delivery_zone_service.validate_delivery(
+                branch_id=subscription.branch_id,
+                pincode=saved_address.pincode,
+                latitude=saved_address.latitude,
+                longitude=saved_address.longitude,
+                order_subtotal=Decimal(str(variant.price or variant.product.base_price or 0)) * quantity,
+            )
+        except ValidationError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("customer.recurring_subscriptions"))
+    subscription.saved_address_id = saved_address.id if saved_address else None
     subscription.days_of_week = (
         ",".join(
             sorted(

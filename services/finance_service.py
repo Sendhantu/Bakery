@@ -18,6 +18,7 @@ from models import (
     GST_LIABILITY_BAKERY,
     GST_LIABILITY_ECOMMERCE_OPERATOR,
     GST_ORDER_SOURCE_COUNTER_TAKEAWAY,
+    GST_ORDER_SOURCE_COUNTER_DINE_IN,
     GST_ORDER_SOURCE_DIRECT_WEB_DELIVERY,
     GST_ORDER_SOURCE_DIRECT_WEB_PICKUP,
     GST_ORDER_SOURCE_ECOMMERCE_SWIGGY,
@@ -202,6 +203,8 @@ class FinanceService:
             return GST_ORDER_SOURCE_ECOMMERCE_SWIGGY
         if source_upper in {"ZOMATO", "ECOMMERCE_ZOMATO"}:
             return GST_ORDER_SOURCE_ECOMMERCE_ZOMATO
+        if (fulfillment_type or "").strip().upper() == "DINE_IN":
+            return GST_ORDER_SOURCE_COUNTER_DINE_IN
         if (channel or "").strip().lower() == "counter":
             return GST_ORDER_SOURCE_COUNTER_TAKEAWAY
         if (fulfillment_type or "").strip().upper() == "PICKUP":
