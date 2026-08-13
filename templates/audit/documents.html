@@ -1,0 +1,17 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Audit Documents - {{ bakery_name }}{% endblock %}
+{% block page_title %}Documents{% endblock %}
+{% block content %}
+{% if documents %}
+<table class="audit-table">
+  <thead><tr><th>Title</th><th>Category</th><th>Financial Year</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for document in documents %}
+    <tr><td>{{ document.title }}</td><td>{{ document.category }}</td><td>{{ document.financial_year }}</td><td>{{ document.status }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="audit-empty">No published audit documents are available yet.</div>
+{% endif %}
+{% endblock %}

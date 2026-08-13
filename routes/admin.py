@@ -89,6 +89,8 @@ from models import (
     ProductionBatch,
     MaterialBatch,
     MaterialDocument,
+    BranchPurchaseRequest,
+    StockTransfer,
     BATCH_STATUS_LABELS,
     MATERIAL_DOCUMENT_TYPES,
     MATERIAL_DOCUMENT_TYPE_LABELS,
@@ -116,6 +118,8 @@ from models import (
     TableMenuSession,
     LoyaltyLedger,
     AuditLog,
+    AuditDocument,
+    AuditReportDownload,
     ApiUsageLog,
     AttendanceRecord,
     FraudAlert,
@@ -204,7 +208,12 @@ def ensure_admin_portal():
             from routes.auth import portal_url_for_role
 
             return redirect(portal_url_for_role("admin", url_for("admin.dashboard")))
+        if current_user.is_authenticated:
+            abort(403)
         abort(404)
+
+    if current_user.is_authenticated and not has_role(current_user, *ADMIN_PORTAL_ROLES):
+        abort(403)
 
     if current_user.is_authenticated and is_order_screen_user(current_user):
         if request.endpoint == "admin.dashboard":
@@ -445,12 +454,14 @@ SUPPORT_STAFF_ROLE_PRIORITY = {
     "admin": 0,
     "super_admin": 0,
     "branch_manager": 1,
-    "cashier": 2,
-    "kitchen_staff": 3,
+    "branch_staff": 2,
+    "cashier": 3,
+    "kitchen_staff": 4,
 }
 
 BRANCH_EMPLOYEE_ROLE_CHOICES = (
     ("branch_manager", "Branch Manager"),
+    ("branch_staff", "Branch Staff"),
     ("cashier", "Cashier / Order Taking"),
     ("kitchen_staff", "Kitchen Staff"),
 )
@@ -573,6 +584,8 @@ STAFF_ACCESS_PATH_SLUGS = {
     "blocklist": "customers",
     "audit": "staff",
     "audit-log": "staff",
+    "audit-management": "finance",
+    "portal-preview": "finance",
     "queue-monitor": "kds",
     "offline": "dashboard",
     "delivery": "delivery_agents",
@@ -7233,6 +7246,148 @@ def create_corporate_quote(inquiry_id):
     return redirect(url_for("admin.corporate_inquiry_detail", inquiry_id=inquiry.id))
 
 
+@admin_bp.route("/audit-management")
+@admin_required
+@finance_required
+def audit_management():
+    auditors = (
+        User.query.filter(User.role == "auditor")
+        .order_by(User.is_active.desc(), User.name.asc())
+        .all()
+    )
+    documents = (
+        AuditDocument.query.order_by(AuditDocument.uploaded_at.desc())
+        .limit(20)
+        .all()
+    )
+    downloads = (
+        AuditReportDownload.query.order_by(AuditReportDownload.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    branches = Branch.query.order_by(Branch.name.asc()).all()
+    branch_requests = BranchPurchaseRequest.query.count()
+    active_transfers = StockTransfer.query.filter(
+        StockTransfer.status.in_(["PREPARED", "DISPATCHED", "IN_TRANSIT"])
+    ).count()
+    return render_template(
+        "admin/audit_management.html",
+        auditors=auditors,
+        documents=documents,
+        downloads=downloads,
+        branches=branches,
+        branch_requests=branch_requests,
+        active_transfers=active_transfers,
+    )
+
+
+@admin_bp.route("/audit-management/auditors/add", methods=["POST"])
+@admin_required
+@finance_required
+def add_auditor_account():
+    name = (request.form.get("name") or "").strip()
+    email = (request.form.get("email") or "").strip().lower()
+    password = request.form.get("password") or ""
+    if not name or not email or not password:
+        flash("Auditor name, email, and temporary password are required.", "danger")
+        return redirect(url_for("admin.audit_management"))
+    if User.query.filter(func.lower(User.email) == email.lower()).first():
+        flash("A user with that email already exists.", "warning")
+        return redirect(url_for("admin.audit_management"))
+    password_errors = validate_password(password)
+    if password_errors:
+        for error in password_errors:
+            flash(error, "danger")
+        return redirect(url_for("admin.audit_management"))
+
+    auditor = User(
+        name=name,
+        email=email,
+        role="auditor",
+        admin_tier="staff",
+        is_active=True,
+        email_locked=True,
+        created_by_id=current_user.id,
+    )
+    auditor.set_password(password, require_change=True)
+    db.session.add(auditor)
+    db.session.flush()
+    get_container().audit_service.log(
+        current_user,
+        "auditor_account_created",
+        "User",
+        auditor.id,
+        after={"email": auditor.email, "role": auditor.role, "is_active": auditor.is_active},
+        change_summary=f"Auditor account created for {auditor.email}.",
+    )
+    db.session.commit()
+    flash("Auditor account created.", "success")
+    return redirect(url_for("admin.audit_management"))
+
+
+@admin_bp.route("/audit-management/auditors/<int:user_id>/toggle", methods=["POST"])
+@admin_required
+@finance_required
+def toggle_auditor_account(user_id):
+    auditor = db.get_or_404(User, user_id)
+    if auditor.role != "auditor":
+        abort(404)
+    before = {"is_active": auditor.is_active}
+    auditor.is_active = not auditor.is_active
+    get_container().audit_service.log(
+        current_user,
+        "auditor_account_status_changed",
+        "User",
+        auditor.id,
+        before=before,
+        after={"is_active": auditor.is_active},
+        change_summary=f"Auditor account {'activated' if auditor.is_active else 'deactivated'} for {auditor.email}.",
+    )
+    db.session.commit()
+    flash("Auditor access updated.", "success")
+    return redirect(url_for("admin.audit_management"))
+
+
+@admin_bp.route("/portal-preview/audit")
+@admin_required
+@finance_required
+def preview_audit_portal():
+    get_container().audit_service.log(
+        current_user,
+        "portal_preview_started",
+        "Portal",
+        "audit",
+        after={"portal_context": "Auditor Portal"},
+        change_summary="Administrator opened Auditor Portal preview.",
+    )
+    db.session.commit()
+    return redirect(url_for("audit.dashboard", preview="admin"))
+
+
+@admin_bp.route("/portal-preview/branch")
+@admin_required
+@finance_required
+def preview_branch_portal():
+    branch_id = request.args.get("branch_id", type=int)
+    branch = db.session.get(Branch, branch_id) if branch_id else None
+    if branch is None:
+        branch = Branch.query.filter_by(is_active=True).order_by(Branch.name.asc()).first()
+    if branch is None:
+        flash("Create a branch before previewing the Branch Portal.", "warning")
+        return redirect(url_for("admin.audit_management"))
+    get_container().audit_service.log(
+        current_user,
+        "portal_preview_started",
+        "Portal",
+        "branch",
+        branch_id=branch.id,
+        after={"portal_context": "Branch Portal", "branch_id": branch.id},
+        change_summary=f"Administrator opened Branch Portal preview for {branch.name}.",
+    )
+    db.session.commit()
+    return redirect(url_for("branch.dashboard", branch_id=branch.id, preview="admin"))
+
+
 @admin_bp.route("/audit")
 @admin_bp.route("/audit-log")
 @admin_required
@@ -7256,7 +7411,9 @@ def audit():
                 (
                     "admin",
                     "super_admin",
+                    "auditor",
                     "branch_manager",
+                    "branch_staff",
                     "cashier",
                     "kitchen_staff",
                     "delivery",

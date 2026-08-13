@@ -1,0 +1,32 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Payables - {{ bakery_name }}{% endblock %}
+{% block page_title %}Payables{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Open Payables</h3><div class="audit-value">{{ format_inr(total) }}</div></div>
+  <div class="audit-panel"><h3>Open Purchase Orders</h3><div class="audit-value">{{ rows|length }}</div></div>
+  <div class="audit-panel"><h3>Vendor Aging</h3><div class="audit-value">Limited</div><div class="audit-subtle">Supplier due-date ledgers are not fully modeled.</div></div>
+</section>
+<div class="audit-table-wrap">
+  <table class="audit-table">
+    <thead><tr><th>PO</th><th>Date</th><th>Vendor</th><th>GSTIN</th><th>Status</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th></tr></thead>
+    <tbody>
+      {% for po in rows %}
+      {% set gst_amount = (po.subtotal or 0) * (po.gst_rate_percent or 0) / 100 %}
+      <tr>
+        <td>PO-{{ po.id }}</td>
+        <td>{{ po.order_date }}</td>
+        <td>{{ po.vendor.name if po.vendor else '' }}</td>
+        <td>{{ po.vendor.gstin if po.vendor else '' }}</td>
+        <td>{{ po.status }}</td>
+        <td class="num">{{ format_inr(po.subtotal) }}</td>
+        <td class="num">{{ format_inr(gst_amount) }}</td>
+        <td class="num">{{ format_inr((po.subtotal or 0) + gst_amount) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8">No open purchase payables are available for the selected period.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Audit Reports - {{ bakery_name }}{% endblock %}
+{% block page_title %}Reports{% endblock %}
+{% block content %}
+<section class="audit-grid">
+  {% for key, label in report_catalog.items() %}
+  <div class="audit-panel">
+    <h3>{{ label }}</h3>
+    <p>Downloads are logged and remain read-only.</p>
+    <div class="audit-actions">
+      <a class="btn btn-primary btn-sm" href="{{ url_for('audit.download_report', report_key=key, file_format='csv', financial_year=selected_financial_year) }}">CSV</a>
+      <a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_report', report_key=key, file_format='pdf', financial_year=selected_financial_year) }}">PDF</a>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Payroll Summary - {{ bakery_name }}{% endblock %}
+{% block page_title %}Payroll Summary{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Total Payroll Records</h3><div class="audit-value">{{ format_inr(total) }}</div></div>
+  <div class="audit-panel"><h3>Employees</h3><div class="audit-value">{{ rows|map(attribute='user_id')|unique|list|length }}</div></div>
+  <div class="audit-panel"><h3>Records</h3><div class="audit-value">{{ rows|length }}</div></div>
+</section>
+<div class="audit-table-wrap">
+  <table class="audit-table">
+    <thead><tr><th>Period</th><th>Employee</th><th>Branch</th><th>Status</th><th class="num">Amount</th><th>Notes</th></tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr><td>{{ row.period_start }} to {{ row.period_end }}</td><td>{{ row.user.name if row.user else row.user_id }}</td><td>{{ row.branch.name if row.branch else 'Unassigned' }}</td><td>{{ row.status }}</td><td class="num">{{ format_inr(row.amount) }}</td><td>{{ row.notes or '' }}</td></tr>
+      {% else %}
+      <tr><td colspan="6">No salary records are available for the selected period.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

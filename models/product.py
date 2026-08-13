@@ -35,6 +35,14 @@ PRODUCT_IMAGE_POSITION_CSS = {
     'right': 'right center',
 }
 
+PRODUCT_SOURCE_CENTRAL_KITCHEN = "CENTRAL_KITCHEN"
+PRODUCT_SOURCE_BRANCH = "BRANCH"
+PRODUCT_SOURCE_CHOICES = [
+    (PRODUCT_SOURCE_CENTRAL_KITCHEN, "Central kitchen"),
+    (PRODUCT_SOURCE_BRANCH, "Branch made"),
+]
+PRODUCT_SOURCE_VALUES = {value for value, _label in PRODUCT_SOURCE_CHOICES}
+
 class Category(db.Model):
     __tablename__ = 'categories'
     id       = db.Column(db.Integer, primary_key=True)
@@ -82,6 +90,11 @@ class Product(db.Model):
     minimum_notice_hours = db.Column(db.Integer, default=24)
     occasion_tags = db.Column(db.String(300))
     shelf_life_hours = db.Column(db.Integer, default=24)
+    production_source = db.Column(
+        db.String(30),
+        default=PRODUCT_SOURCE_CENTRAL_KITCHEN,
+        nullable=False,
+    )
     version = db.Column(db.Integer, default=1, nullable=False)
     created_at    = db.Column(db.DateTime, default=utcnow)
 

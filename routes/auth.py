@@ -42,7 +42,7 @@ def current_portal_role():
 
 
 def portal_url_for_role(role, path=""):
-    role = role if role in {"customer", "admin", "delivery"} else "customer"
+    role = role if role in {"customer", "admin", "delivery", "audit", "branch"} else "customer"
     base_url = current_app.config.get(f"{role.upper()}_PORTAL_URL", "").rstrip("/")
     if not path:
         return base_url
@@ -52,6 +52,10 @@ def portal_url_for_role(role, path=""):
 
 
 def role_portal(user):
+    if has_role(user, "auditor"):
+        return "audit"
+    if has_role(user, "branch_manager", "branch_staff"):
+        return "branch"
     if has_role(user, *ADMIN_PORTAL_ROLES):
         return "admin"
     if has_role(user, "delivery"):
@@ -60,11 +64,13 @@ def role_portal(user):
 
 
 def portal_dashboard_url(role, user=None):
-    role = role if role in {"customer", "admin", "delivery"} else "customer"
+    role = role if role in {"customer", "admin", "delivery", "audit", "branch"} else "customer"
     endpoint = {
         "customer": "customer.home",
         "admin": "admin.dashboard",
         "delivery": "delivery.dashboard",
+        "audit": "audit.dashboard",
+        "branch": "branch.dashboard",
     }[role]
     if role == "admin" and is_order_screen_user(user):
         endpoint = "admin.pos"
@@ -75,7 +81,7 @@ def portal_dashboard_url(role, user=None):
 
 
 def portal_login_url(role):
-    role = role if role in {"customer", "admin", "delivery"} else "customer"
+    role = role if role in {"customer", "admin", "delivery", "audit", "branch"} else "customer"
     path = url_for("auth.login")
     if current_portal_role() == role:
         return path

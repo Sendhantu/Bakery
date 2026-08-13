@@ -1,0 +1,56 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Sales Register - {{ bakery_name }}{% endblock %}
+{% block page_title %}Sales Register{% endblock %}
+{% block filters %}
+<form method="get" class="audit-filters">
+  <label>Financial Year <select name="financial_year">{% for fy in financial_years %}<option value="{{ fy }}" {% if fy == selected_financial_year %}selected{% endif %}>{{ fy }}</option>{% endfor %}</select></label>
+  <label>Date From <input type="date" name="start_date" value="{{ selected_period.start_date }}"></label>
+  <label>Date To <input type="date" name="end_date" value="{{ selected_period.end_date }}"></label>
+  <label>Branch <select name="branch_id"><option value="">All</option>{% for branch in branches %}<option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}</select></label>
+  <label>Payment Status <select name="payment_status"><option value="">All</option>{% for status in ['PAID','PENDING','FAILED','REFUNDED'] %}<option value="{{ status }}" {% if request.args.get('payment_status') == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select></label>
+  <label>Search <input name="q" value="{{ request.args.get('q','') }}" placeholder="Invoice, customer"></label>
+  <div class="audit-actions"><button class="btn btn-primary btn-sm">Apply</button><a class="btn btn-outline btn-sm" href="{{ url_for('audit.sales') }}">Reset</a></div>
+</form>
+{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Gross Sales</h3><div class="audit-value">{{ format_inr(summary.gross_sales) }}</div></div>
+  <div class="audit-panel"><h3>Net Sales</h3><div class="audit-value">{{ format_inr(summary.net_sales) }}</div></div>
+  <div class="audit-panel"><h3>Taxable Sales</h3><div class="audit-value">{{ format_inr(summary.taxable_sales) }}</div></div>
+  <div class="audit-panel"><h3>GST Collected</h3><div class="audit-value">{{ format_inr(summary.gst_collected) }}</div></div>
+  <div class="audit-panel"><h3>Discounts</h3><div class="audit-value">{{ format_inr(summary.discounts) }}</div></div>
+  <div class="audit-panel"><h3>Invoices</h3><div class="audit-value">{{ summary.invoice_count }}</div></div>
+</section>
+<div class="audit-actions" style="margin-bottom:10px">
+  <a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_report', report_key='sales-register', file_format='csv', **request.args) }}">Export CSV</a>
+  <a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_report', report_key='sales-register', file_format='pdf', **request.args) }}">Export PDF</a>
+</div>
+<div class="audit-table-wrap">
+  <table class="audit-table">
+    <thead><tr><th>Invoice</th><th>Date</th><th>Branch</th><th>Customer</th><th>Order Type</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th><th>Payment</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for order in pagination.items %}
+      <tr>
+        <td><a href="{{ url_for('audit.sales_detail', order_id=order.id, financial_year=selected_financial_year) }}">{{ order.invoice_number or order.order_number }}</a></td>
+        <td>{{ order.placed_at.strftime('%d %b %Y') if order.placed_at else '' }}</td>
+        <td>{{ order.branch.name if order.branch else 'Unassigned' }}</td>
+        <td>{{ order.customer.name if order.customer else 'Walk-in' }}</td>
+        <td>{{ order.fulfillment_type }}</td>
+        <td class="num">{{ format_inr(order.gst_taxable_amount or order.subtotal) }}</td>
+        <td class="num">{{ format_inr(order.gst_amount) }}</td>
+        <td class="num">{{ format_inr(order.total) }}</td>
+        <td>{{ order.payment_method }}</td>
+        <td><span class="audit-badge {% if order.payment_status == 'PAID' %}green{% elif order.payment_status == 'FAILED' %}red{% else %}orange{% endif %}">{{ order.payment_status }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10">No sales records are available for the selected filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="audit-pagination">
+  {% if pagination.has_prev %}<a class="btn btn-outline btn-sm" href="{{ page_url(pagination.prev_num) }}">Previous</a>{% endif %}
+  <span class="audit-subtle">Page {{ pagination.page }} of {{ pagination.pages or 1 }}</span>
+  {% if pagination.has_next %}<a class="btn btn-outline btn-sm" href="{{ page_url(pagination.next_num) }}">Next</a>{% endif %}
+</div>
+{% endblock %}

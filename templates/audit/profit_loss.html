@@ -1,0 +1,16 @@
+{% extends "audit/base_audit.html" %}
+{% block page_title %}Profit &amp; Loss Statement{% endblock %}
+{% block content %}
+<section class="audit-panel" style="margin-bottom:14px">
+  <h3>Professional P&amp;L Layout</h3>
+  <div class="audit-table-wrap"><table class="audit-table"><tbody>
+    <tr><td>Revenue</td><td class="num">{{ format_inr(pnl.sales_revenue) }}</td></tr>
+    <tr><td>Other Income</td><td class="num">{{ format_inr(pnl.other_income) }}</td></tr>
+    <tr><td><strong>Total Income</strong></td><td class="num"><strong>{{ format_inr(pnl.income) }}</strong></td></tr>
+    <tr><td>Less: Cost of Goods Sold from recipe/material records</td><td class="num">{{ format_inr(products|sum(attribute='cogs')) }}</td></tr>
+    <tr><td>Operating Expenses</td><td class="num">{{ format_inr(pnl.expenses) }}</td></tr>
+    <tr><td><strong>Net Profit</strong></td><td class="num"><strong>{{ format_inr(pnl.net_profit) }}</strong></td></tr>
+  </tbody></table></div>
+</section>
+<div class="audit-empty">EBITDA, depreciation, interest, and tax expense are not shown because the current schema does not yet provide reliable source ledgers for those calculations.</div>
+{% endblock %}

@@ -29,6 +29,58 @@ class AuditLog(db.Model):
     )
 
 
+class AuditDocument(db.Model):
+    __tablename__ = "audit_documents"
+    id = db.Column(db.Integer, primary_key=True)
+    document_uid = db.Column(db.String(80), nullable=False, unique=True)
+    financial_year = db.Column(db.String(20), nullable=False)
+    category = db.Column(db.String(40), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    storage_reference = db.Column(db.String(500), nullable=False)
+    original_filename = db.Column(db.String(255))
+    mime_type = db.Column(db.String(120))
+    size_bytes = db.Column(db.Integer, default=0)
+    visibility = db.Column(db.String(30), nullable=False, default="AUDITOR")
+    status = db.Column(db.String(30), nullable=False, default="DRAFT")
+    uploaded_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    published_at = db.Column(db.DateTime)
+
+    uploader = db.relationship("User", backref="uploaded_audit_documents")
+
+    __table_args__ = (
+        db.Index("idx_audit_document_year_status", "financial_year", "status"),
+        db.Index("idx_audit_document_category_status", "category", "status"),
+    )
+
+    @property
+    def is_auditor_visible(self):
+        return (
+            (self.visibility or "").strip().upper() == "AUDITOR"
+            and (self.status or "").strip().upper() == "PUBLISHED"
+        )
+
+
+class AuditReportDownload(db.Model):
+    __tablename__ = "audit_report_downloads"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    report_key = db.Column(db.String(80), nullable=False)
+    financial_year = db.Column(db.String(20))
+    file_format = db.Column(db.String(20), nullable=False, default="csv")
+    portal_context = db.Column(db.String(40), nullable=False, default="audit")
+    ip_address = db.Column(db.String(64))
+    user_agent = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    user = db.relationship("User", backref="audit_report_downloads")
+
+    __table_args__ = (
+        db.Index("idx_audit_report_download_user_created", "user_id", "created_at"),
+        db.Index("idx_audit_report_download_report_created", "report_key", "created_at"),
+    )
+
+
 class OperationalAlert(db.Model):
     __tablename__ = "operational_alerts"
     id = db.Column(db.Integer, primary_key=True)

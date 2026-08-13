@@ -1,0 +1,17 @@
+{% extends "branch/base_branch.html" %}
+{% block title %}Branch Dashboard - {{ bakery_name }}{% endblock %}
+{% block page_title %}{{ branch.name }} Branch Dashboard{% endblock %}
+{% block content %}
+<section class="branch-grid">
+  <div class="branch-panel"><h3>Today Orders</h3><div class="branch-value">{{ orders_today }}</div></div>
+  <div class="branch-panel"><h3>Pending Orders</h3><div class="branch-value">{{ pending_orders }}</div></div>
+  <div class="branch-panel"><h3>Low Stock</h3><div class="branch-value">{{ low_stock }}</div></div>
+  <div class="branch-panel"><h3>Incoming Transfers</h3><div class="branch-value">{{ incoming_transfers }}</div></div>
+  <div class="branch-panel"><h3>Active Staff</h3><div class="branch-value">{{ staff_count }}</div></div>
+  <div class="branch-panel"><h3>Purchase Requests</h3><div class="branch-value">{{ purchase_requests }}</div></div>
+</section>
+<section class="branch-panel" style="margin-top:16px">
+  <h3>Synchronization</h3>
+  <p>{{ sync_status.message }}</p>
+</section>
+{% endblock %}

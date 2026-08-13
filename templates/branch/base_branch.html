@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#1f5c47">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <link rel="manifest" href="{{ url_for('branch_manifest') }}">
+  <title>{% block title %}Branch Portal - {{ bakery_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <style>
+    body.branch-shell { background:#f4f8f5; color:#18352b; }
+    .branch-layout { display:grid; grid-template-columns:260px minmax(0,1fr); min-height:100vh; }
+    .branch-sidebar { background:#1f5c47; color:#effaf4; padding:24px 18px; }
+    .branch-brand { font-weight:700; font-size:1.15rem; }
+    .branch-name { color:#c9e4d5; margin:3px 0 22px; }
+    .branch-nav { list-style:none; padding:0; margin:0; display:grid; gap:4px; }
+    .branch-nav a { color:#e5f4eb; display:block; padding:10px 12px; border-radius:6px; text-decoration:none; }
+    .branch-nav a.active, .branch-nav a:hover { background:#2c745a; color:#fff; }
+    .branch-main { padding:24px; }
+    .branch-topbar { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+    .branch-preview { background:#fff7e0; color:#6b4b00; border:1px solid #ecd38a; padding:10px 12px; border-radius:6px; margin-bottom:16px; }
+    .branch-sync { background:#e9f6ee; border:1px solid #c7e4d3; color:#215840; border-radius:6px; padding:8px 10px; }
+    .branch-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+    .branch-panel { background:#fff; border:1px solid #dce9e0; border-radius:8px; padding:16px; }
+    .branch-panel h3 { margin:0 0 8px; font-size:1rem; }
+    .branch-value { font-size:1.45rem; font-weight:700; }
+    .branch-table { width:100%; border-collapse:collapse; background:#fff; }
+    .branch-table th, .branch-table td { border-bottom:1px solid #e3ece6; padding:10px; text-align:left; }
+    .branch-empty { background:#fff; border:1px dashed #b7d0c2; border-radius:8px; padding:18px; color:#527262; }
+    @media (max-width: 760px) {
+      .branch-layout { grid-template-columns:1fr; }
+      .branch-topbar { flex-direction:column; }
+    }
+  </style>
+</head>
+<body class="branch-shell" data-page-role="branch" data-service-worker-url="{{ url_for('branch_service_worker') }}">
+  <div class="branch-layout">
+    <aside class="branch-sidebar">
+      <div class="branch-brand">Branch Portal</div>
+      <div class="branch-name">{{ branch.name }}</div>
+      <ul class="branch-nav">
+        <li><a href="{{ branch_url('branch.dashboard', branch=branch) }}" class="{{ 'active' if request.endpoint == 'branch.dashboard' }}">Dashboard</a></li>
+        <li><a href="{{ branch_url('branch.placeholder', branch=branch, module_name='pos') }}" class="{{ 'active' if request.path.endswith('/pos') }}">POS</a></li>
+        <li><a href="{{ branch_url('branch.orders', branch=branch) }}" class="{{ 'active' if request.endpoint in ['branch.orders','branch.order_detail'] }}">Orders</a></li>
+        <li><a href="{{ branch_url('branch.stock', branch=branch) }}" class="{{ 'active' if request.endpoint == 'branch.stock' }}">Stock</a></li>
+        <li><a href="{{ branch_url('branch.placeholder', branch=branch, module_name='transfers') }}">Stock Transfers</a></li>
+        <li><a href="{{ branch_url('branch.placeholder', branch=branch, module_name='cash') }}">Cash Management</a></li>
+        <li><a href="{{ branch_url('branch.placeholder', branch=branch, module_name='purchase-requests') }}">Purchase Requests</a></li>
+        <li><a href="{{ branch_url('branch.workforce', branch=branch) }}" class="{{ 'active' if request.endpoint == 'branch.workforce' }}">Workforce</a></li>
+        <li><a href="{{ branch_url('branch.placeholder', branch=branch, module_name='reports') }}">Reports</a></li>
+      </ul>
+    </aside>
+    <main class="branch-main">
+      {% if admin_preview %}
+      <div class="branch-preview">
+        Viewing {{ branch.name }} Branch Portal as Administrator.
+        <a href="{{ url_for('admin.dashboard') }}">Return to Admin Portal</a>
+      </div>
+      {% endif %}
+      <div class="branch-topbar">
+        <div>
+          <h1>{% block page_title %}{{ branch.name }} Branch{% endblock %}</h1>
+          <p>Signed in as {{ current_user.name }}</p>
+        </div>
+        <div class="branch-sync">{{ sync_status.state }}{% if sync_status.pending %} - {{ sync_status.pending }} waiting{% endif %}</div>
+      </div>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

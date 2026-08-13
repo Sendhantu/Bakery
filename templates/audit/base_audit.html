@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#263238">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <link rel="manifest" href="{{ url_for('audit_manifest') }}">
+  <title>{% block title %}Auditor Portal - {{ bakery_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <style>
+    body.audit-shell { background:#f4f6f7; color:#1f2933; letter-spacing:0; }
+    .audit-layout { display:grid; grid-template-columns:280px minmax(0,1fr); min-height:100vh; }
+    .audit-sidebar { background:#25313a; color:#f7fafc; padding:18px 14px; position:sticky; top:0; height:100vh; overflow:auto; }
+    .audit-brand { padding:6px 10px 18px; border-bottom:1px solid rgba(255,255,255,.12); margin-bottom:14px; }
+    .audit-brand strong { display:block; font-size:1.05rem; }
+    .audit-brand span { color:#b8c7cc; font-size:.82rem; }
+    .audit-nav-group { margin:14px 0; }
+    .audit-nav-label { color:#9fb2b9; font-size:.72rem; text-transform:uppercase; font-weight:700; padding:0 10px 6px; }
+    .audit-nav { list-style:none; padding:0; margin:0; display:grid; gap:2px; }
+    .audit-nav a { color:#dce7ea; display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:6px; text-decoration:none; font-size:.92rem; }
+    .audit-nav a.active, .audit-nav a:hover { background:#344850; color:#fff; }
+    .audit-main { min-width:0; padding:20px 24px 32px; }
+    .audit-header { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:14px; }
+    .audit-header h1 { margin:0; font-size:1.55rem; color:#17242b; }
+    .audit-meta { color:#5f6f76; font-size:.9rem; display:flex; gap:10px; flex-wrap:wrap; margin-top:4px; }
+    .audit-mode { background:#e8f1f4; color:#263238; border:1px solid #cbdce1; border-radius:6px; padding:7px 10px; font-size:.85rem; font-weight:700; }
+    .audit-preview { background:#fff7df; color:#664900; border:1px solid #e6cf89; padding:10px 12px; border-radius:6px; margin-bottom:14px; }
+    .audit-filters { background:#fff; border:1px solid #dce5e8; border-radius:8px; padding:12px; margin-bottom:16px; display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; align-items:end; }
+    .audit-filters label { font-size:.78rem; color:#5b6a70; font-weight:700; display:grid; gap:5px; }
+    .audit-filters input, .audit-filters select { width:100%; border:1px solid #cbd8dc; border-radius:6px; padding:8px; background:#fff; }
+    .audit-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .audit-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; }
+    .audit-panel { background:#fff; border:1px solid #dce5e8; border-radius:8px; padding:16px; }
+    .audit-panel h3 { margin:0 0 8px; font-size:.98rem; color:#23333b; }
+    .audit-value { font-size:1.5rem; font-weight:800; color:#17242b; }
+    .audit-subtle { color:#65767d; font-size:.88rem; }
+    .audit-positive { color:#0c7a43; font-weight:700; }
+    .audit-negative { color:#b42318; font-weight:700; }
+    .audit-table-wrap { overflow:auto; border:1px solid #dce5e8; border-radius:8px; background:#fff; }
+    .audit-table { width:100%; border-collapse:collapse; min-width:780px; }
+    .audit-table th { position:sticky; top:0; background:#f8fafb; color:#3a4a51; text-align:left; font-size:.78rem; text-transform:uppercase; border-bottom:1px solid #dce5e8; padding:10px; }
+    .audit-table td { border-bottom:1px solid #edf2f4; padding:10px; vertical-align:top; }
+    .audit-table tr:hover td { background:#fbfdfe; }
+    .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .audit-badge { display:inline-flex; align-items:center; border-radius:999px; padding:3px 8px; font-size:.75rem; font-weight:700; background:#eef3f5; color:#40525a; }
+    .audit-badge.green { background:#e7f6ed; color:#12613a; }
+    .audit-badge.orange { background:#fff3df; color:#8a5300; }
+    .audit-badge.red { background:#fdecea; color:#9f2017; }
+    .audit-empty { background:#fff; border:1px dashed #b9c9ce; border-radius:8px; padding:18px; color:#607178; }
+    .audit-breadcrumbs { color:#6a7a81; font-size:.85rem; margin-bottom:8px; }
+    .audit-breadcrumbs a { color:#345d6b; }
+    .audit-chart { height:280px; }
+    .audit-pagination { display:flex; gap:8px; justify-content:flex-end; padding:12px 0; }
+    @media (max-width: 860px) {
+      .audit-layout { grid-template-columns:1fr; }
+      .audit-sidebar { position:static; height:auto; }
+      .audit-header { flex-direction:column; }
+    }
+  </style>
+</head>
+<body class="audit-shell" data-page-role="audit" data-service-worker-url="{{ url_for('audit_service_worker') }}">
+  <div class="audit-layout">
+    <aside class="audit-sidebar">
+      <div class="audit-brand">
+        <strong>{{ bakery_name }}</strong>
+        <span>Auditor Portal - read-only financial access</span>
+      </div>
+      {% set ep = request.endpoint or '' %}
+      <div class="audit-nav-group">
+        <div class="audit-nav-label">Overview</div>
+        <ul class="audit-nav">
+          <li><a href="{{ url_for('audit.dashboard', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.dashboard' }}">Dashboard</a></li>
+          <li><a href="{{ url_for('audit.sales', financial_year=selected_financial_year) }}" class="{{ 'active' if ep in ['audit.sales','audit.sales_detail'] }}">Sales</a></li>
+          <li><a href="{{ url_for('audit.revenue', financial_year=selected_financial_year) }}" class="{{ 'active' if 'revenue' in ep }}">Revenue</a></li>
+          <li><a href="{{ url_for('audit.purchases', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.purchases' }}">Purchases</a></li>
+          <li><a href="{{ url_for('audit.expenses', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.expenses' }}">Expenses</a></li>
+        </ul>
+      </div>
+      <div class="audit-nav-group">
+        <div class="audit-nav-label">Statements</div>
+        <ul class="audit-nav">
+          <li><a href="{{ url_for('audit.profit_loss', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.profit_loss' }}">Profit &amp; Loss</a></li>
+          <li><a href="{{ url_for('audit.balance_sheet', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.balance_sheet' }}">Balance Sheet</a></li>
+          <li><a href="{{ url_for('audit.trial_balance', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.trial_balance' }}">Trial Balance</a></li>
+          <li><a href="{{ url_for('audit.general_ledger', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.general_ledger' }}">General Ledger</a></li>
+        </ul>
+      </div>
+      <div class="audit-nav-group">
+        <div class="audit-nav-label">Review Areas</div>
+        <ul class="audit-nav">
+          <li><a href="{{ url_for('audit.gst', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.gst' }}">GST &amp; Tax</a></li>
+          <li><a href="{{ url_for('audit.bank_cash', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.bank_cash' }}">Bank &amp; Cash</a></li>
+          <li><a href="{{ url_for('audit.receivables', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.receivables' }}">Receivables</a></li>
+          <li><a href="{{ url_for('audit.payables', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.payables' }}">Payables</a></li>
+          <li><a href="{{ url_for('audit.inventory', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.inventory' }}">Inventory</a></li>
+          <li><a href="{{ url_for('audit.fixed_assets', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.fixed_assets' }}">Fixed Assets</a></li>
+          <li><a href="{{ url_for('audit.payroll', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.payroll' }}">Payroll Summary</a></li>
+          <li><a href="{{ url_for('audit.branches', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.branches' }}">Branch Performance</a></li>
+        </ul>
+      </div>
+      <div class="audit-nav-group">
+        <div class="audit-nav-label">Library</div>
+        <ul class="audit-nav">
+          <li><a href="{{ url_for('audit.documents', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.documents' }}">Documents</a></li>
+          <li><a href="{{ url_for('audit.reports', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.reports' }}">Reports</a></li>
+        </ul>
+      </div>
+    </aside>
+    <main class="audit-main">
+      {% if admin_preview %}
+      <div class="audit-preview">Viewing Auditor Portal as Administrator. <a href="{{ url_for('admin.dashboard') }}">Return to Admin Portal</a></div>
+      {% endif %}
+      <div class="audit-header">
+        <div>
+          <div class="audit-breadcrumbs">{% block breadcrumbs %}<a href="{{ url_for('audit.dashboard') }}">Auditor Portal</a>{% endblock %}</div>
+          <h1>{% block page_title %}Auditor Portal{% endblock %}</h1>
+          <div class="audit-meta">
+            <span>FY {{ selected_financial_year }}</span>
+            <span>{{ selected_period.label }}</span>
+            <span>Last updated {{ last_updated_at.strftime('%d %b %Y, %H:%M') }}</span>
+            <span>{{ current_user.name }}</span>
+          </div>
+        </div>
+        <div class="audit-actions">
+          <span class="audit-mode">Read-only</span>
+          <a class="btn btn-outline btn-sm" href="{{ url_for('audit.reports', financial_year=selected_financial_year) }}">Exports</a>
+          <a class="btn btn-outline btn-sm" href="{{ url_for('auth.logout') }}">Logout</a>
+        </div>
+      </div>
+      {% block filters %}
+      <form method="get" class="audit-filters">
+        <label>Financial Year
+          <select name="financial_year">
+            {% for fy in financial_years %}<option value="{{ fy }}" {% if fy == selected_financial_year %}selected{% endif %}>{{ fy }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Date From <input type="date" name="start_date" value="{{ selected_period.start_date }}"></label>
+        <label>Date To <input type="date" name="end_date" value="{{ selected_period.end_date }}"></label>
+        <label>Branch
+          <select name="branch_id">
+            <option value="">All branches</option>
+            {% for branch in branches %}<option value="{{ branch.id }}" {% if selected_branch_id == branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <div class="audit-actions">
+          <button class="btn btn-primary btn-sm" type="submit">Apply</button>
+          <a class="btn btn-outline btn-sm" href="{{ request.path }}">Reset Filters</a>
+        </div>
+      </form>
+      {% endblock %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

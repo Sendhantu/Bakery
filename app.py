@@ -63,6 +63,8 @@ PORTAL_PORTS = {
     "customer": 5000,
     "admin": 5001,
     "delivery": 5002,
+    "audit": 5003,
+    "branch": 5004,
 }
 
 LOCAL_PORTAL_URLS = {
@@ -85,6 +87,16 @@ DEMO_PORTAL_CREDENTIALS = {
         "password": "delivery123",
         "label": "Delivery Default",
     },
+    "audit": {
+        "email": "auditor@bakery.com",
+        "password": "Auditor123",
+        "label": "Auditor Demo",
+    },
+    "branch": {
+        "email": "branch.manager@bakery.com",
+        "password": "Branch123",
+        "label": "Branch Manager Demo",
+    },
 }
 
 ORDER_SCREEN_CREDENTIALS = {
@@ -97,7 +109,7 @@ ORDER_SCREEN_CREDENTIALS = {
 @socketio.on("connect")
 def handle_socket_connect():
     portal = (request.args.get("portal") or "customer").strip().lower()
-    if portal in {"customer", "admin", "delivery"}:
+    if portal in set(PORTAL_PORTS):
         join_room(portal)
     if portal == "customer" and current_user.is_authenticated:
         join_room(f"customer_{current_user.id}")
@@ -109,6 +121,10 @@ def handle_socket_connect():
         agent = DeliveryAgent.query.filter_by(user_id=current_user.id).first()
         if agent:
             join_room(f"delivery_{agent.id}")
+    if portal == "branch" and current_user.is_authenticated:
+        branch_id = getattr(current_user, "branch_id", None)
+        if branch_id:
+            join_room(f"branch_{branch_id}")
     join_room("global")
 
 
@@ -265,8 +281,8 @@ def get_available_development_credentials():
         credentials.values(),
         key=lambda item: (
             (
-                ["customer", "admin", "delivery"].index(item["role"])
-                if item["role"] in {"customer", "admin", "delivery"}
+                ["customer", "admin", "delivery", "audit", "branch"].index(item["role"])
+                if item["role"] in set(PORTAL_PORTS)
                 else 99
             ),
             item["email"],
@@ -370,6 +386,8 @@ def build_socketio_origins(app):
             app.config.get("CUSTOMER_PORTAL_URL"),
             app.config.get("ADMIN_PORTAL_URL"),
             app.config.get("DELIVERY_PORTAL_URL"),
+            app.config.get("AUDIT_PORTAL_URL"),
+            app.config.get("BRANCH_PORTAL_URL"),
         ]
         filtered = [origin for origin in origins if origin]
         return filtered
@@ -486,6 +504,8 @@ def register_blueprints(app):
     from routes.customer import customer_bp
     from routes.admin import admin_bp
     from routes.delivery import delivery_bp
+    from routes.audit import audit_bp
+    from routes.branch import branch_bp
     from routes.api import api_bp
 
     oauth.init_app(app)
@@ -494,6 +514,8 @@ def register_blueprints(app):
     app.register_blueprint(customer_bp, url_prefix="")
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(delivery_bp, url_prefix="/delivery")
+    app.register_blueprint(audit_bp, url_prefix="/audit")
+    app.register_blueprint(branch_bp, url_prefix="/branch")
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
     if app.config.get("FEATURE_FLAGS", {}).get("api.v2.enabled", False):
@@ -547,6 +569,46 @@ def register_core_routes(app):
             }
         )
 
+    @app.route("/audit/manifest.json")
+    def audit_manifest():
+        return jsonify(
+            {
+                "name": "SweetCrumbs Auditor Portal",
+                "short_name": "Sweet Audit",
+                "start_url": "/audit/",
+                "display": "standalone",
+                "background_color": "#F7F8FA",
+                "theme_color": "#263238",
+                "icons": [
+                    {
+                        "src": url_for("static", filename="icons/bakery-app.svg"),
+                        "sizes": "512x512",
+                        "type": "image/svg+xml",
+                    }
+                ],
+            }
+        )
+
+    @app.route("/branch/manifest.json")
+    def branch_manifest():
+        return jsonify(
+            {
+                "name": "SweetCrumbs Branch Portal",
+                "short_name": "Sweet Branch",
+                "start_url": "/branch/",
+                "display": "standalone",
+                "background_color": "#F7FBF8",
+                "theme_color": "#1F5C47",
+                "icons": [
+                    {
+                        "src": url_for("static", filename="icons/bakery-app.svg"),
+                        "sizes": "512x512",
+                        "type": "image/svg+xml",
+                    }
+                ],
+            }
+        )
+
     @app.route("/admin/offline")
     def admin_offline():
         return render_template("admin/offline.html")
@@ -554,6 +616,14 @@ def register_core_routes(app):
     @app.route("/delivery/offline")
     def delivery_offline():
         return render_template("delivery/offline.html")
+
+    @app.route("/audit/offline")
+    def audit_offline():
+        return render_template("audit/offline.html")
+
+    @app.route("/branch/offline")
+    def branch_offline():
+        return render_template("branch/offline.html")
 
     @app.route("/admin/service-worker.js")
     def admin_service_worker():
@@ -577,6 +647,33 @@ def register_core_routes(app):
             warm_urls=[
                 url_for("delivery.dashboard"),
                 url_for("delivery_offline"),
+                url_for("static", filename="css/main.css"),
+                url_for("static", filename="js/main.js"),
+            ],
+        )
+        return app.response_class(script, mimetype="application/javascript")
+
+    @app.route("/audit/service-worker.js")
+    def audit_service_worker():
+        script = _build_sensitive_service_worker_script(
+            cache_name="sweetcrumbs-audit-v1",
+            offline_url=url_for("audit_offline"),
+            warm_urls=[
+                url_for("audit_offline"),
+                url_for("static", filename="css/main.css"),
+                url_for("static", filename="js/main.js"),
+            ],
+        )
+        return app.response_class(script, mimetype="application/javascript")
+
+    @app.route("/branch/service-worker.js")
+    def branch_service_worker():
+        script = _build_service_worker_script(
+            cache_name="sweetcrumbs-branch-v1",
+            offline_url=url_for("branch_offline"),
+            warm_urls=[
+                url_for("branch.dashboard"),
+                url_for("branch_offline"),
                 url_for("static", filename="css/main.css"),
                 url_for("static", filename="js/main.js"),
             ],
@@ -914,11 +1011,44 @@ self.addEventListener("notificationclick", (event) => {{
 """
 
 
+def _build_sensitive_service_worker_script(cache_name, offline_url, warm_urls):
+    precache = json.dumps(list(dict.fromkeys(warm_urls)))
+    return f"""
+const CACHE_NAME = "{cache_name}";
+const OFFLINE_URL = "{offline_url}";
+const PRECACHE_URLS = {precache};
+
+self.addEventListener("install", (event) => {{
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)).then(() => self.skipWaiting())
+  );
+}});
+
+self.addEventListener("activate", (event) => {{
+  event.waitUntil(self.clients.claim());
+}});
+
+self.addEventListener("fetch", (event) => {{
+  if (event.request.method !== "GET") {{
+    return;
+  }}
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith("/audit") && !PRECACHE_URLS.includes(url.pathname)) {{
+    event.respondWith(fetch(event.request).catch(() => caches.match(OFFLINE_URL)));
+    return;
+  }}
+  event.respondWith(
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
+  );
+}});
+"""
+
+
 def start_local_sync_worker(app):
     if (
         app.testing
         or not app.config.get("ENABLE_LOCAL_SYNC_WORKER", False)
-        or app.config.get("PORTAL_ROLE") not in {"admin", "delivery"}
+        or app.config.get("PORTAL_ROLE") not in {"admin", "delivery", "branch"}
         or app.config.get("ENV") == "production"
     ):
         return
@@ -981,6 +1111,7 @@ def seed_data(app):
             DeliveryAgent,
             RawMaterial,
             ProductMaterial,
+            Branch,
         )
 
         # Admin user
@@ -1070,6 +1201,69 @@ def seed_data(app):
             DEMO_PORTAL_CREDENTIALS["delivery"]["email"],
             DEMO_PORTAL_CREDENTIALS["delivery"]["password"],
             label=DEMO_PORTAL_CREDENTIALS["delivery"]["label"],
+            source="seeded",
+        )
+
+        default_branch = Branch.query.filter_by(name="Anna Nagar").first()
+        if not default_branch:
+            default_branch = Branch(
+                name="Anna Nagar",
+                manager_name="Branch Manager",
+                phone="9000001001",
+                address="Anna Nagar, Chennai",
+                is_active=True,
+            )
+            db.session.add(default_branch)
+            db.session.flush()
+
+        auditor = User.query.filter_by(
+            email=DEMO_PORTAL_CREDENTIALS["audit"]["email"]
+        ).first()
+        if not auditor:
+            auditor = User(
+                name="Audit Reviewer",
+                email=DEMO_PORTAL_CREDENTIALS["audit"]["email"],
+                role="auditor",
+                phone="9000002001",
+            )
+            db.session.add(auditor)
+        auditor.name = "Audit Reviewer"
+        auditor.role = "auditor"
+        auditor.admin_tier = "staff"
+        auditor.is_active = True
+        auditor.email_locked = True
+        auditor.set_password(DEMO_PORTAL_CREDENTIALS["audit"]["password"])
+        record_development_credential(
+            "audit",
+            DEMO_PORTAL_CREDENTIALS["audit"]["email"],
+            DEMO_PORTAL_CREDENTIALS["audit"]["password"],
+            label=DEMO_PORTAL_CREDENTIALS["audit"]["label"],
+            source="seeded",
+        )
+
+        branch_user = User.query.filter_by(
+            email=DEMO_PORTAL_CREDENTIALS["branch"]["email"]
+        ).first()
+        if not branch_user:
+            branch_user = User(
+                name="Anna Nagar Manager",
+                email=DEMO_PORTAL_CREDENTIALS["branch"]["email"],
+                role="branch_manager",
+                phone="9000003001",
+            )
+            db.session.add(branch_user)
+        branch_user.name = "Anna Nagar Manager"
+        branch_user.role = "branch_manager"
+        branch_user.admin_tier = "manager"
+        branch_user.branch_id = default_branch.id
+        branch_user.is_active = True
+        branch_user.email_locked = True
+        branch_user.set_password(DEMO_PORTAL_CREDENTIALS["branch"]["password"])
+        record_development_credential(
+            "branch",
+            DEMO_PORTAL_CREDENTIALS["branch"]["email"],
+            DEMO_PORTAL_CREDENTIALS["branch"]["password"],
+            label=DEMO_PORTAL_CREDENTIALS["branch"]["label"],
             source="seeded",
         )
 

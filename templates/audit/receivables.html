@@ -1,0 +1,30 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Receivables - {{ bakery_name }}{% endblock %}
+{% block page_title %}Receivables{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Outstanding Receivables</h3><div class="audit-value">{{ format_inr(total) }}</div></div>
+  <div class="audit-panel"><h3>Open Invoices</h3><div class="audit-value">{{ rows|length }}</div></div>
+  <div class="audit-panel"><h3>Aging</h3><div class="audit-value">Limited</div><div class="audit-subtle">Due dates are not fully modeled.</div></div>
+</section>
+<div class="audit-table-wrap">
+  <table class="audit-table">
+    <thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Branch</th><th>Status</th><th>Payment</th><th class="num">Total</th></tr></thead>
+    <tbody>
+      {% for order in rows %}
+      <tr>
+        <td><a href="{{ url_for('audit.sales_detail', order_id=order.id) }}">{{ order.invoice_number or order.order_number }}</a></td>
+        <td>{{ order.placed_at.strftime('%d %b %Y') if order.placed_at else '' }}</td>
+        <td>{{ order.customer.name if order.customer else 'Walk-in' }}</td>
+        <td>{{ order.branch.name if order.branch else 'Unassigned' }}</td>
+        <td>{{ order.status }}</td>
+        <td>{{ order.payment_status }}</td>
+        <td class="num">{{ format_inr(order.total) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7">No unpaid customer orders are available for the selected period.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

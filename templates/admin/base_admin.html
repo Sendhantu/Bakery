@@ -146,6 +146,8 @@
       {% if can_admin_owner %}
       <li><a href="{{ url_for('admin.finance_dashboard') }}" class="{{ 'active' if 'finance' in request.endpoint }}">
         <span class="icon">💰</span>Finance</a></li>
+      <li><a href="{{ url_for('admin.audit_management') }}" class="{{ 'active' if request.endpoint and 'audit_management' in request.endpoint }}">
+        <span class="icon">▤</span>Audit Management</a></li>
       {% endif %}
       {% if can_admin_manager %}
       <li><a href="{{ url_for('admin.coupons') }}" class="{{ 'active' if 'coupon' in request.endpoint }}">

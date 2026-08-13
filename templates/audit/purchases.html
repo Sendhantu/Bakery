@@ -1,0 +1,38 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Purchase Register - {{ bakery_name }}{% endblock %}
+{% block page_title %}Purchase Register{% endblock %}
+{% block filters %}
+<form method="get" class="audit-filters">
+  <label>Financial Year <select name="financial_year">{% for fy in financial_years %}<option value="{{ fy }}" {% if fy == selected_financial_year %}selected{% endif %}>{{ fy }}</option>{% endfor %}</select></label>
+  <label>Date From <input type="date" name="start_date" value="{{ selected_period.start_date }}"></label>
+  <label>Date To <input type="date" name="end_date" value="{{ selected_period.end_date }}"></label>
+  <label>Vendor <select name="vendor_id"><option value="">All vendors</option>{% for vendor in vendors %}<option value="{{ vendor.id }}" {% if request.args.get('vendor_id', type=int) == vendor.id %}selected{% endif %}>{{ vendor.name }}</option>{% endfor %}</select></label>
+  <label>Status <input name="status" value="{{ request.args.get('status','') }}" placeholder="received, draft"></label>
+  <label>Search <input name="q" value="{{ request.args.get('q','') }}" placeholder="Vendor or GSTIN"></label>
+  <div class="audit-actions"><button class="btn btn-primary btn-sm">Apply</button><a class="btn btn-outline btn-sm" href="{{ url_for('audit.purchases') }}">Reset</a></div>
+</form>
+{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Total Purchases</h3><div class="audit-value">{{ format_inr(summary.total_purchases) }}</div></div>
+  <div class="audit-panel"><h3>Taxable Purchases</h3><div class="audit-value">{{ format_inr(summary.taxable_purchases) }}</div></div>
+  <div class="audit-panel"><h3>GST Paid</h3><div class="audit-value">{{ format_inr(summary.gst_paid) }}</div></div>
+  <div class="audit-panel"><h3>Open Payables</h3><div class="audit-value">{{ format_inr(summary.outstanding_payables) }}</div></div>
+</section>
+<div class="audit-actions" style="margin-bottom:10px">
+  <a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_report', report_key='purchase-register', file_format='csv', **request.args) }}">Export CSV</a>
+</div>
+<div class="audit-table-wrap">
+  <table class="audit-table">
+    <thead><tr><th>Purchase Invoice</th><th>Date</th><th>Vendor</th><th>GSTIN</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th><th>Status</th><th>ITC</th></tr></thead>
+    <tbody>
+      {% for po in pagination.items %}
+      {% set gst_amount = (po.subtotal or 0) * (po.gst_rate_percent or 0) / 100 %}
+      <tr><td>PO-{{ po.id }}</td><td>{{ po.order_date }}</td><td>{{ po.vendor.name if po.vendor else '' }}</td><td>{{ po.vendor.gstin if po.vendor else '' }}</td><td class="num">{{ format_inr(po.subtotal) }}</td><td class="num">{{ format_inr(gst_amount) }}</td><td class="num">{{ format_inr((po.subtotal or 0) + gst_amount) }}</td><td>{{ po.status }}</td><td><span class="audit-badge {% if po.input_tax_credit_eligible %}green{% else %}orange{% endif %}">{{ 'Eligible' if po.input_tax_credit_eligible else 'Ineligible' }}</span></td></tr>
+      {% else %}
+      <tr><td colspan="9">No purchase records are available for the selected filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

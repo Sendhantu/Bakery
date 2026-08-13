@@ -1,0 +1,23 @@
+{% extends "branch/base_branch.html" %}
+{% block title %}Branch Orders - {{ bakery_name }}{% endblock %}
+{% block page_title %}Orders{% endblock %}
+{% block content %}
+{% if orders %}
+<table class="branch-table">
+  <thead><tr><th>Order</th><th>Status</th><th>Payment</th><th>Total</th><th></th></tr></thead>
+  <tbody>
+    {% for order in orders %}
+    <tr>
+      <td>{{ order.order_number }}</td>
+      <td>{{ order.status }}</td>
+      <td>{{ order.payment_status }}</td>
+      <td>{{ format_inr(order.total) }}</td>
+      <td><a href="{{ branch_url('branch.order_detail', branch=branch, order_id=order.id) }}">View</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="branch-empty">No branch orders are available yet.</div>
+{% endif %}
+{% endblock %}

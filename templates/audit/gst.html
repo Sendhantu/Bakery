@@ -1,0 +1,16 @@
+{% extends "audit/base_audit.html" %}
+{% block page_title %}GST &amp; Tax{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Output GST</h3><div class="audit-value">{{ format_inr(summary.gross_output_gst) }}</div></div>
+  <div class="audit-panel"><h3>Input GST Recorded</h3><div class="audit-value">{{ format_inr(summary.input_gst_recorded) }}</div></div>
+  <div class="audit-panel"><h3>GST Liability</h3><div class="audit-value">{{ format_inr(summary.net_gst_liability) }}</div></div>
+  <div class="audit-panel"><h3>TDS Withheld</h3><div class="audit-value">{{ format_inr(tds.tds_withheld) }}</div></div>
+</section>
+<section class="audit-panel">
+  <h3>Sales GST Register</h3>
+  <div class="audit-table-wrap"><table class="audit-table"><thead><tr><th>Invoice</th><th>Date</th><th>Source</th><th class="num">Taxable</th><th class="num">CGST</th><th class="num">SGST</th><th class="num">GST</th><th>Liability</th></tr></thead><tbody>
+    {% for row in summary.rows %}<tr><td>{{ row.invoice_number }}</td><td>{{ row.order_date }}</td><td>{{ row.order_source_label }}</td><td class="num">{{ format_inr(row.base_taxable_value) }}</td><td class="num">{{ format_inr(row.cgst_amount) }}</td><td class="num">{{ format_inr(row.sgst_amount) }}</td><td class="num">{{ format_inr(row.gst_amount) }}</td><td>{{ row.tax_liability_flag }}</td></tr>{% else %}<tr><td colspan="8">No GST sales rows in this period.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

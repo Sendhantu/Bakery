@@ -1,0 +1,41 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Inventory Review - {{ bakery_name }}{% endblock %}
+{% block page_title %}Inventory Review{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Total Inventory Value</h3><div class="audit-value">{{ format_inr(inventory.total_value) }}</div></div>
+  <div class="audit-panel"><h3>Raw Materials</h3><div class="audit-value">{{ format_inr(inventory.raw_material_value) }}</div></div>
+  <div class="audit-panel"><h3>Finished Goods</h3><div class="audit-value">{{ format_inr(inventory.finished_goods_value) }}</div></div>
+  <div class="audit-panel"><h3>Wastage / Expiry Logs</h3><div class="audit-value">{{ wastage|length }}</div></div>
+</section>
+<section class="audit-panel" style="margin-bottom:14px">
+  <h3>Branch Inventory Valuation</h3>
+  <div class="audit-table-wrap">
+    <table class="audit-table">
+      <thead><tr><th>Branch</th><th class="num">Raw Material Value</th><th class="num">Finished Goods Value</th><th class="num">Total Value</th></tr></thead>
+      <tbody>
+        {% for row in inventory.branch_rows %}
+        <tr><td>{{ row.branch }}</td><td class="num">{{ format_inr(row.raw_material_value) }}</td><td class="num">{{ format_inr(row.finished_goods_value) }}</td><td class="num">{{ format_inr(row.total_value) }}</td></tr>
+        {% else %}
+        <tr><td colspan="4">No inventory valuation records are available.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="audit-panel">
+  <h3>Wastage / Damage / Expiry</h3>
+  <div class="audit-table-wrap">
+    <table class="audit-table">
+      <thead><tr><th>Date</th><th>Material</th><th>Reason</th><th class="num">Quantity</th><th>Actor</th></tr></thead>
+      <tbody>
+        {% for movement in wastage %}
+        <tr><td>{{ movement.created_at.strftime('%d %b %Y') if movement.created_at else '' }}</td><td>{{ movement.raw_material.name if movement.raw_material else '' }}</td><td>{{ movement.reason }}</td><td class="num">{{ movement.quantity }}</td><td>{{ movement.actor.name if movement.actor else '' }}</td></tr>
+        {% else %}
+        <tr><td colspan="5">No wastage, damage, or expiry movements are recorded.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

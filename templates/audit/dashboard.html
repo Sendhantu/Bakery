@@ -1,0 +1,114 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Audit Dashboard - {{ bakery_name }}{% endblock %}
+{% block page_title %}Financial Dashboard{% endblock %}
+{% block content %}
+<section class="audit-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin-bottom:14px">
+  {% for metric in primary_metrics %}
+  <div class="audit-panel">
+    <h3>{{ metric.label }}</h3>
+    <div class="audit-value">{{ format_inr(metric.value) }}</div>
+    {% if metric.comparison is not none %}
+      <div class="{{ 'audit-positive' if metric.comparison >= 0 else 'audit-negative' }}">{{ 'up' if metric.comparison >= 0 else 'down' }} {{ metric.comparison|abs }}% vs previous period</div>
+    {% else %}
+      <div class="audit-subtle">Comparison unavailable for this metric</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section class="audit-grid" style="margin-bottom:16px">
+  {% for metric in secondary_metrics %}
+  <div class="audit-panel">
+    <h3>{{ metric.label }}</h3>
+    <div class="audit-value" style="font-size:1.25rem">{{ format_inr(metric.value) }}</div>
+  </div>
+  {% endfor %}
+</section>
+
+<div class="audit-grid" style="grid-template-columns:minmax(0,1.4fr) minmax(320px,.8fr); margin-bottom:16px">
+  <section class="audit-panel">
+    <h3>Revenue vs Expenses</h3>
+    <canvas class="audit-chart" id="auditRevenueChart"></canvas>
+  </section>
+  <section class="audit-panel">
+    <h3>Profit Trend</h3>
+    <canvas class="audit-chart" id="auditProfitChart"></canvas>
+  </section>
+</div>
+
+<div class="audit-grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr); margin-bottom:16px">
+  <section class="audit-panel">
+    <h3>Expense Breakdown</h3>
+    <div class="audit-table-wrap">
+      <table class="audit-table">
+        <thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          {% for row in dashboard.category_breakdown.expenses[:8] %}
+          <tr><td>{{ row.category }}</td><td class="num">{{ format_inr(row.amount) }}</td></tr>
+          {% else %}
+          <tr><td colspan="2">No expenses in the selected period.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <section class="audit-panel">
+    <h3>Branch Revenue</h3>
+    <div class="audit-table-wrap">
+      <table class="audit-table">
+        <thead><tr><th>Branch</th><th class="num">Revenue</th><th class="num">Orders</th><th class="num">Net</th></tr></thead>
+        <tbody>
+          {% for row in branch_rows %}
+          <tr>
+            <td>{% if row.branch_id %}<a href="{{ url_for('audit.branch_revenue_detail', branch_id=row.branch_id, financial_year=selected_financial_year) }}">{{ row.branch }}</a>{% else %}{{ row.branch }}{% endif %}</td>
+            <td class="num">{{ format_inr(row.revenue) }}</td>
+            <td class="num">{{ row.orders }}</td>
+            <td class="num">{{ format_inr(row.gross_contribution) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">No branch revenue in the selected period.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<section class="audit-panel">
+  <h3>Recent Financial Activity</h3>
+  <div class="audit-actions" style="margin-bottom:10px">
+    {% for key, label in report_catalog.items() %}
+      {% if loop.index <= 5 %}<a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_report', report_key=key, file_format='csv', financial_year=selected_financial_year) }}">{{ label }} CSV</a>{% endif %}
+    {% endfor %}
+  </div>
+  <div class="audit-subtle">Figures are calculated from authoritative Bakery orders, financial transactions, GST summaries, and inventory records available to the application.</div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function() {
+  const chartData = {{ chart_data|tojson }};
+  const revenueCtx = document.getElementById('auditRevenueChart');
+  const profitCtx = document.getElementById('auditProfitChart');
+  if (window.Chart && revenueCtx) {
+    new Chart(revenueCtx, {
+      type: 'line',
+      data: { labels: chartData.labels, datasets: [
+        { label: 'Revenue', data: chartData.revenue, borderColor: '#1f6f55', backgroundColor: 'rgba(31,111,85,.08)', tension: .25 },
+        { label: 'Expenses', data: chartData.expenses, borderColor: '#9a3412', backgroundColor: 'rgba(154,52,18,.08)', tension: .25 }
+      ] },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+  }
+  if (window.Chart && profitCtx) {
+    new Chart(profitCtx, {
+      type: 'bar',
+      data: { labels: chartData.labels, datasets: [
+        { label: 'Net Profit', data: chartData.net_profit, backgroundColor: '#334e68' }
+      ] },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+  }
+})();
+</script>
+{% endblock %}

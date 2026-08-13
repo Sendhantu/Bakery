@@ -1,0 +1,31 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Revenue Review - {{ bakery_name }}{% endblock %}
+{% block page_title %}Revenue Review{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Total Revenue</h3><div class="audit-value">{{ format_inr(payload.pnl.income) }}</div></div>
+  <div class="audit-panel"><h3>Product Sales Revenue</h3><div class="audit-value">{{ format_inr(payload.pnl.sales_revenue) }}</div></div>
+  <div class="audit-panel"><h3>Other Income</h3><div class="audit-value">{{ format_inr(payload.pnl.other_income) }}</div></div>
+  <div class="audit-panel"><h3>Units Sold</h3><div class="audit-value">{{ payload.sales.units_sold|sum(attribute='units_sold') }}</div></div>
+</section>
+<div class="audit-grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr); margin-bottom:16px">
+  <section class="audit-panel"><h3>Monthly Revenue</h3><canvas class="audit-chart" id="revenueTrend"></canvas></section>
+  <section class="audit-panel">
+    <h3>Revenue by Branch</h3>
+    <div class="audit-table-wrap"><table class="audit-table"><thead><tr><th>Branch</th><th class="num">Revenue</th><th class="num">Orders</th><th class="num">AOV</th><th class="num">Net</th></tr></thead><tbody>
+      {% for row in branch_rows %}<tr><td>{% if row.branch_id %}<a href="{{ url_for('audit.branch_revenue_detail', branch_id=row.branch_id, financial_year=selected_financial_year) }}">{{ row.branch }}</a>{% else %}{{ row.branch }}{% endif %}</td><td class="num">{{ format_inr(row.revenue) }}</td><td class="num">{{ row.orders }}</td><td class="num">{{ format_inr(row.average_order_value) }}</td><td class="num">{{ format_inr(row.gross_contribution) }}</td></tr>{% else %}<tr><td colspan="5">No revenue by branch for this period.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</div>
+<section class="audit-panel">
+  <h3>Income Categories Supported by Current Data</h3>
+  <div class="audit-table-wrap"><table class="audit-table"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead><tbody>
+    {% for row in payload.category_breakdown.income %}<tr><td>{{ row.category }}</td><td class="num">{{ format_inr(row.amount) }}</td></tr>{% else %}<tr><td colspan="2">No income categories recorded.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){ const data={{ chart_data|tojson }}; const ctx=document.getElementById('revenueTrend'); if(window.Chart&&ctx){ new Chart(ctx,{type:'line',data:{labels:data.labels,datasets:[{label:'Revenue',data:data.revenue,borderColor:'#1f6f55',backgroundColor:'rgba(31,111,85,.08)',tension:.25}]},options:{responsive:true,maintainAspectRatio:false}}); }})();
+</script>
+{% endblock %}

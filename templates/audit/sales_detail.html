@@ -1,0 +1,54 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Invoice {{ order.invoice_number or order.order_number }} - {{ bakery_name }}{% endblock %}
+{% block breadcrumbs %}<a href="{{ url_for('audit.dashboard') }}">Auditor Portal</a> &gt; <a href="{{ url_for('audit.sales', financial_year=selected_financial_year) }}">Sales</a> &gt; {{ order.invoice_number or order.order_number }}{% endblock %}
+{% block page_title %}Invoice {{ order.invoice_number or order.order_number }}{% endblock %}
+{% block filters %}{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Invoice Total</h3><div class="audit-value">{{ format_inr(order.total) }}</div></div>
+  <div class="audit-panel"><h3>Taxable Amount</h3><div class="audit-value">{{ format_inr(order.gst_taxable_amount or order.subtotal) }}</div></div>
+  <div class="audit-panel"><h3>GST</h3><div class="audit-value">{{ format_inr(order.gst_amount) }}</div></div>
+  <div class="audit-panel"><h3>Payment Status</h3><div class="audit-value">{{ order.payment_status }}</div></div>
+</section>
+<div class="audit-grid" style="grid-template-columns:minmax(280px,.7fr) minmax(0,1.3fr)">
+  <section class="audit-panel">
+    <h3>Invoice Details</h3>
+    <p><strong>Date:</strong> {{ order.placed_at.strftime('%d %b %Y %H:%M') if order.placed_at else '' }}</p>
+    <p><strong>Branch:</strong> {{ order.branch.name if order.branch else 'Unassigned' }}</p>
+    <p><strong>Customer:</strong> {{ order.customer.name if order.customer else 'Walk-in' }}</p>
+    <p><strong>Customer GSTIN:</strong> {{ order.b2b_gstin or 'Not recorded' }}</p>
+    <p><strong>Order Source:</strong> {{ order.gst_order_source }}</p>
+    <p><strong>Payment Method:</strong> {{ order.payment_method }}</p>
+  </section>
+  <section class="audit-panel">
+    <h3>Items</h3>
+    <div class="audit-table-wrap">
+      <table class="audit-table">
+        <thead><tr><th>Product</th><th>Variant</th><th class="num">Qty</th><th class="num">Unit Price</th><th class="num">Subtotal</th></tr></thead>
+        <tbody>
+          {% for item in order_items %}
+          <tr><td>{{ item.product_name }}</td><td>{{ item.variant_name }}</td><td class="num">{{ item.quantity }}</td><td class="num">{{ format_inr(item.unit_price) }}</td><td class="num">{{ format_inr(item.subtotal) }}</td></tr>
+          {% else %}
+          <tr><td colspan="5">No line items are attached to this invoice.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% if refunds %}
+<section class="audit-panel" style="margin-top:14px">
+  <h3>Refunds</h3>
+  <div class="audit-table-wrap">
+    <table class="audit-table">
+      <thead><tr><th>Refund ID</th><th>Status</th><th class="num">Amount</th><th>Created</th></tr></thead>
+      <tbody>
+        {% for refund in refunds %}
+        <tr><td>RF-{{ refund.id }}</td><td>{{ refund.status }}</td><td class="num">{{ format_inr(refund.amount) }}</td><td>{{ refund.created_at.strftime('%d %b %Y') if refund.created_at else '' }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "branch/base_branch.html" %}
+{% block title %}Order {{ order.order_number }} - {{ bakery_name }}{% endblock %}
+{% block page_title %}Order {{ order.order_number }}{% endblock %}
+{% block content %}
+<section class="branch-panel">
+  <h3>Order Summary</h3>
+  <p>Status: {{ order.status }}</p>
+  <p>Payment: {{ order.payment_status }}</p>
+  <p>Total: {{ format_inr(order.total) }}</p>
+</section>
+{% endblock %}

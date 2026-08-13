@@ -58,8 +58,11 @@ class FinanceExportService:
         return buffer.getvalue().encode("utf-8")
 
     def simple_pdf(self, title: str, lines: List[str]) -> bytes:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.pdfgen import canvas
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas
+        except ModuleNotFoundError:
+            return self._simple_pdf_without_reportlab(title, lines)
 
         buffer = io.BytesIO()
         pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -80,6 +83,42 @@ class FinanceExportService:
         pdf.save()
         buffer.seek(0)
         return buffer.getvalue()
+
+    def _simple_pdf_without_reportlab(self, title: str, lines: List[str]) -> bytes:
+        def escape(text):
+            return str(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+        text_lines = [escape(title[:90])] + [escape(line[:110]) for line in lines]
+        stream_lines = ["BT", "/F1 14 Tf", "50 790 Td", f"({text_lines[0]}) Tj"]
+        stream_lines.extend(["/F1 10 Tf", "0 -24 Td"])
+        for line in text_lines[1:]:
+            stream_lines.append(f"({line}) Tj")
+            stream_lines.append("0 -14 Td")
+        stream_lines.append("ET")
+        stream = "\n".join(stream_lines).encode("utf-8")
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+        ]
+        pdf = bytearray(b"%PDF-1.4\n")
+        offsets = [0]
+        for index, obj in enumerate(objects, start=1):
+            offsets.append(len(pdf))
+            pdf.extend(f"{index} 0 obj\n".encode("ascii"))
+            pdf.extend(obj)
+            pdf.extend(b"\nendobj\n")
+        xref = len(pdf)
+        pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+        pdf.extend(b"0000000000 65535 f \n")
+        for offset in offsets[1:]:
+            pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+        pdf.extend(
+            f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii")
+        )
+        return bytes(pdf)
 
     def profit_and_loss_pdf(self, payload: Dict[str, Any]) -> bytes:
         lines = [

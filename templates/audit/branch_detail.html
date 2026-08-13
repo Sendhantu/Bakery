@@ -1,0 +1,14 @@
+{% extends "audit/base_audit.html" %}
+{% block breadcrumbs %}<a href="{{ url_for('audit.dashboard') }}">Auditor Portal</a> &gt; <a href="{{ url_for('audit.branches', financial_year=selected_financial_year) }}">Branch Performance</a> &gt; {{ branch.name }}{% endblock %}
+{% block page_title %}{{ branch.name }} Financial Detail{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Sales</h3><div class="audit-value">{{ orders|length }}</div></div>
+  <div class="audit-panel"><h3>Expenses</h3><div class="audit-value">{{ expenses|length }}</div></div>
+  <div class="audit-panel"><h3>Inventory Value</h3><div class="audit-value">{{ format_inr(inventory.total_value if inventory else 0) }}</div></div>
+</section>
+<div class="audit-grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+  <section class="audit-panel"><h3>Recent Sales</h3><div class="audit-table-wrap"><table class="audit-table"><thead><tr><th>Invoice</th><th>Date</th><th class="num">Total</th><th>Status</th></tr></thead><tbody>{% for order in orders %}<tr><td>{{ order.invoice_number or order.order_number }}</td><td>{{ order.placed_at.strftime('%d %b %Y') if order.placed_at else '' }}</td><td class="num">{{ format_inr(order.total) }}</td><td>{{ order.payment_status }}</td></tr>{% else %}<tr><td colspan="4">No sales for this branch in the selected period.</td></tr>{% endfor %}</tbody></table></div></section>
+  <section class="audit-panel"><h3>Recent Expenses</h3><div class="audit-table-wrap"><table class="audit-table"><thead><tr><th>Date</th><th>Category</th><th class="num">Amount</th></tr></thead><tbody>{% for txn in expenses %}<tr><td>{{ txn.created_at.strftime('%d %b %Y') }}</td><td>{{ txn.category.label if txn.category else '' }}</td><td class="num">{{ format_inr(txn.amount) }}</td></tr>{% else %}<tr><td colspan="3">No expenses for this branch in the selected period.</td></tr>{% endfor %}</tbody></table></div></section>
+</div>
+{% endblock %}

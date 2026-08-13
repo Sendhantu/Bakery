@@ -1,0 +1,111 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Audit Management - Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Audit Management</h1>
+    <p class="text-muted">Prepare audit access, review portal activity, and preview dedicated portal experiences.</p>
+  </div>
+  <div class="flex gap-2" style="flex-wrap:wrap">
+    <a class="btn btn-outline btn-sm" href="{{ url_for('admin.preview_audit_portal') }}">Preview Auditor Portal</a>
+    {% if branches %}
+    <a class="btn btn-primary btn-sm" href="{{ url_for('admin.preview_branch_portal', branch_id=branches[0].id) }}">Preview Branch Portal</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card"><div class="stat-label">Auditors</div><div class="stat-value">{{ auditors|length }}</div></div>
+  <div class="stat-card"><div class="stat-label">Audit Documents</div><div class="stat-value">{{ documents|length }}</div></div>
+  <div class="stat-card"><div class="stat-label">Branch Requests</div><div class="stat-value">{{ branch_requests }}</div></div>
+  <div class="stat-card"><div class="stat-label">Active Transfers</div><div class="stat-value">{{ active_transfers }}</div></div>
+</div>
+
+<div class="page-grid page-grid-sidebar mt-3">
+  <section class="card">
+    <div class="card-header">Auditor Accounts</div>
+    <form method="post" action="{{ url_for('admin.add_auditor_account') }}" class="form-grid">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Name <input name="name" required></label>
+      <label>Email <input type="email" name="email" required></label>
+      <label>Temporary Password <input type="password" name="password" required></label>
+      <button class="btn btn-primary" type="submit">Create Auditor</button>
+    </form>
+    <div class="table-wrap mt-3">
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for auditor in auditors %}
+          <tr>
+            <td>{{ auditor.name }}</td>
+            <td>{{ auditor.email }}</td>
+            <td>{{ 'Active' if auditor.is_active else 'Inactive' }}</td>
+            <td>
+              <form method="post" action="{{ url_for('admin.toggle_auditor_account', user_id=auditor.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-outline btn-sm" type="submit">{{ 'Deactivate' if auditor.is_active else 'Activate' }}</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No auditor accounts yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="card">
+    <div class="card-header">Portal Switcher</div>
+    <p>Preview keeps your administrator identity and records an audit entry.</p>
+    <p><a class="btn btn-outline btn-sm" href="{{ url_for('admin.preview_audit_portal') }}">Auditor Portal Preview</a></p>
+    {% if branches %}
+    <form method="get" action="{{ url_for('admin.preview_branch_portal') }}">
+      <label>Branch
+        <select name="branch_id">
+          {% for branch in branches %}
+          <option value="{{ branch.id }}">{{ branch.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn btn-primary btn-sm" type="submit">Preview Branch</button>
+    </form>
+    {% else %}
+    <p class="text-muted">Create a branch before previewing the Branch Portal.</p>
+    {% endif %}
+  </aside>
+</div>
+
+<div class="page-grid page-grid-sidebar mt-3">
+  <section class="card">
+    <div class="card-header">Audit Documents</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Title</th><th>Category</th><th>Financial Year</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for document in documents %}
+          <tr><td>{{ document.title }}</td><td>{{ document.category }}</td><td>{{ document.financial_year }}</td><td>{{ document.status }}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No audit documents have been registered.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <aside class="card">
+    <div class="card-header">Recent Downloads</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Report</th><th>User</th><th>When</th></tr></thead>
+        <tbody>
+          {% for download in downloads %}
+          <tr><td>{{ download.report_key }}</td><td>{{ download.user.name if download.user else 'Unknown' }}</td><td>{{ download.created_at.strftime('%d %b %Y %H:%M') }}</td></tr>
+          {% else %}
+          <tr><td colspan="3" class="text-center text-muted" style="padding:1rem">No downloads yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </aside>
+</div>
+{% endblock %}

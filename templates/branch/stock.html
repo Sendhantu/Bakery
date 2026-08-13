@@ -1,0 +1,28 @@
+{% extends "branch/base_branch.html" %}
+{% block title %}Branch Stock - {{ bakery_name }}{% endblock %}
+{% block page_title %}Stock{% endblock %}
+{% block content %}
+{% if inventory or variants or materials %}
+<table class="branch-table">
+  <thead><tr><th>Item</th><th>Type</th><th>Quantity</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for row in inventory %}
+    <tr>
+      <td>{{ row.product.name if row.product else row.raw_material.name if row.raw_material else 'Unassigned item' }}</td>
+      <td>{{ 'Product' if row.product else 'Raw material' }}</td>
+      <td>{{ row.available_quantity }}</td>
+      <td>{{ 'Low stock' if row.is_low_stock else 'Available' }}</td>
+    </tr>
+    {% endfor %}
+    {% for variant in variants %}
+    <tr><td>{{ variant.product.name }} - {{ variant.name }}</td><td>Variant</td><td>{{ variant.stock }}</td><td>Assigned branch stock</td></tr>
+    {% endfor %}
+    {% for material in materials %}
+    <tr><td>{{ material.name }}</td><td>Raw material</td><td>{{ material.usable_quantity }} {{ material.unit }}</td><td>{{ material.stock_status.replace('_', ' ').title() }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="branch-empty">No stock records are assigned to this branch yet.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "audit/base_audit.html" %}
+{% block page_title %}Bank &amp; Cash{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Cash Sales</h3><div class="audit-value">{{ format_inr(cash_sales) }}</div></div>
+  <div class="audit-panel"><h3>Digital Collections</h3><div class="audit-value">{{ format_inr(digital_sales) }}</div></div>
+  <div class="audit-panel"><h3>Bank Balance</h3><div class="audit-value">Not modeled</div></div>
+  <div class="audit-panel"><h3>Cash Balance</h3><div class="audit-value">Not modeled</div></div>
+</section>
+<div class="audit-empty">{{ limitation }}</div>
+{% endblock %}

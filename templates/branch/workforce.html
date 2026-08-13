@@ -1,0 +1,17 @@
+{% extends "branch/base_branch.html" %}
+{% block title %}Branch Workforce - {{ bakery_name }}{% endblock %}
+{% block page_title %}Workforce{% endblock %}
+{% block content %}
+{% if staff %}
+<table class="branch-table">
+  <thead><tr><th>Name</th><th>Role</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for user in staff %}
+    <tr><td>{{ user.name }}</td><td>{{ user.role.replace('_', ' ').title() }}</td><td>{{ 'Active' if user.is_active else 'Inactive' }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="branch-empty">No staff are assigned to this branch yet.</div>
+{% endif %}
+{% endblock %}

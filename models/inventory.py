@@ -19,6 +19,29 @@ STOCK_MOVEMENT_REASONS = [
 ]
 STOCK_MOVEMENT_REASON_LABELS = dict(STOCK_MOVEMENT_REASONS)
 
+STOCK_TRANSFER_STATUSES = [
+    ("PREPARED", "Prepared"),
+    ("DISPATCHED", "Dispatched"),
+    ("IN_TRANSIT", "In transit"),
+    ("RECEIVED", "Received"),
+    ("CANCELLED", "Cancelled"),
+]
+STOCK_TRANSFER_STATUS_LABELS = dict(STOCK_TRANSFER_STATUSES)
+STOCK_TRANSFER_STATUS_VALUES = {value for value, _label in STOCK_TRANSFER_STATUSES}
+
+PURCHASE_REQUEST_STATUSES = [
+    ("DRAFT", "Draft"),
+    ("SUBMITTED", "Submitted"),
+    ("UNDER_REVIEW", "Under review"),
+    ("APPROVED", "Approved"),
+    ("PARTIALLY_APPROVED", "Partially approved"),
+    ("REJECTED", "Rejected"),
+    ("FULFILLED", "Fulfilled"),
+    ("CANCELLED", "Cancelled"),
+]
+PURCHASE_REQUEST_STATUS_LABELS = dict(PURCHASE_REQUEST_STATUSES)
+PURCHASE_REQUEST_STATUS_VALUES = {value for value, _label in PURCHASE_REQUEST_STATUSES}
+
 BATCH_STATUSES = [
     ("available", "Available"),
     ("partially_used", "Partially Used"),
@@ -284,6 +307,162 @@ class Branch(db.Model):
     @property
     def status(self):
         return 'Open' if self.is_active else 'Closed'
+
+
+class BranchProductAssignment(db.Model):
+    __tablename__ = "branch_product_assignments"
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    branch = db.relationship("Branch", backref="product_assignments")
+    product = db.relationship("Product", backref="branch_assignments")
+    creator = db.relationship("User")
+
+    __table_args__ = (
+        db.UniqueConstraint("branch_id", "product_id", name="uq_branch_product_assignment"),
+        db.Index("idx_branch_product_assignment_active", "branch_id", "is_active"),
+    )
+
+
+class BranchInventory(db.Model):
+    __tablename__ = "branch_inventory"
+    id = db.Column(db.Integer, primary_key=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"))
+    raw_material_id = db.Column(db.Integer, db.ForeignKey("raw_materials.id"))
+    quantity = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    reserved_quantity = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    min_stock = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    sync_status = db.Column(db.String(30), nullable=False, default="SYNCED")
+    version = db.Column(db.Integer, nullable=False, default=1)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    branch = db.relationship("Branch", backref="inventory_items")
+    product = db.relationship("Product", backref="branch_inventory_items")
+    raw_material = db.relationship("RawMaterial", backref="branch_inventory_items")
+
+    __table_args__ = (
+        db.UniqueConstraint("branch_id", "product_id", name="uq_branch_inventory_product"),
+        db.UniqueConstraint("branch_id", "raw_material_id", name="uq_branch_inventory_material"),
+        db.Index("idx_branch_inventory_branch_status", "branch_id", "sync_status"),
+    )
+
+    @property
+    def available_quantity(self):
+        return max(
+            Decimal("0"),
+            Decimal(str(self.quantity or 0)) - Decimal(str(self.reserved_quantity or 0)),
+        )
+
+    @property
+    def is_low_stock(self):
+        return Decimal(str(self.min_stock or 0)) > 0 and self.available_quantity <= Decimal(str(self.min_stock or 0))
+
+
+class StockTransfer(db.Model):
+    __tablename__ = "stock_transfers"
+    id = db.Column(db.Integer, primary_key=True)
+    transfer_number = db.Column(
+        db.String(80),
+        nullable=False,
+        unique=True,
+        default=lambda: f"TRF-{uuid.uuid4().hex[:10].upper()}",
+    )
+    source_location = db.Column(db.String(80), nullable=False, default="CENTRAL_KITCHEN")
+    destination_branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    status = db.Column(db.String(30), nullable=False, default="PREPARED")
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    received_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    prepared_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    dispatched_at = db.Column(db.DateTime)
+    received_at = db.Column(db.DateTime)
+    idempotency_key = db.Column(db.String(120), unique=True)
+    sync_status = db.Column(db.String(30), nullable=False, default="SYNCED")
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+
+    destination_branch = db.relationship("Branch", backref="incoming_stock_transfers")
+    creator = db.relationship("User", foreign_keys=[created_by])
+    receiver = db.relationship("User", foreign_keys=[received_by])
+    items = db.relationship("StockTransferItem", backref="transfer", lazy="dynamic", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        db.Index("idx_stock_transfer_branch_status", "destination_branch_id", "status"),
+        db.Index("idx_stock_transfer_sync", "sync_status", "updated_at"),
+    )
+
+
+class StockTransferItem(db.Model):
+    __tablename__ = "stock_transfer_items"
+    id = db.Column(db.Integer, primary_key=True)
+    transfer_id = db.Column(db.Integer, db.ForeignKey("stock_transfers.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"))
+    raw_material_id = db.Column(db.Integer, db.ForeignKey("raw_materials.id"))
+    quantity = db.Column(db.Numeric(10, 2), nullable=False)
+    received_quantity = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+
+    product = db.relationship("Product")
+    raw_material = db.relationship("RawMaterial")
+
+    __table_args__ = (
+        db.Index("idx_stock_transfer_item_transfer", "transfer_id"),
+    )
+
+
+class BranchPurchaseRequest(db.Model):
+    __tablename__ = "branch_purchase_requests"
+    id = db.Column(db.Integer, primary_key=True)
+    request_number = db.Column(
+        db.String(80),
+        nullable=False,
+        unique=True,
+        default=lambda: f"PRQ-{uuid.uuid4().hex[:10].upper()}",
+    )
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id"), nullable=False)
+    requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    priority = db.Column(db.String(20), nullable=False, default="normal")
+    reason = db.Column(db.Text)
+    status = db.Column(db.String(30), nullable=False, default="DRAFT")
+    admin_response = db.Column(db.Text)
+    sync_status = db.Column(db.String(30), nullable=False, default="SYNCED")
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+    submitted_at = db.Column(db.DateTime)
+    reviewed_at = db.Column(db.DateTime)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+
+    branch = db.relationship("Branch", backref="purchase_requests")
+    requester = db.relationship("User", foreign_keys=[requested_by])
+    reviewer = db.relationship("User", foreign_keys=[reviewed_by])
+    items = db.relationship("BranchPurchaseRequestItem", backref="request", lazy="dynamic", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        db.Index("idx_branch_purchase_request_branch_status", "branch_id", "status"),
+        db.Index("idx_branch_purchase_request_sync", "sync_status", "updated_at"),
+    )
+
+
+class BranchPurchaseRequestItem(db.Model):
+    __tablename__ = "branch_purchase_request_items"
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.Integer, db.ForeignKey("branch_purchase_requests.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"))
+    raw_material_id = db.Column(db.Integer, db.ForeignKey("raw_materials.id"))
+    requested_quantity = db.Column(db.Numeric(10, 2), nullable=False)
+    approved_quantity = db.Column(db.Numeric(10, 2))
+    notes = db.Column(db.Text)
+
+    product = db.relationship("Product")
+    raw_material = db.relationship("RawMaterial")
+
+    __table_args__ = (
+        db.Index("idx_branch_purchase_request_item_request", "request_id"),
+    )
 
 
 class ProductionPlan(db.Model):

@@ -1,0 +1,9 @@
+{% extends "audit/base_audit.html" %}
+{% block page_title %}Balance Sheet{% endblock %}
+{% block content %}
+<div class="audit-empty" style="margin-bottom:14px">{{ limitation }}</div>
+<div class="audit-grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+  <section class="audit-panel"><h3>Supported Assets</h3><div class="audit-table-wrap"><table class="audit-table"><tbody><tr><td>Inventory Value</td><td class="num">{{ format_inr(inventory.total_value) }}</td></tr><tr><td>Receivables</td><td class="num">Not fully modeled</td></tr><tr><td>Bank / Cash</td><td class="num">Not modeled</td></tr></tbody></table></div></section>
+  <section class="audit-panel"><h3>Supported Liabilities</h3><div class="audit-table-wrap"><table class="audit-table"><tbody><tr><td>GST Payable</td><td class="num">{{ format_inr(gst.net_gst_liability) }}</td></tr><tr><td>TDS / Loans / Equity</td><td class="num">Not fully modeled</td></tr><tr><td>Current Year Profit</td><td class="num">{{ format_inr(pnl.net_profit) }}</td></tr></tbody></table></div></section>
+</div>
+{% endblock %}
