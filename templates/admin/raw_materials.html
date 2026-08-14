@@ -103,8 +103,8 @@
         </select>
       </div>
       <div class="raw-material-filter-actions">
-        <button type="submit" class="btn btn-outline">Apply Filters</button>
-        <a href="{{ url_for('admin.raw_materials') }}" class="btn btn-ghost">Clear</a>
+        <button type="submit" class="btn btn-outline btn-sm">Apply</button>
+        <a href="{{ url_for('admin.raw_materials') }}" class="btn btn-ghost btn-sm">Clear</a>
       </div>
     </form>
   </div>
@@ -194,27 +194,38 @@
     {% if stock_status %}Filtered: {{ dict(stock_status_options).get(stock_status, stock_status) }}{% elif search %}Search Results{% else %}All Raw Materials{% endif %}
     <span class="text-muted">· {{ pagination.total }} total</span>
   </div>
-  <div class="raw-material-list">
-    <div class="raw-material-list-head">
-      <div>Material</div>
-      <div>Available</div>
-      <div>Status</div>
-      <div>Expiry</div>
-      <div>Last Purchase</div>
-      <div></div>
-    </div>
+  <div class="raw-material-table-wrap">
+    <table class="raw-material-table">
+      <thead>
+        <tr>
+          <th class="col-material">Raw Material</th>
+          <th>Category</th>
+          <th>Unit</th>
+          <th class="num">Current Stock</th>
+          <th class="num">Cost</th>
+          <th>Supplier</th>
+          <th>Status</th>
+          <th>Expiry</th>
+          <th>Last Purchase</th>
+          <th class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
     {% for material in materials %}
-    <div class="raw-material-list-row">
-      <div>
-        <a href="{{ url_for('admin.material_detail', material_id=material.id) }}" style="color:var(--brown);font-weight:600">{{ material.name }}</a>
-        {% if material.sku %}<div class="text-muted text-sm">{{ material.sku }}</div>{% endif %}
-        {% if material.category %}<div class="text-muted text-sm">{{ material.category }}</div>{% endif %}
-      </div>
-      <div>
-        <strong>{{ material.usable_quantity }}</strong> {{ material.unit }}
-        {% if material.reserved_quantity %}<div class="text-muted text-sm">{{ material.reserved_quantity }} reserved</div>{% endif %}
-      </div>
-      <div>
+        <tr>
+          <td class="col-material">
+            <a href="{{ url_for('admin.material_detail', material_id=material.id) }}" class="raw-material-name">{{ material.name }}</a>
+            {% if material.sku %}<div class="text-muted text-sm">{{ material.sku }}</div>{% endif %}
+          </td>
+          <td>{{ material.category or '—' }}</td>
+          <td>{{ material.unit }}</td>
+          <td class="num">
+            <strong>{{ material.usable_quantity }}</strong>
+            {% if material.reserved_quantity %}<div class="text-muted text-sm">{{ material.reserved_quantity }} reserved</div>{% endif %}
+          </td>
+          <td class="num">₹{{ material.cost_per_unit or 0 }}</td>
+          <td>{{ material.preferred_supplier.name if material.preferred_supplier else material.supplier or '—' }}</td>
+          <td>
         {% if material.stock_status == 'out_of_stock' %}
         <span class="badge badge-red">Out of Stock</span>
         {% elif material.stock_status == 'low_stock' %}
@@ -228,8 +239,8 @@
         {% if not material.is_active %}
         <span class="badge badge-brown">Paused</span>
         {% endif %}
-      </div>
-      <div>
+          </td>
+          <td>
         {% if material.expiry_summary and material.expiry_summary.status == 'expired' %}
         <span class="badge badge-red">Expired</span>
         {% elif material.expiry_summary and material.expiry_summary.status == 'expiring_soon' %}
@@ -239,24 +250,36 @@
         {% else %}
         <span class="text-muted text-sm">—</span>
         {% endif %}
-      </div>
-      <div>
+          </td>
+          <td>
         {% if material.last_purchased_at %}
         <div>{{ material.last_purchased_at.strftime('%d %b %Y') }}</div>
         <div class="text-muted text-sm">{{ material.last_purchase_quantity }} {{ material.unit }} @ ₹{{ material.last_purchase_unit_price }}</div>
         {% else %}
         <span class="text-muted text-sm">Never purchased</span>
         {% endif %}
-      </div>
-      <div class="raw-material-list-actions">
-        <a href="{{ url_for('admin.material_detail', material_id=material.id) }}" class="btn btn-outline btn-sm">View</a>
+          </td>
+          <td>
+            <div class="raw-material-list-actions">
+        <a href="{{ url_for('admin.material_detail', material_id=material.id) }}" class="btn btn-outline btn-sm" title="View {{ material.name }}">View</a>
         {% if can_admin_manager %}
-        <button type="button" class="btn btn-ghost btn-sm" data-toggle-target="#inline-stock-{{ material.id }}" data-toggle-hide-text="Close">Stock</button>
+        <a href="{{ url_for('admin.material_detail', material_id=material.id, edit=1) }}#edit-material-form" class="btn btn-ghost btn-sm" title="Edit {{ material.name }}">Edit</a>
+        <button type="button" class="btn btn-ghost btn-sm" title="Quick stock update for {{ material.name }}" data-toggle-target="#inline-stock-{{ material.id }}" data-toggle-hide-text="Close">Stock</button>
+        <form method="POST" action="{{ url_for('admin.delete_raw_material', material_id=material.id) }}">
+          <button type="submit"
+                  class="btn btn-danger btn-sm"
+                  title="Delete {{ material.name }}"
+                  data-confirm="Delete raw material '{{ material.name }}'? This action cannot be undone. Materials linked to history will be paused instead.">
+            Delete
+          </button>
+        </form>
         {% endif %}
-      </div>
-    </div>
+            </div>
+          </td>
+        </tr>
     {% if can_admin_manager %}
-    <div id="inline-stock-{{ material.id }}" class="raw-material-inline-stock hidden">
+        <tr id="inline-stock-{{ material.id }}" class="raw-material-inline-stock hidden">
+          <td colspan="10">
       <form method="POST" action="{{ url_for('admin.record_material_stock_action', material_id=material.id) }}" class="raw-material-stock-form">
         <input type="hidden" name="action" value="add">
         <div class="form-group">
@@ -270,16 +293,21 @@
         <button type="submit" class="btn btn-primary btn-sm">Add</button>
       </form>
       <a href="{{ url_for('admin.material_detail', material_id=material.id) }}#stock-actions" class="btn btn-ghost btn-sm">All stock actions</a>
-    </div>
+          </td>
+        </tr>
     {% endif %}
     {% else %}
-    <div class="text-center text-muted" style="padding:2rem">
+        <tr>
+          <td colspan="10" class="text-center text-muted" style="padding:2rem">
       No raw materials found.
       {% if can_admin_manager %}
       <button type="button" class="btn btn-primary btn-sm mt-2" data-toggle-target="#new-raw-material-form">Create New Raw Material</button>
       {% endif %}
-    </div>
+          </td>
+        </tr>
     {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 {% include 'includes/pagination.html' %}

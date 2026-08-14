@@ -212,8 +212,10 @@ def test_branch_inventory_and_delivery_cash_are_scoped(admin_client):
 
     inventory_response = admin_client.get("/admin/inventory")
     assert inventory_response.status_code == 200
-    assert b"RBAC Branch A Flour" in inventory_response.data
-    assert b"RBAC Branch B Flour" not in inventory_response.data
+    material_inventory_response = admin_client.get("/admin/inventory?view=materials")
+    assert material_inventory_response.status_code == 200
+    assert b"RBAC Branch A Flour" in material_inventory_response.data
+    assert b"RBAC Branch B Flour" not in material_inventory_response.data
 
     own_stock_update = admin_client.post(
         "/admin/inventory/update",

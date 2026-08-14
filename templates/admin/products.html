@@ -53,9 +53,18 @@
                         class="btn btn-ghost btn-sm"
                         style="color:{% if p.is_active %}var(--dusty-rose){% else %}var(--sage){% endif %}"
                         data-confirm="{% if p.is_active %}Move this product offline?{% else %}Make this product live again?{% endif %}">
-                  {% if p.is_active %}Pause{% else %}Go Live{% endif %}
+                  {% if p.is_active %}Pause{% else %}Resume{% endif %}
                 </button>
               </form>
+              {% if not p.is_active %}
+              <form method="POST" action="{{ url_for('admin.remove_product', product_id=p.id) }}">
+                <button type="submit"
+                        class="btn btn-danger btn-sm"
+                        data-confirm="Delete this paused product? Products with order history will stay offline instead.">
+                  Delete
+                </button>
+              </form>
+              {% endif %}
             </div>
           </td>
         </tr>

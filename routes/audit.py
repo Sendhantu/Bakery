@@ -2,12 +2,14 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 import csv
 import io
+from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
 from flask import (
     Blueprint,
     Response,
     abort,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -18,12 +20,19 @@ from flask import (
 from flask_login import current_user
 from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
+from werkzeug.utils import secure_filename
 
 from bootstrap import get_container
 from clock import utcnow
 from models import (
     AuditDocument,
     AuditReportDownload,
+    AUDIT_DOCUMENT_CATEGORIES,
+    AUDIT_REQUIREMENT_CATEGORIES,
+    AUDIT_REQUIREMENT_PRIORITIES,
+    AUDIT_REQUIREMENT_STATUSES,
+    AuditorRequirement,
+    AuditorRequirementEvent,
     Branch,
     BranchInventory,
     FinancialCategory,
@@ -76,6 +85,11 @@ AUDIT_DOCUMENT_CATEGORIES = (
     "Other",
 )
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+AUDITOR_WRITE_ENDPOINTS = {
+    "audit.requirements",
+    "audit.request_revision",
+    "audit.resolve_requirement",
+}
 PAGE_SIZE = 25
 
 
@@ -94,6 +108,49 @@ def available_financial_years(now=None, count=5):
         f"{start.year - offset}-{str(start.year - offset + 1)[-2:]}"
         for offset in range(count)
     ]
+
+
+def audit_requirement_uid():
+    prefix = f"REQ-{utcnow().year}-"
+    latest = (
+        AuditorRequirement.query.filter(
+            AuditorRequirement.requirement_uid.like(f"{prefix}%")
+        )
+        .order_by(AuditorRequirement.id.desc())
+        .first()
+    )
+    next_number = 1
+    if latest and latest.requirement_uid:
+        try:
+            next_number = int(latest.requirement_uid.rsplit("-", 1)[1]) + 1
+        except (IndexError, ValueError):
+            next_number = (latest.id or 0) + 1
+    return f"{prefix}{next_number:04d}"
+
+
+def audit_requirement_event(requirement, event_type, message=""):
+    event = AuditorRequirementEvent(
+        requirement=requirement,
+        actor_id=current_user.id,
+        event_type=event_type,
+        message=(message or "").strip() or None,
+    )
+    db.session.add(event)
+    return event
+
+
+def auditor_requirement_or_404(requirement_id):
+    query = AuditorRequirement.query.options(
+        selectinload(AuditorRequirement.auditor),
+        selectinload(AuditorRequirement.documents),
+        selectinload(AuditorRequirement.events).selectinload(AuditorRequirementEvent.actor),
+    ).filter_by(id=requirement_id)
+    if has_role(current_user, "auditor"):
+        query = query.filter(AuditorRequirement.auditor_id == current_user.id)
+    requirement = query.first()
+    if requirement is None:
+        abort(404)
+    return requirement
 
 
 def financial_year_dates(label):
@@ -117,7 +174,7 @@ def enforce_audit_access():
         return redirect(url_for("auth.login", next=request.full_path.rstrip("?")))
 
     if has_role(current_user, "auditor"):
-        if request.method not in SAFE_METHODS:
+        if request.method not in SAFE_METHODS and request.endpoint not in AUDITOR_WRITE_ENDPOINTS:
             abort(403)
         return None
 
@@ -821,12 +878,167 @@ def branches():
     )
 
 
+@audit_bp.route("/requirements", methods=["GET", "POST"])
+def requirements():
+    period = selected_period()
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        description = (request.form.get("description") or "").strip()
+        category = (request.form.get("category") or "Other").strip()
+        priority = (request.form.get("priority") or "NORMAL").strip().upper()
+        if category not in AUDIT_REQUIREMENT_CATEGORIES:
+            category = "Other"
+        if priority not in AUDIT_REQUIREMENT_PRIORITIES:
+            priority = "NORMAL"
+        if not title or not description:
+            flash("Requirement title and description are required.", "danger")
+            return redirect(url_for("audit.requirements", financial_year=period["financial_year"]))
+        due_date = None
+        due_raw = (request.form.get("due_date") or "").strip()
+        if due_raw:
+            try:
+                due_date = date.fromisoformat(due_raw)
+            except ValueError:
+                flash("Requested due date is invalid.", "danger")
+                return redirect(url_for("audit.requirements", financial_year=period["financial_year"]))
+        requirement = AuditorRequirement(
+            requirement_uid=audit_requirement_uid(),
+            auditor_id=current_user.id,
+            requested_by=current_user.id,
+            financial_year=request.form.get("financial_year") or period["financial_year"],
+            period_label=(request.form.get("period_label") or "").strip() or None,
+            title=title,
+            description=description,
+            category=category,
+            priority=priority,
+            status="OPEN",
+            due_date=due_date,
+            requested_at=utcnow(),
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        db.session.add(requirement)
+        db.session.flush()
+        audit_requirement_event(requirement, "auditor_requested", description)
+        get_container().audit_service.log(
+            current_user,
+            "auditor_requirement_created",
+            "AuditorRequirement",
+            requirement.id,
+            after={
+                "requirement_uid": requirement.requirement_uid,
+                "category": requirement.category,
+                "priority": requirement.priority,
+            },
+            change_summary=f"Auditor created requirement {requirement.requirement_uid}.",
+        )
+        db.session.commit()
+        flash("Requirement sent to Admin Audit Management.", "success")
+        return redirect(url_for("audit.requirement_detail", requirement_id=requirement.id))
+
+    query = AuditorRequirement.query.options(
+        selectinload(AuditorRequirement.documents),
+    )
+    if has_role(current_user, "auditor"):
+        query = query.filter(AuditorRequirement.auditor_id == current_user.id)
+    query = query.filter(AuditorRequirement.financial_year == period["financial_year"])
+    status = (request.args.get("status") or "").strip().upper()
+    if status in AUDIT_REQUIREMENT_STATUSES:
+        query = query.filter(AuditorRequirement.status == status)
+    return render_template(
+        "audit/requirements.html",
+        requirements=query.order_by(AuditorRequirement.updated_at.desc()).limit(50).all(),
+        categories=AUDIT_REQUIREMENT_CATEGORIES,
+        priorities=AUDIT_REQUIREMENT_PRIORITIES,
+        statuses=AUDIT_REQUIREMENT_STATUSES,
+        **audit_shell_context(),
+    )
+
+
+@audit_bp.route("/requirements/<int:requirement_id>")
+def requirement_detail(requirement_id):
+    requirement = auditor_requirement_or_404(requirement_id)
+    visible_documents = [
+        document for document in requirement.documents if document.is_auditor_visible
+    ]
+    return render_template(
+        "audit/requirement_detail.html",
+        requirement=requirement,
+        visible_documents=visible_documents,
+        **audit_shell_context(),
+    )
+
+
+@audit_bp.route("/requirements/<int:requirement_id>/revision", methods=["POST"])
+def request_revision(requirement_id):
+    requirement = auditor_requirement_or_404(requirement_id)
+    comment = (request.form.get("comment") or "").strip()
+    if not comment:
+        flash("Add a revision comment before sending.", "danger")
+        return redirect(url_for("audit.requirement_detail", requirement_id=requirement.id))
+    before = {"status": requirement.status, "latest_auditor_comment": requirement.latest_auditor_comment}
+    requirement.status = "NEEDS_REVISION"
+    requirement.latest_auditor_comment = comment
+    requirement.reviewed_at = utcnow()
+    requirement.updated_at = utcnow()
+    audit_requirement_event(requirement, "auditor_requested_revision", comment)
+    get_container().audit_service.log(
+        current_user,
+        "auditor_requirement_revision_requested",
+        "AuditorRequirement",
+        requirement.id,
+        before=before,
+        after={"status": requirement.status},
+        change_summary=f"Auditor requested revision for {requirement.requirement_uid}.",
+    )
+    db.session.commit()
+    flash("Revision request sent to Admin Audit Management.", "success")
+    return redirect(url_for("audit.requirement_detail", requirement_id=requirement.id))
+
+
+@audit_bp.route("/requirements/<int:requirement_id>/resolve", methods=["POST"])
+def resolve_requirement(requirement_id):
+    requirement = auditor_requirement_or_404(requirement_id)
+    before = {"status": requirement.status}
+    requirement.status = "RESOLVED"
+    requirement.reviewed_at = utcnow()
+    requirement.resolved_at = utcnow()
+    requirement.updated_at = utcnow()
+    audit_requirement_event(
+        requirement,
+        "auditor_resolved",
+        (request.form.get("comment") or "Requirement resolved.").strip(),
+    )
+    get_container().audit_service.log(
+        current_user,
+        "auditor_requirement_resolved",
+        "AuditorRequirement",
+        requirement.id,
+        before=before,
+        after={"status": requirement.status},
+        change_summary=f"Auditor resolved requirement {requirement.requirement_uid}.",
+    )
+    db.session.commit()
+    flash("Requirement marked resolved.", "success")
+    return redirect(url_for("audit.requirement_detail", requirement_id=requirement.id))
+
+
 @audit_bp.route("/documents")
 def documents():
-    query = AuditDocument.query.options(selectinload(AuditDocument.uploader)).filter_by(
+    query = AuditDocument.query.options(
+        selectinload(AuditDocument.uploader),
+        selectinload(AuditDocument.requirement),
+    ).filter_by(
         status="PUBLISHED",
         visibility="AUDITOR",
     )
+    if has_role(current_user, "auditor"):
+        query = query.outerjoin(AuditorRequirement).filter(
+            or_(
+                AuditDocument.requirement_id.is_(None),
+                AuditorRequirement.auditor_id == current_user.id,
+            )
+        )
     category = (request.args.get("category") or "").strip()
     if category:
         query = query.filter(AuditDocument.category == category)
@@ -841,6 +1053,56 @@ def documents():
         documents=query.order_by(AuditDocument.uploaded_at.desc()).all(),
         categories=AUDIT_DOCUMENT_CATEGORIES,
         **audit_shell_context(),
+    )
+
+
+@audit_bp.route("/documents/<document_uid>/download")
+def download_document(document_uid):
+    document = (
+        AuditDocument.query.options(selectinload(AuditDocument.requirement))
+        .filter_by(document_uid=document_uid)
+        .first_or_404()
+    )
+    if not document.is_auditor_visible:
+        abort(404)
+    if (
+        has_role(current_user, "auditor")
+        and document.requirement is not None
+        and document.requirement.auditor_id != current_user.id
+    ):
+        abort(404)
+    safe_reference = secure_filename(document.storage_reference or "")
+    if safe_reference != (document.storage_reference or ""):
+        abort(404)
+    root = current_app.config.get("AUDIT_DOCUMENT_STORAGE_ROOT")
+    base = Path(root) if root else Path(current_app.instance_path) / "audit_documents"
+    target = base / safe_reference
+    if not target.exists():
+        abort(404)
+    db.session.add(
+        AuditReportDownload(
+            user_id=current_user.id,
+            report_key=f"audit-document:{document.document_uid}",
+            financial_year=document.financial_year,
+            file_format=(document.original_filename or "").rsplit(".", 1)[-1] or "file",
+            portal_context="audit_admin_preview" if is_admin_preview() else "audit",
+            ip_address=request.remote_addr,
+            user_agent=(request.user_agent.string or "")[:200],
+        )
+    )
+    get_container().audit_service.log(
+        current_user,
+        "auditor_document_download",
+        "AuditDocument",
+        document.id,
+        change_summary=f"Auditor downloaded audit document: {document.title}.",
+    )
+    db.session.commit()
+    return send_file(
+        target,
+        as_attachment=True,
+        download_name=document.original_filename or target.name,
+        mimetype=document.mime_type,
     )
 
 

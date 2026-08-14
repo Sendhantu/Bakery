@@ -3,14 +3,24 @@
 {% block page_title %}Documents{% endblock %}
 {% block content %}
 {% if documents %}
-<table class="audit-table">
-  <thead><tr><th>Title</th><th>Category</th><th>Financial Year</th><th>Status</th></tr></thead>
-  <tbody>
-    {% for document in documents %}
-    <tr><td>{{ document.title }}</td><td>{{ document.category }}</td><td>{{ document.financial_year }}</td><td>{{ document.status }}</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="audit-table-wrap">
+  <table class="audit-table">
+    <thead><tr><th>Document Name</th><th>Category</th><th>Financial Year</th><th>Period</th><th>Published Date</th><th>Related Requirement</th><th>Download</th></tr></thead>
+    <tbody>
+      {% for document in documents %}
+      <tr>
+        <td>{{ document.title }}</td>
+        <td>{{ document.category }}</td>
+        <td>{{ document.financial_year }}</td>
+        <td>{{ document.period_label or '—' }}</td>
+        <td>{{ document.published_at.strftime('%d %b %Y') if document.published_at else document.uploaded_at.strftime('%d %b %Y') }}</td>
+        <td>{{ document.requirement.requirement_uid if document.requirement else 'General' }}</td>
+        <td><a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_document', document_uid=document.document_uid) }}">Download</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% else %}
 <div class="audit-empty">No published audit documents are available yet.</div>
 {% endif %}

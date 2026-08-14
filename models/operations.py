@@ -4,6 +4,54 @@ from clock import utcnow
 from .base import db
 
 
+AUDIT_REQUIREMENT_CATEGORIES = (
+    "Sales",
+    "Purchases",
+    "GST",
+    "Income Tax",
+    "TDS",
+    "Bank",
+    "Cash",
+    "Inventory",
+    "Fixed Assets",
+    "Payroll",
+    "Loans",
+    "Financial Statements",
+    "Vendor",
+    "Other",
+)
+AUDIT_REQUIREMENT_PRIORITIES = ("LOW", "NORMAL", "HIGH", "URGENT")
+AUDIT_REQUIREMENT_STATUSES = (
+    "OPEN",
+    "IN_PROGRESS",
+    "DOCUMENTS_UPLOADED",
+    "SUBMITTED_TO_AUDITOR",
+    "NEEDS_REVISION",
+    "RESOLVED",
+    "CLOSED",
+)
+AUDIT_DOCUMENT_CATEGORIES = (
+    "Financial Statements",
+    "Sales",
+    "Purchases",
+    "GST",
+    "Income Tax",
+    "TDS",
+    "Bank Statements",
+    "Bank Reconciliation",
+    "Cash",
+    "Inventory",
+    "Fixed Assets",
+    "Payroll",
+    "Loans",
+    "Vendor Documents",
+    "Audit Reports",
+    "Other",
+)
+AUDIT_DOCUMENT_STATUSES = ("DRAFT", "READY_FOR_AUDITOR", "PUBLISHED", "ARCHIVED")
+AUDIT_DOCUMENT_VISIBILITIES = ("INTERNAL", "AUDITOR")
+
+
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"
     id = db.Column(db.Integer, primary_key=True)
@@ -43,14 +91,22 @@ class AuditDocument(db.Model):
     visibility = db.Column(db.String(30), nullable=False, default="AUDITOR")
     status = db.Column(db.String(30), nullable=False, default="DRAFT")
     uploaded_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    requirement_id = db.Column(db.Integer, db.ForeignKey("auditor_requirements.id"))
+    period_label = db.Column(db.String(80))
+    document_type = db.Column(db.String(80))
+    description = db.Column(db.Text)
+    document_date = db.Column(db.Date)
     uploaded_at = db.Column(db.DateTime, default=utcnow, nullable=False)
     published_at = db.Column(db.DateTime)
+    archived_at = db.Column(db.DateTime)
 
     uploader = db.relationship("User", backref="uploaded_audit_documents")
+    requirement = db.relationship("AuditorRequirement", back_populates="documents")
 
     __table_args__ = (
         db.Index("idx_audit_document_year_status", "financial_year", "status"),
         db.Index("idx_audit_document_category_status", "category", "status"),
+        db.Index("idx_audit_document_requirement_status", "requirement_id", "status"),
     )
 
     @property
@@ -59,6 +115,76 @@ class AuditDocument(db.Model):
             (self.visibility or "").strip().upper() == "AUDITOR"
             and (self.status or "").strip().upper() == "PUBLISHED"
         )
+
+
+class AuditorRequirement(db.Model):
+    __tablename__ = "auditor_requirements"
+
+    id = db.Column(db.Integer, primary_key=True)
+    requirement_uid = db.Column(db.String(40), nullable=False, unique=True)
+    auditor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    financial_year = db.Column(db.String(20), nullable=False)
+    period_label = db.Column(db.String(80))
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(50), nullable=False, default="Other")
+    priority = db.Column(db.String(20), nullable=False, default="NORMAL")
+    status = db.Column(db.String(30), nullable=False, default="OPEN")
+    due_date = db.Column(db.Date)
+    requested_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    assigned_to = db.Column(db.Integer, db.ForeignKey("users.id"))
+    admin_response = db.Column(db.Text)
+    latest_auditor_comment = db.Column(db.Text)
+    submitted_at = db.Column(db.DateTime)
+    reviewed_at = db.Column(db.DateTime)
+    resolved_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    auditor = db.relationship("User", foreign_keys=[auditor_id], backref="audit_requirements")
+    requester = db.relationship("User", foreign_keys=[requested_by])
+    assignee = db.relationship("User", foreign_keys=[assigned_to])
+    documents = db.relationship(
+        "AuditDocument",
+        back_populates="requirement",
+        lazy="selectin",
+    )
+    events = db.relationship(
+        "AuditorRequirementEvent",
+        back_populates="requirement",
+        cascade="all, delete-orphan",
+        order_by="AuditorRequirementEvent.created_at.desc()",
+    )
+
+    __table_args__ = (
+        db.Index("idx_auditor_requirement_status_year", "status", "financial_year"),
+        db.Index("idx_auditor_requirement_auditor_status", "auditor_id", "status"),
+        db.Index("idx_auditor_requirement_category_status", "category", "status"),
+        db.Index("idx_auditor_requirement_due_date", "due_date"),
+    )
+
+
+class AuditorRequirementEvent(db.Model):
+    __tablename__ = "auditor_requirement_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    requirement_id = db.Column(
+        db.Integer, db.ForeignKey("auditor_requirements.id"), nullable=False
+    )
+    actor_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    event_type = db.Column(db.String(50), nullable=False)
+    message = db.Column(db.Text)
+    document_id = db.Column(db.Integer, db.ForeignKey("audit_documents.id"))
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+    requirement = db.relationship("AuditorRequirement", back_populates="events")
+    actor = db.relationship("User")
+    document = db.relationship("AuditDocument")
+
+    __table_args__ = (
+        db.Index("idx_audit_requirement_event_requirement_created", "requirement_id", "created_at"),
+    )
 
 
 class AuditReportDownload(db.Model):

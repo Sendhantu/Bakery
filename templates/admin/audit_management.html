@@ -1,111 +1,286 @@
 {% extends 'admin/base_admin.html' %}
 {% block title %}Audit Management - Admin{% endblock %}
 {% block content %}
-<div class="page-header">
-  <div>
-    <h1>Audit Management</h1>
-    <p class="text-muted">Prepare audit access, review portal activity, and preview dedicated portal experiences.</p>
+{% set base_args = {'financial_year': selected_financial_year} %}
+<div class="audit-management">
+  <div class="audit-management-header">
+    <div>
+      <h1>Audit Management</h1>
+      <p>Manage auditor requirements, financial documents, published reports and auditor access.</p>
+    </div>
+    <div class="audit-management-actions">
+      <a class="btn btn-outline btn-sm" href="{{ url_for('admin.preview_audit_portal') }}">Preview Auditor Portal</a>
+      {% if branches %}
+      <a class="btn btn-primary btn-sm" href="{{ url_for('admin.preview_branch_portal', branch_id=branches[0].id) }}">Preview Branch Portal</a>
+      {% endif %}
+    </div>
   </div>
-  <div class="flex gap-2" style="flex-wrap:wrap">
-    <a class="btn btn-outline btn-sm" href="{{ url_for('admin.preview_audit_portal') }}">Preview Auditor Portal</a>
-    {% if branches %}
-    <a class="btn btn-primary btn-sm" href="{{ url_for('admin.preview_branch_portal', branch_id=branches[0].id) }}">Preview Branch Portal</a>
-    {% endif %}
+
+  <form method="get" class="audit-compact-filters">
+    <input type="hidden" name="section" value="{{ active_section }}">
+    <label>Financial Year
+      <select name="financial_year">
+        {% for year in financial_years %}
+        <option value="{{ year }}" {% if year == selected_financial_year %}selected{% endif %}>FY {{ year }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Auditor
+      <select name="auditor_id">
+        <option value="">All auditors</option>
+        {% for auditor in auditors %}
+        <option value="{{ auditor.id }}" {% if request.args.get('auditor_id', type=int) == auditor.id %}selected{% endif %}>{{ auditor.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn btn-primary btn-sm" type="submit">Apply</button>
+  </form>
+
+  <nav class="audit-management-tabs" aria-label="Audit Management sections">
+    {% for section_key, section_label in audit_sections %}
+    <a href="{{ url_for('admin.audit_management', section=section_key, **base_args) }}" class="{% if active_section == section_key %}active{% endif %}">{{ section_label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if active_section == 'overview' %}
+  <section class="audit-overview-grid">
+    {% for label, value, section_key, status_filter in overview_cards %}
+    <a class="audit-kpi-card" href="{{ url_for('admin.audit_management', section=section_key, financial_year=selected_financial_year, status=status_filter) if status_filter else url_for('admin.audit_management', section=section_key, financial_year=selected_financial_year) }}">
+      <span>{{ label }}</span>
+      <strong>{{ value }}</strong>
+    </a>
+    {% endfor %}
+  </section>
+  <div class="audit-workspace-grid">
+    <section class="card">
+      <div class="card-header">Audit Requirements Progress</div>
+      <div class="audit-progress-list">
+        {% for status in requirement_statuses %}
+        <div><span>{{ status.replace('_', ' ').title() }}</span><strong>{{ status_counts.get(status, 0) }}</strong></div>
+        {% endfor %}
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-header">Latest Requirement Activity</div>
+      <div class="audit-timeline audit-timeline--compact">
+        {% for event in activity[:6] %}
+        <div>
+          <time>{{ event.created_at.strftime('%d %b %Y') }}</time>
+          <strong>{{ event.requirement.requirement_uid if event.requirement else 'Requirement' }}</strong>
+          <p>{{ event.message or event.event_type.replace('_', ' ').title() }}</p>
+        </div>
+        {% else %}
+        <p class="text-muted">No requirement activity yet.</p>
+        {% endfor %}
+      </div>
+    </section>
   </div>
-</div>
-
-<div class="stats-grid">
-  <div class="stat-card"><div class="stat-label">Auditors</div><div class="stat-value">{{ auditors|length }}</div></div>
-  <div class="stat-card"><div class="stat-label">Audit Documents</div><div class="stat-value">{{ documents|length }}</div></div>
-  <div class="stat-card"><div class="stat-label">Branch Requests</div><div class="stat-value">{{ branch_requests }}</div></div>
-  <div class="stat-card"><div class="stat-label">Active Transfers</div><div class="stat-value">{{ active_transfers }}</div></div>
-</div>
-
-<div class="page-grid page-grid-sidebar mt-3">
+  {% elif active_section == 'requirements' %}
   <section class="card">
-    <div class="card-header">Auditor Accounts</div>
-    <form method="post" action="{{ url_for('admin.add_auditor_account') }}" class="form-grid">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label>Name <input name="name" required></label>
-      <label>Email <input type="email" name="email" required></label>
-      <label>Temporary Password <input type="password" name="password" required></label>
-      <button class="btn btn-primary" type="submit">Create Auditor</button>
+    <div class="audit-section-header">
+      <div>
+        <span>Auditor Requirements</span>
+        <h2>Requests, responses and review status</h2>
+      </div>
+    </div>
+    <form method="get" class="audit-table-filters">
+      <input type="hidden" name="section" value="requirements">
+      <input type="hidden" name="financial_year" value="{{ selected_financial_year }}">
+      <input name="q" placeholder="Search requirements" value="{{ request.args.get('q', '') }}">
+      <select name="status">
+        <option value="">All statuses</option>
+        {% for status in requirement_statuses %}
+        <option value="{{ status }}" {% if request.args.get('status') == status %}selected{% endif %}>{{ status.replace('_', ' ').title() }}</option>
+        {% endfor %}
+      </select>
+      <select name="category">
+        <option value="">All categories</option>
+        {% for category in requirement_categories %}
+        <option value="{{ category }}" {% if request.args.get('category') == category %}selected{% endif %}>{{ category }}</option>
+        {% endfor %}
+      </select>
+      <select name="priority">
+        <option value="">All priorities</option>
+        {% for priority in requirement_priorities %}
+        <option value="{{ priority }}" {% if request.args.get('priority') == priority %}selected{% endif %}>{{ priority.title() }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-primary btn-sm">Filter</button>
     </form>
-    <div class="table-wrap mt-3">
+    <div class="table-wrap audit-management-table">
       <table>
-        <thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Requirement ID</th><th>Date</th><th>Auditor</th><th>Category</th><th>Requirement</th><th>FY</th><th>Priority</th><th>Due Date</th><th>Assigned To</th><th>Status</th><th>Documents</th><th>Actions</th></tr></thead>
         <tbody>
-          {% for auditor in auditors %}
+          {% for requirement in requirements %}
           <tr>
-            <td>{{ auditor.name }}</td>
-            <td>{{ auditor.email }}</td>
-            <td>{{ 'Active' if auditor.is_active else 'Inactive' }}</td>
+            <td>{{ requirement.requirement_uid }}</td>
+            <td>{{ requirement.requested_at.strftime('%d %b %Y') }}</td>
+            <td>{{ requirement.auditor.name if requirement.auditor else 'Auditor' }}</td>
+            <td>{{ requirement.category }}</td>
             <td>
-              <form method="post" action="{{ url_for('admin.toggle_auditor_account', user_id=auditor.id) }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-outline btn-sm" type="submit">{{ 'Deactivate' if auditor.is_active else 'Activate' }}</button>
-              </form>
+              <strong>{{ requirement.title }}</strong>
+              {% if requirement.latest_auditor_comment %}<div class="audit-feedback">Auditor feedback: {{ requirement.latest_auditor_comment }}</div>{% endif %}
             </td>
+            <td>{{ requirement.financial_year }}</td>
+            <td><span class="audit-status-badge priority-{{ requirement.priority|lower }}">{{ requirement.priority.title() }}</span></td>
+            <td>{{ requirement.due_date or '—' }}</td>
+            <td>{{ requirement.assignee.name if requirement.assignee else 'Unassigned' }}</td>
+            <td><span class="audit-status-badge status-{{ requirement.status|lower|replace('_', '-') }}">{{ requirement.status.replace('_', ' ').title() }}</span></td>
+            <td>{{ requirement.documents|length }}</td>
+            <td><a class="btn btn-outline btn-sm" href="{{ url_for('admin.audit_requirement_detail', requirement_id=requirement.id) }}">Open</a></td>
           </tr>
           {% else %}
-          <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No auditor accounts yet.</td></tr>
+          <tr><td colspan="12" class="text-center text-muted">No auditor requirements match this view.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
-
-  <aside class="card">
-    <div class="card-header">Portal Switcher</div>
-    <p>Preview keeps your administrator identity and records an audit entry.</p>
-    <p><a class="btn btn-outline btn-sm" href="{{ url_for('admin.preview_audit_portal') }}">Auditor Portal Preview</a></p>
-    {% if branches %}
-    <form method="get" action="{{ url_for('admin.preview_branch_portal') }}">
-      <label>Branch
-        <select name="branch_id">
-          {% for branch in branches %}
-          <option value="{{ branch.id }}">{{ branch.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button class="btn btn-primary btn-sm" type="submit">Preview Branch</button>
-    </form>
-    {% else %}
-    <p class="text-muted">Create a branch before previewing the Branch Portal.</p>
-    {% endif %}
-  </aside>
-</div>
-
-<div class="page-grid page-grid-sidebar mt-3">
+  {% elif active_section == 'documents' %}
+  <div class="audit-workspace-grid">
+    <section class="card">
+      <div class="audit-section-header">
+        <div><span>Documents</span><h2>Audit document library</h2></div>
+      </div>
+      <div class="table-wrap audit-management-table">
+        <table>
+          <thead><tr><th>Document</th><th>Category</th><th>Financial Year</th><th>Period</th><th>Related Requirement</th><th>Uploaded By</th><th>Uploaded Date</th><th>Visibility</th><th>Status</th><th>Auditor Access</th><th>Actions</th></tr></thead>
+          <tbody>
+            {% for document in documents %}
+            <tr>
+              <td><strong>{{ document.title }}</strong><div class="text-muted text-sm">{{ document.original_filename }}</div></td>
+              <td>{{ document.category }}</td>
+              <td>{{ document.financial_year }}</td>
+              <td>{{ document.period_label or '—' }}</td>
+              <td>{% if document.requirement %}<a href="{{ url_for('admin.audit_requirement_detail', requirement_id=document.requirement.id) }}">{{ document.requirement.requirement_uid }}</a>{% else %}General{% endif %}</td>
+              <td>{{ document.uploader.name if document.uploader else 'Unknown' }}</td>
+              <td>{{ document.uploaded_at.strftime('%d %b %Y') }}</td>
+              <td>{{ document.visibility }}</td>
+              <td><span class="audit-status-badge status-{{ document.status|lower|replace('_', '-') }}">{{ document.status.replace('_', ' ').title() }}</span></td>
+              <td>{{ 'Visible' if document.is_auditor_visible else 'Hidden' }}</td>
+              <td class="audit-action-stack">
+                <a class="btn btn-outline btn-sm" href="{{ url_for('admin.download_audit_document_admin', document_id=document.id) }}">Download</a>
+                {% if document.status != 'PUBLISHED' %}<form method="post" action="{{ url_for('admin.publish_audit_document', document_id=document.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-primary btn-sm">Publish</button></form>{% endif %}
+                {% if document.status != 'ARCHIVED' %}<form method="post" action="{{ url_for('admin.archive_audit_document', document_id=document.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline btn-sm">Archive</button></form>{% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="11" class="text-center text-muted">No audit documents have been uploaded for this year.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <aside class="card">
+      <div class="card-header">Upload Document</div>
+      <form method="post" enctype="multipart/form-data" action="{{ url_for('admin.upload_audit_document') }}" class="audit-upload-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Document Title <input name="title" required></label>
+        <label>Category <select name="category">{% for category in document_categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}</select></label>
+        <label>Financial Year <select name="financial_year">{% for year in financial_years %}<option value="{{ year }}" {% if year == selected_financial_year %}selected{% endif %}>{{ year }}</option>{% endfor %}</select></label>
+        <label>Period <input name="period_label" placeholder="April-June 2026"></label>
+        <label>Related Requirement <select name="requirement_id"><option value="">General audit document</option>{% for requirement in requirements %}<option value="{{ requirement.id }}">{{ requirement.requirement_uid }} - {{ requirement.title }}</option>{% endfor %}</select></label>
+        <label>Document Type <input name="document_type" placeholder="Challan, statement, ledger"></label>
+        <label>Description <textarea name="description" rows="3"></textarea></label>
+        <label>Document Date <input type="date" name="document_date"></label>
+        <label>Visibility <select name="visibility"><option value="INTERNAL">Internal</option><option value="AUDITOR">Auditor</option></select></label>
+        <label>Status <select name="status"><option value="DRAFT">Draft</option><option value="READY_FOR_AUDITOR">Ready For Auditor</option><option value="PUBLISHED">Published</option></select></label>
+        <label>Files <input type="file" name="documents" multiple required></label>
+        <button class="btn btn-primary" type="submit">+ Upload Document</button>
+      </form>
+    </aside>
+  </div>
+  {% elif active_section == 'reports' %}
   <section class="card">
-    <div class="card-header">Audit Documents</div>
-    <div class="table-wrap">
+    <div class="audit-section-header">
+      <div><span>Published Reports</span><h2>Existing auditor-visible financial reports</h2></div>
+    </div>
+    <div class="table-wrap audit-management-table">
       <table>
-        <thead><tr><th>Title</th><th>Category</th><th>Financial Year</th><th>Status</th></tr></thead>
+        <thead><tr><th>Report</th><th>Financial Year</th><th>Status</th><th>CSV</th><th>PDF</th></tr></thead>
         <tbody>
-          {% for document in documents %}
-          <tr><td>{{ document.title }}</td><td>{{ document.category }}</td><td>{{ document.financial_year }}</td><td>{{ document.status }}</td></tr>
-          {% else %}
-          <tr><td colspan="4" class="text-center text-muted" style="padding:1rem">No audit documents have been registered.</td></tr>
+          {% for key, label in supported_reports %}
+          <tr>
+            <td>{{ label }}</td>
+            <td>{{ selected_financial_year }}</td>
+            <td><span class="audit-status-badge status-published">Available to auditor</span></td>
+            <td><a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_report', report_key=key, file_format='csv', financial_year=selected_financial_year) }}">CSV</a></td>
+            <td><a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_report', report_key=key, file_format='pdf', financial_year=selected_financial_year) }}">PDF</a></td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
-  <aside class="card">
-    <div class="card-header">Recent Downloads</div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Report</th><th>User</th><th>When</th></tr></thead>
-        <tbody>
-          {% for download in downloads %}
-          <tr><td>{{ download.report_key }}</td><td>{{ download.user.name if download.user else 'Unknown' }}</td><td>{{ download.created_at.strftime('%d %b %Y %H:%M') }}</td></tr>
-          {% else %}
-          <tr><td colspan="3" class="text-center text-muted" style="padding:1rem">No downloads yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </aside>
+  {% elif active_section == 'accounts' %}
+  <div class="audit-workspace-grid">
+    <section class="card">
+      <div class="card-header">Auditor Accounts</div>
+      <div class="table-wrap audit-management-table">
+        <table>
+          <thead><tr><th>Auditor Name</th><th>Email</th><th>Status</th><th>Financial Year Access</th><th>Last Login</th><th>Open Requirements</th><th>Last Activity</th><th>Actions</th></tr></thead>
+          <tbody>
+            {% for auditor in auditors %}
+            <tr>
+              <td>{{ auditor.name }}</td>
+              <td>{{ auditor.email }}</td>
+              <td>{{ 'Active' if auditor.is_active else 'Inactive' }}</td>
+              <td>FY {{ selected_financial_year }}</td>
+              <td>{{ auditor.last_login_at.strftime('%d %b %Y') if auditor.last_login_at else 'Never' }}</td>
+              <td>{{ auditor_open_counts.get(auditor.id, 0) }}</td>
+              <td>{{ auditor.last_seen_at.strftime('%d %b %Y') if auditor.last_seen_at else '—' }}</td>
+              <td><form method="post" action="{{ url_for('admin.toggle_auditor_account', user_id=auditor.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline btn-sm">{{ 'Deactivate' if auditor.is_active else 'Activate' }}</button></form></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="text-center text-muted">No auditor accounts yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <aside class="card">
+      <div class="card-header">Create Auditor</div>
+      <form method="post" action="{{ url_for('admin.add_auditor_account') }}" class="audit-upload-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Name <input name="name" required></label>
+        <label>Email <input type="email" name="email" required></label>
+        <label>Temporary Password <input type="password" name="password" required></label>
+        <button class="btn btn-primary" type="submit">Create Auditor</button>
+      </form>
+    </aside>
+  </div>
+  {% else %}
+  <div class="audit-workspace-grid">
+    <section class="card">
+      <div class="card-header">Requirement Activity</div>
+      <div class="audit-timeline">
+        {% for event in activity %}
+        <div>
+          <time>{{ event.created_at.strftime('%d %b %Y %H:%M') }}</time>
+          <strong>{{ event.actor.name if event.actor else 'System' }} - {{ event.event_type.replace('_', ' ').title() }}</strong>
+          <p>{{ event.message or 'Requirement updated.' }}</p>
+        </div>
+        {% else %}
+        <p class="text-muted">No requirement activity yet.</p>
+        {% endfor %}
+      </div>
+    </section>
+    <aside class="card">
+      <div class="card-header">Recent Downloads</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Report</th><th>User</th><th>When</th></tr></thead>
+          <tbody>
+            {% for download in downloads %}
+            <tr><td>{{ download.report_key }}</td><td>{{ download.user.name if download.user else 'Unknown' }}</td><td>{{ download.created_at.strftime('%d %b %Y %H:%M') }}</td></tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center text-muted">No downloads yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </aside>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

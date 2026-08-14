@@ -2,245 +2,348 @@
 {% block title %}Finance — Admin{% endblock %}
 {% block content %}
 {% set period_args = {'period': period, 'start_date': start_date, 'end_date': end_date} %}
-<div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-  <div>
-    <h1 style="font-family:var(--font-display);font-size:1.75rem;color:var(--brown);margin-bottom:0.2rem">Finance Command Center</h1>
-    <p class="text-sm text-muted" style="margin:0">Sales performance, P&amp;L, ledgers, and tax estimates use one selected period.</p>
+{% set section_args = {'period': period, 'start_date': start_date, 'end_date': end_date, 'section': active_finance_section} %}
+{% set total_units = dashboard.sales.units_sold|sum(attribute='units_sold') %}
+{% set vendor_total = namespace(value=0) %}
+{% for row in dashboard.vendor_spend %}
+  {% set vendor_total.value = vendor_total.value + row.total_spend %}
+{% endfor %}
+{% set margin = ((pnl.net_profit / pnl.income * 100)|round(1)) if pnl.income else none %}
+{% set expense_ratio = ((pnl.expenses / pnl.income * 100)|round(1)) if pnl.income else none %}
+
+<div class="finance-page">
+  <div class="finance-header">
+    <div>
+      <h1>Finance Command Center</h1>
+      <p>Sales performance, P&amp;L, ledgers, and tax estimates use one selected period.</p>
+    </div>
+    <div class="finance-header-actions">
+      <a href="{{ url_for('admin.finance_add_transaction') }}" class="btn btn-primary btn-sm">+ Record Transaction</a>
+      <a href="{{ url_for('admin.finance_tax_rates') }}" class="btn btn-outline btn-sm">Tax Rates</a>
+    </div>
   </div>
-  <div class="flex gap-2 flex-wrap">
-    <a href="{{ url_for('admin.finance_add_transaction') }}" class="btn btn-primary btn-sm">+ Record Transaction</a>
-    <a href="{{ url_for('admin.finance_tax_rates') }}" class="btn btn-outline btn-sm">Tax Rates</a>
-  </div>
-</div>
 
-<div class="card" style="margin-bottom:1rem">
-  <div class="card-body">
-    <form method="GET" class="finance-period-form" data-finance-period-form>
-      <div class="form-group finance-period-select">
-        <label class="form-label">Period</label>
-        <select class="form-control" name="period" data-finance-period-select>
-          <option value="day" {% if period == 'day' %}selected{% endif %}>Today</option>
-          <option value="week" {% if period == 'week' %}selected{% endif %}>This Week</option>
-          <option value="month" {% if period == 'month' %}selected{% endif %}>This Month</option>
-          <option value="year" {% if period == 'year' %}selected{% endif %}>This Year</option>
-          <option value="financial_year" {% if period == 'financial_year' %}selected{% endif %}>Financial Year</option>
-          <option value="custom" {% if period == 'custom' %}selected{% endif %}>Custom Range</option>
-        </select>
-      </div>
-      <div class="finance-custom-range" data-finance-custom-range>
-        <div class="finance-custom-range-copy">
-          <strong>Custom date range</strong>
-          <span>Pick exact start and end dates for exports, tax review, and ledgers.</span>
-        </div>
-        <div class="form-group" data-finance-custom-date>
-          <label class="form-label">From</label>
-          <input class="form-control" type="date" name="start_date" value="{{ start_date }}">
-        </div>
-        <div class="form-group" data-finance-custom-date>
-          <label class="form-label">To</label>
-          <input class="form-control" type="date" name="end_date" value="{{ end_date }}">
-        </div>
-      </div>
-      <div class="finance-period-actions">
-        <button type="submit" class="btn btn-primary btn-sm">Apply Period</button>
-        <span class="badge badge-brown">{{ selected_period.label }}: {{ start_date }} to {{ end_date }}</span>
-      </div>
-    </form>
-    <p class="text-sm text-muted" style="margin-top:0.75rem;margin-bottom:0">Record-keeping aid only — financial year in India runs from 1 April to 31 March. Review all figures with your accountant before filing GST or ITR.</p>
-  </div>
-</div>
-
-{% if not dashboard.consistency.matches %}
-<div class="flash-msg flash-warning" style="margin-bottom:1rem">
-  <span>⚠️</span>
-  <span>Revenue check needs review: orders ₹{{ dashboard.consistency.order_revenue|int }} vs ledger ₹{{ dashboard.consistency.ledger_revenue|int }}; missing sale ledger entries {{ dashboard.consistency.missing_count }}.</span>
-</div>
-{% endif %}
-
-<div class="stat-grid" style="margin-bottom:1.5rem">
-  {% for card in dashboard.period_cards %}
-  <div class="stat-card {% if card.key in ['day','month'] %}green{% elif card.key == 'week' %}orange{% else %}brown{% endif %}">
-    <span class="stat-icon">₹</span>
-    <div class="stat-value">₹{{ card.revenue|int }}</div>
-    <div class="stat-label">{{ card.label }} Revenue</div>
-    <div class="text-sm text-muted">Expense ₹{{ card.expenses|int }} · Net ₹{{ card.net_profit|int }}</div>
-  </div>
-  {% endfor %}
-</div>
-
-<div class="stat-grid" style="margin-bottom:1.5rem">
-  <div class="stat-card green"><span class="stat-icon">📈</span><div class="stat-value">₹{{ pnl.sales_revenue|int }}</div><div class="stat-label">Sales Revenue</div></div>
-  <div class="stat-card brown"><span class="stat-icon">➕</span><div class="stat-value">₹{{ pnl.other_income|int }}</div><div class="stat-label">Other Income</div></div>
-  <div class="stat-card rose"><span class="stat-icon">📉</span><div class="stat-value">₹{{ pnl.expenses|int }}</div><div class="stat-label">Expenses</div></div>
-  <div class="stat-card orange"><span class="stat-icon">🧾</span><div class="stat-value">₹{{ pnl.net_profit|int }}</div><div class="stat-label">Net Profit</div></div>
-</div>
-
-<div class="flex gap-2 flex-wrap" style="margin-bottom:1.5rem">
-  <a href="{{ url_for('admin.finance_export', report='dashboard', file_format='csv', **period_args) }}" class="btn btn-outline btn-sm">Export Dashboard CSV</a>
-  <a href="{{ url_for('admin.finance_export', report='dashboard', file_format='pdf', **period_args) }}" class="btn btn-outline btn-sm">Export Dashboard PDF</a>
-  <a href="{{ url_for('admin.finance_export', report='sales', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Sales CSV</a>
-  <a href="{{ url_for('admin.finance_export', report='categories', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Categories CSV</a>
-  <a href="{{ url_for('admin.finance_export', report='products', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Products CSV</a>
-  <a href="{{ url_for('admin.finance_export', report='stores', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Stores CSV</a>
-  <a href="{{ url_for('admin.finance_export', report='vendors', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Vendors CSV</a>
-  <a href="{{ url_for('admin.finance_export', report='gst', file_format='csv', **period_args) }}" class="btn btn-ghost btn-sm">Tax CSV</a>
-  <form method="POST" action="{{ url_for('admin.finance_consistency_check', **period_args) }}" style="display:inline">
-    <button type="submit" class="btn btn-outline btn-sm">Run Consistency Check</button>
-  </form>
-</div>
-
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;margin-bottom:1.5rem">
-  <section class="card">
-    <div class="card-header">Sales Performance</div>
+  <section class="card finance-filter-card">
     <div class="card-body">
-      <div class="flex justify-between mb-2"><span class="text-muted">Units sold</span><strong>{{ dashboard.sales.units_sold|sum(attribute='units_sold') }}</strong></div>
-      <div class="flex justify-between mb-2"><span class="text-muted">Best seller by units</span><strong>{{ dashboard.sales.top_sellers.by_units.product_name if dashboard.sales.top_sellers.by_units else '—' }}</strong></div>
-      <div class="flex justify-between mb-3"><span class="text-muted">Best seller by revenue</span><strong>{{ dashboard.sales.top_sellers.by_revenue.product_name if dashboard.sales.top_sellers.by_revenue else '—' }}</strong></div>
-      <div class="table-wrap">
+      <form method="GET" class="finance-period-form finance-period-form--compact" data-finance-period-form>
+        <input type="hidden" name="section" value="{{ active_finance_section }}">
+        <div class="form-group finance-period-select">
+          <label class="form-label">Period</label>
+          <select class="form-control" name="period" data-finance-period-select>
+            <option value="day" {% if period == 'day' %}selected{% endif %}>Today</option>
+            <option value="week" {% if period == 'week' %}selected{% endif %}>This Week</option>
+            <option value="month" {% if period == 'month' %}selected{% endif %}>This Month</option>
+            <option value="year" {% if period == 'year' %}selected{% endif %}>This Year</option>
+            <option value="financial_year" {% if period == 'financial_year' %}selected{% endif %}>Financial Year</option>
+            <option value="custom" {% if period == 'custom' %}selected{% endif %}>Custom Range</option>
+          </select>
+        </div>
+        <div class="finance-custom-range" data-finance-custom-range>
+          <div class="form-group" data-finance-custom-date>
+            <label class="form-label">From</label>
+            <input class="form-control" type="date" name="start_date" value="{{ start_date }}">
+          </div>
+          <div class="form-group" data-finance-custom-date>
+            <label class="form-label">To</label>
+            <input class="form-control" type="date" name="end_date" value="{{ end_date }}">
+          </div>
+        </div>
+        <div class="finance-period-actions">
+          <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+          <span class="badge badge-brown">{{ selected_period.label }}: {{ start_date }} to {{ end_date }}</span>
+        </div>
+      </form>
+      <p class="finance-disclaimer">Record-keeping aid only. Financial year in India runs from 1 April to 31 March; review figures with your accountant before filing GST or ITR.</p>
+    </div>
+  </section>
+
+  {% if not dashboard.consistency.matches %}
+  <div class="flash-msg flash-warning" style="margin-bottom:1rem">
+    <span>!</span>
+    <span>Revenue check needs review: orders {{ finance_money(dashboard.consistency.order_revenue) }} vs ledger {{ finance_money(dashboard.consistency.ledger_revenue) }}; missing sale ledger entries {{ dashboard.consistency.missing_count }}.</span>
+  </div>
+  {% endif %}
+
+  <section class="finance-summary">
+    <article class="finance-summary-card finance-summary-card--primary">
+      <span class="finance-summary-label">Revenue</span>
+      <strong>{{ finance_money(pnl.income) }}</strong>
+      <small>Sales {{ finance_money(pnl.sales_revenue) }} · Other {{ finance_money(pnl.other_income) }}</small>
+    </article>
+    <article class="finance-summary-card finance-summary-card--profit">
+      <span class="finance-summary-label">Net Profit</span>
+      <strong>{{ finance_money(pnl.net_profit) }}</strong>
+      <small>{% if margin is not none %}Margin {{ margin }}%{% else %}No revenue yet{% endif %}</small>
+    </article>
+    <article class="finance-summary-card finance-summary-card--expense">
+      <span class="finance-summary-label">Expenses</span>
+      <strong>{{ finance_money(pnl.expenses) }}</strong>
+      <small>{% if expense_ratio is not none %}{{ expense_ratio }}% of revenue{% else %}Awaiting revenue{% endif %}</small>
+    </article>
+    <article class="finance-summary-card finance-summary-card--tax">
+      <span class="finance-summary-label">GST / Tax Payable</span>
+      <strong>{{ finance_money(gst.net_gst_liability) }}</strong>
+      <small>TDS withheld {{ finance_money(dashboard.tds.tds_withheld) }}</small>
+    </article>
+    <article class="finance-summary-card">
+      <span class="finance-summary-label">Sales</span>
+      <strong>{{ total_units }}</strong>
+      <small>Units sold in selected period</small>
+    </article>
+    <article class="finance-summary-card">
+      <span class="finance-summary-label">Purchases</span>
+      <strong>{{ finance_money(vendor_total.value) }}</strong>
+      <small>{{ dashboard.vendor_spend|length }} vendor{{ '' if dashboard.vendor_spend|length == 1 else 's' }} tracked</small>
+    </article>
+  </section>
+
+  <nav class="finance-section-nav" aria-label="Finance sections">
+    {% for section_key, section_label in finance_sections %}
+      <a href="{{ url_for('admin.finance_dashboard', section=section_key, **period_args) }}" class="{% if active_finance_section == section_key %}active{% endif %}">{{ section_label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="finance-section-panel">
+    {% if active_finance_section == 'sales-tax' %}
+      <div class="finance-section-heading">
+        <div>
+          <span>Sales Tax</span>
+          <h2>GST and statutory tax view</h2>
+        </div>
+        <a href="{{ url_for('admin.finance_gst_summary', **period_args) }}" class="btn btn-outline btn-sm">GST Summary</a>
+      </div>
+      <div class="finance-mini-grid">
+        <div><span>GST payable by bakery</span><strong>{{ finance_money(gst.gst_collected) }}</strong></div>
+        <div><span>GST paid by aggregators</span><strong>{{ finance_money(gst.ecommerce_operator_gst) }}</strong></div>
+        <div><span>Supplier GST recorded</span><strong>{{ finance_money(gst.input_gst_recorded) }}</strong></div>
+        <div><span>Blocked input GST</span><strong>{{ finance_money(gst.non_creditable_input_gst) }}</strong></div>
+        <div><span>E-commerce TCS</span><strong>{{ finance_money(gst.ecommerce_tcs) }}</strong></div>
+        <div><span>Net GST liability</span><strong>{{ finance_money(gst.net_gst_liability) }}</strong></div>
+      </div>
+      <div class="table-wrap finance-table-wrap">
         <table>
-          <thead><tr><th>Product</th><th>Units</th><th>Revenue</th></tr></thead>
+          <thead>
+            <tr><th class="text-center">Date</th><th>Reference</th><th>Source</th><th class="text-right">Taxable Value</th><th class="text-right">CGST</th><th class="text-right">SGST</th><th class="text-right">Tax</th><th>Status</th></tr>
+          </thead>
           <tbody>
-            {% for row in dashboard.sales.units_sold[:5] %}
-            <tr><td>{{ row.product_name }}</td><td>{{ row.units_sold }}</td><td>₹{{ row.revenue|int }}</td></tr>
+            {% for row in gst.rows[:20] %}
+            <tr>
+              <td class="text-center text-sm">{{ row.order_date or '—' }}</td>
+              <td>{{ row.invoice_number }}</td>
+              <td>{{ row.order_source_label }}</td>
+              <td class="text-right">{{ finance_money(row.base_taxable_value) }}</td>
+              <td class="text-right">{{ finance_money(row.cgst_amount) }}</td>
+              <td class="text-right">{{ finance_money(row.sgst_amount) }}</td>
+              <td class="text-right">{{ finance_money(row.gst_amount) }}</td>
+              <td><span class="badge {% if row.tax_liability_flag == 'Payable by Bakery' %}badge-orange{% else %}badge-green{% endif %}">{{ row.tax_liability_flag }}</span></td>
+            </tr>
             {% else %}
-            <tr><td colspan="3" class="text-center text-muted">No paid delivered sales in this period.</td></tr>
+            <tr><td colspan="8" class="text-center text-muted">No GST-linked sales in this period.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-header">Tax Summary</div>
-    <div class="card-body">
-      <div class="flex justify-between mb-2"><span class="text-muted">GST payable by bakery</span><strong>₹{{ gst.gst_collected|int }}</strong></div>
-      <div class="flex justify-between mb-2"><span class="text-muted">GST paid by aggregators</span><strong>₹{{ gst.ecommerce_operator_gst|int }}</strong></div>
-      <div class="flex justify-between mb-2"><span class="text-muted">Supplier GST recorded</span><strong>₹{{ gst.input_gst_recorded|int }}</strong></div>
-      <div class="flex justify-between mb-2"><span class="text-muted">Blocked input GST</span><strong>₹{{ gst.non_creditable_input_gst|int }}</strong></div>
-      <div class="flex justify-between mb-2"><span class="text-muted">Net GST liability</span><strong>₹{{ gst.net_gst_liability|int }}</strong></div>
-      <div class="flex justify-between"><span class="text-muted">TDS withheld</span><strong>₹{{ dashboard.tds.tds_withheld|int }}</strong></div>
-    </div>
-  </section>
-</div>
-
-<section class="card" style="margin-bottom:1.5rem">
-  <div class="card-header">Vendor Spend</div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Vendor</th><th>Purchases</th><th>Total Spend</th><th>GST Paid</th><th>TDS</th><th>ITC</th></tr></thead>
-      <tbody>
-        {% for row in dashboard.vendor_spend %}
-        <tr>
-          <td><a href="{{ url_for('admin.vendor_detail', vendor_id=row.vendor_id) }}">{{ row.vendor_name }}</a></td>
-          <td>{{ row.transaction_count }}</td>
-          <td>₹{{ row.total_spend|int }}</td>
-          <td>₹{{ row.gst_paid|int }}</td>
-          <td>₹{{ '%.2f'|format(row.tds_withheld or 0) }}</td>
-          <td><span class="badge {% if row.input_tax_credit_eligible %}badge-green{% else %}badge-orange{% endif %}">{% if row.input_tax_credit_eligible %}Eligible{% elif row.input_tax_credit_blocked %}No ITC - 5% restaurant{% else %}No GSTIN{% endif %}</span></td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6" class="text-center text-muted">No vendor-linked purchases in this period.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;margin-bottom:1.5rem">
-  <section class="card">
-    <div class="card-header">Income Breakdown</div>
-    <div class="card-body" style="padding:0">
-      {% for row in dashboard.category_breakdown.income %}
-      <div style="padding:0.75rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><span>{{ row.category }}</span><strong>₹{{ row.amount|int }}</strong></div>
-      {% else %}
-      <div style="padding:1.25rem" class="text-muted">No income in this period.</div>
-      {% endfor %}
-    </div>
-  </section>
-  <section class="card">
-    <div class="card-header">Expense Breakdown</div>
-    <div class="card-body" style="padding:0">
-      {% for row in dashboard.category_breakdown.expenses %}
-      <div style="padding:0.75rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><span>{{ row.category }}</span><strong>₹{{ row.amount|int }}</strong></div>
-      {% else %}
-      <div style="padding:1.25rem" class="text-muted">No expenses in this period.</div>
-      {% endfor %}
-    </div>
-  </section>
-</div>
-
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;margin-bottom:1.5rem">
-  <section class="card">
-    <div class="card-header">Product-wise P&amp;L</div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Product</th><th>Units</th><th>Revenue</th><th>COGS</th><th>Gross</th></tr></thead>
-        <tbody>
-          {% for row in dashboard.product_ledger[:8] %}
-          <tr><td>{{ row.product_name }}</td><td>{{ row.units_sold }}</td><td>₹{{ row.revenue|int }}</td><td>₹{{ row.cogs|int }}</td><td>₹{{ row.gross_profit|int }}</td></tr>
+    {% elif active_finance_section == 'vendor-breakdown' %}
+      <div class="finance-section-heading">
+        <div>
+          <span>Vendor Breakdown</span>
+          <h2>Vendor purchase and tax treatment</h2>
+        </div>
+        <a href="{{ url_for('admin.finance_export', report='vendors', file_format='csv', **period_args) }}" class="btn btn-outline btn-sm">Vendors CSV</a>
+      </div>
+      <div class="finance-mini-grid">
+        <div><span>Vendors tracked</span><strong>{{ dashboard.vendor_spend|length }}</strong></div>
+        <div><span>Total purchases</span><strong>{{ finance_money(vendor_total.value) }}</strong></div>
+        <div><span>GST recorded</span><strong>{{ finance_money(gst.input_gst_recorded) }}</strong></div>
+        <div><span>TDS withheld</span><strong>{{ finance_money(dashboard.tds.tds_withheld) }}</strong></div>
+      </div>
+      <div class="table-wrap finance-table-wrap">
+        <table>
+          <thead>
+            <tr><th>Vendor</th><th class="text-center">Purchases</th><th class="text-right">Total Spend</th><th class="text-right">GST Paid</th><th class="text-right">TDS</th><th class="text-center">Last Purchase</th><th class="text-center">ITC</th></tr>
+          </thead>
+          <tbody>
+            {% for row in dashboard.vendor_spend %}
+            <tr>
+              <td><a href="{{ url_for('admin.vendor_detail', vendor_id=row.vendor_id) }}">{{ row.vendor_name }}</a></td>
+              <td class="text-center">{{ row.transaction_count }}</td>
+              <td class="text-right">{{ finance_money(row.total_spend) }}</td>
+              <td class="text-right">{{ finance_money(row.gst_paid) }}</td>
+              <td class="text-right">{{ finance_money(row.tds_withheld) }}</td>
+              <td class="text-center text-sm">{{ row.last_purchase_at.strftime('%d %b %Y') if row.last_purchase_at else '—' }}</td>
+              <td class="text-center"><span class="badge {% if row.input_tax_credit_eligible %}badge-green{% else %}badge-orange{% endif %}">{% if row.input_tax_credit_eligible %}Eligible{% elif row.input_tax_credit_blocked %}No ITC - 5% restaurant{% else %}No GSTIN{% endif %}</span></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted">No vendor-linked purchases in this period.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif active_finance_section == 'financial-health' %}
+      <div class="finance-section-heading">
+        <div>
+          <span>Financial Health</span>
+          <h2>{{ dashboard.itr_health.label }} review</h2>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          <a href="{{ url_for('admin.finance_export', report='itr', file_format='csv') }}" class="btn btn-outline btn-sm">FY CSV</a>
+          <a href="{{ url_for('admin.finance_export', report='itr', file_format='pdf') }}" class="btn btn-outline btn-sm">FY PDF</a>
+        </div>
+      </div>
+      <div class="finance-mini-grid">
+        <div><span>FY income</span><strong>{{ finance_money(dashboard.itr_health.total_income) }}</strong></div>
+        <div><span>FY expenses</span><strong>{{ finance_money(dashboard.itr_health.total_expenses) }}</strong></div>
+        <div><span>FY net income</span><strong>{{ finance_money(dashboard.itr_health.net_income) }}</strong></div>
+        <div><span>FY net tax</span><strong>{{ finance_money(dashboard.itr_health.net_tax_liability) }}</strong></div>
+        <div><span>Selected margin</span><strong>{% if margin is not none %}{{ margin }}%{% else %}—{% endif %}</strong></div>
+        <div><span>Expense ratio</span><strong>{% if expense_ratio is not none %}{{ expense_ratio }}%{% else %}—{% endif %}</strong></div>
+      </div>
+      <div class="finance-breakdown-grid">
+        <section>
+          <h3>Largest Expense Categories</h3>
+          {% for row in dashboard.itr_health.expense_categories[:8] %}
+          <div class="finance-breakdown-row"><span>{{ row.category }}</span><strong>{{ finance_money(row.amount) }}</strong></div>
           {% else %}
-          <tr><td colspan="5" class="text-center text-muted">No product P&amp;L in this period.</td></tr>
+          <p class="text-muted">No financial-year expenses recorded yet.</p>
           {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-  <section class="card">
-    <div class="card-header">Store-wise P&amp;L</div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Store</th><th>Income</th><th>Expense</th><th>Net</th></tr></thead>
-        <tbody>
-          {% for row in dashboard.store_ledger %}
-          <tr><td>{{ row.store }}</td><td>₹{{ row.income|int }}</td><td>₹{{ row.expenses|int }}</td><td>₹{{ row.net|int }}</td></tr>
+        </section>
+        <section>
+          <h3>Consistency Status</h3>
+          <div class="finance-breakdown-row"><span>Order revenue</span><strong>{{ finance_money(dashboard.consistency.order_revenue) }}</strong></div>
+          <div class="finance-breakdown-row"><span>Ledger revenue</span><strong>{{ finance_money(dashboard.consistency.ledger_revenue) }}</strong></div>
+          <div class="finance-breakdown-row"><span>Difference</span><strong>{{ finance_money(dashboard.consistency.difference) }}</strong></div>
+          <form method="POST" action="{{ url_for('admin.finance_consistency_check', **section_args) }}">
+            <button type="submit" class="btn btn-outline btn-sm">Run Consistency Check</button>
+          </form>
+        </section>
+      </div>
+    {% elif active_finance_section == 'recent-transactions' %}
+      <div class="finance-section-heading">
+        <div>
+          <span>Recent Transactions</span>
+          <h2>Selected-period ledger activity</h2>
+        </div>
+        <a href="{{ url_for('admin.finance_add_transaction') }}" class="btn btn-primary btn-sm">+ Record Transaction</a>
+      </div>
+      <div class="table-wrap finance-table-wrap">
+        <table>
+          <thead>
+            <tr><th class="text-center">Date</th><th>Transaction Type</th><th>Category</th><th class="text-right">Amount</th><th>Branch</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            {% for txn in transactions %}
+            <tr>
+              <td class="text-center text-sm">{{ txn.created_at.strftime('%d %b %Y') }}</td>
+              <td><span class="badge {% if txn.transaction_type == 'income' %}badge-green{% else %}badge-orange{% endif %}">{{ txn.transaction_type }}</span></td>
+              <td>{{ txn.category.label if txn.category else '—' }}</td>
+              <td class="text-right" style="font-weight:600">{{ finance_money(txn.amount) }}</td>
+              <td class="text-sm text-muted">{{ txn.store_location or '—' }}</td>
+              <td class="text-sm">{{ txn.description or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted">No transactions in this period yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif active_finance_section == 'selected-period' %}
+      <div class="finance-section-heading">
+        <div>
+          <span>Selected Period</span>
+          <h2>{{ selected_period.label }} comparison</h2>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          <a href="{{ url_for('admin.finance_export', report='dashboard', file_format='csv', **period_args) }}" class="btn btn-outline btn-sm">Dashboard CSV</a>
+          <a href="{{ url_for('admin.finance_export', report='dashboard', file_format='pdf', **period_args) }}" class="btn btn-outline btn-sm">Dashboard PDF</a>
+        </div>
+      </div>
+      <div class="finance-period-detail">
+        <div><span>From</span><strong>{{ period_summary.from }}</strong></div>
+        <div><span>To</span><strong>{{ period_summary.to }}</strong></div>
+        <div><span>Previous Period</span><strong>{{ period_summary.previous_from }} to {{ period_summary.previous_to }}</strong></div>
+      </div>
+      <div class="table-wrap finance-table-wrap">
+        <table>
+          <thead>
+            <tr><th>Metric</th><th class="text-right">Selected Period</th><th class="text-right">Previous Period</th><th class="text-right">Change</th></tr>
+          </thead>
+          <tbody>
+            {% for metric in period_summary.metrics %}
+            <tr>
+              <td>{{ metric.label }}</td>
+              <td class="text-right">{{ finance_money(metric.current) }}</td>
+              <td class="text-right">{% if metric.comparison_available %}{{ finance_money(metric.previous) }}{% else %}Operational estimate only{% endif %}</td>
+              <td class="text-right">{% if metric.change is not none %}{{ '+' if metric.change > 0 else '' }}{{ metric.change }}%{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="finance-section-heading">
+        <div>
+          <span>Profit &amp; Loss</span>
+          <h2>Income, expenses, product, and store performance</h2>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          <a href="{{ url_for('admin.finance_export', report='pnl', file_format='csv', **period_args) }}" class="btn btn-outline btn-sm">P&amp;L CSV</a>
+          <a href="{{ url_for('admin.finance_export', report='products', file_format='csv', **period_args) }}" class="btn btn-outline btn-sm">Products CSV</a>
+          <a href="{{ url_for('admin.finance_export', report='stores', file_format='csv', **period_args) }}" class="btn btn-outline btn-sm">Stores CSV</a>
+        </div>
+      </div>
+      <div class="finance-breakdown-grid">
+        <section>
+          <h3>Income Breakdown</h3>
+          {% for row in dashboard.category_breakdown.income %}
+          <div class="finance-breakdown-row"><span>{{ row.category }}</span><strong>{{ finance_money(row.amount) }}</strong></div>
           {% else %}
-          <tr><td colspan="4" class="text-center text-muted">No store P&amp;L in this period.</td></tr>
+          <p class="text-muted">No income in this period.</p>
           {% endfor %}
-        </tbody>
-      </table>
-    </div>
+        </section>
+        <section>
+          <h3>Expense Breakdown</h3>
+          {% for row in dashboard.category_breakdown.expenses %}
+          <div class="finance-breakdown-row"><span>{{ row.category }}</span><strong>{{ finance_money(row.amount) }}</strong></div>
+          {% else %}
+          <p class="text-muted">No expenses in this period.</p>
+          {% endfor %}
+        </section>
+      </div>
+      <div class="finance-ledger-grid">
+        <section>
+          <h3>Product-wise P&amp;L</h3>
+          <div class="table-wrap finance-table-wrap">
+            <table>
+              <thead><tr><th>Product</th><th class="text-center">Units</th><th class="text-right">Revenue</th><th class="text-right">COGS</th><th class="text-right">Gross Profit</th></tr></thead>
+              <tbody>
+                {% for row in dashboard.product_ledger[:10] %}
+                <tr><td>{{ row.product_name }}</td><td class="text-center">{{ row.units_sold }}</td><td class="text-right">{{ finance_money(row.revenue) }}</td><td class="text-right">{{ finance_money(row.cogs) }}</td><td class="text-right">{{ finance_money(row.gross_profit) }}</td></tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted">No product P&amp;L in this period.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section>
+          <h3>Store-wise P&amp;L</h3>
+          <div class="table-wrap finance-table-wrap">
+            <table>
+              <thead><tr><th>Store</th><th class="text-right">Income</th><th class="text-right">Expense</th><th class="text-right">Net</th></tr></thead>
+              <tbody>
+                {% for row in dashboard.store_ledger %}
+                <tr><td>{{ row.store }}</td><td class="text-right">{{ finance_money(row.income) }}</td><td class="text-right">{{ finance_money(row.expenses) }}</td><td class="text-right">{{ finance_money(row.net) }}</td></tr>
+                {% else %}
+                <tr><td colspan="4" class="text-center text-muted">No store P&amp;L in this period.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    {% endif %}
   </section>
 </div>
-
-<section class="card" style="margin-bottom:1.5rem">
-  <div class="card-header">Financial Health at a Glance — {{ dashboard.itr_health.label }}</div>
-  <div class="card-body">
-    <div class="stat-grid">
-      <div class="stat-card green"><div class="stat-value">₹{{ dashboard.itr_health.total_income|int }}</div><div class="stat-label">FY Income</div></div>
-      <div class="stat-card rose"><div class="stat-value">₹{{ dashboard.itr_health.total_expenses|int }}</div><div class="stat-label">FY Expenses</div></div>
-      <div class="stat-card brown"><div class="stat-value">₹{{ dashboard.itr_health.net_income|int }}</div><div class="stat-label">FY Net Income</div></div>
-      <div class="stat-card orange"><div class="stat-value">₹{{ dashboard.itr_health.net_tax_liability|int }}</div><div class="stat-label">FY Net Tax</div></div>
-    </div>
-    <div class="flex gap-2 flex-wrap" style="margin-top:1rem">
-      <a href="{{ url_for('admin.finance_export', report='itr', file_format='csv') }}" class="btn btn-outline btn-sm">Export FY Health CSV</a>
-      <a href="{{ url_for('admin.finance_export', report='itr', file_format='pdf') }}" class="btn btn-outline btn-sm">Export FY Health PDF</a>
-    </div>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Recent Transactions in Selected Period</div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Store</th><th>Description</th></tr></thead>
-      <tbody>
-        {% for txn in transactions %}
-        <tr>
-          <td class="text-sm">{{ txn.created_at.strftime('%d %b %Y') }}</td>
-          <td><span class="badge {% if txn.transaction_type == 'income' %}badge-green{% else %}badge-orange{% endif %}">{{ txn.transaction_type }}</span></td>
-          <td>{{ txn.category.label if txn.category else '—' }}</td>
-          <td style="font-weight:600">₹{{ txn.amount|int }}</td>
-          <td class="text-sm text-muted">{{ txn.store_location or '—' }}</td>
-          <td class="text-sm">{{ txn.description or '—' }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6" class="text-center text-muted" style="padding:1.5rem">No transactions in this period yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
 {% endblock %}
 
 {% block scripts %}

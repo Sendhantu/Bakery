@@ -21,7 +21,10 @@ import re
 import secrets
 from decimal import Decimal
 from datetime import date, timedelta
+from pathlib import Path
+from uuid import uuid4
 from sqlalchemy.orm import selectinload
+from werkzeug.utils import secure_filename
 from realtime.events import (
     customer_room,
     emit_new_order,
@@ -83,6 +86,9 @@ from models import (
     PurchaseOrderItem,
     RawMaterial,
     ProductMaterial,
+    BranchInventory,
+    StockTransferItem,
+    BranchPurchaseRequestItem,
     Supplier,
     Branch,
     ProductionPlan,
@@ -119,6 +125,14 @@ from models import (
     LoyaltyLedger,
     AuditLog,
     AuditDocument,
+    AUDIT_DOCUMENT_CATEGORIES,
+    AUDIT_DOCUMENT_STATUSES,
+    AUDIT_DOCUMENT_VISIBILITIES,
+    AUDIT_REQUIREMENT_CATEGORIES,
+    AUDIT_REQUIREMENT_PRIORITIES,
+    AUDIT_REQUIREMENT_STATUSES,
+    AuditorRequirement,
+    AuditorRequirementEvent,
     AuditReportDownload,
     ApiUsageLog,
     AttendanceRecord,
@@ -1644,6 +1658,44 @@ def delete_product(product_id):
     return redirect(url_for("admin.products"))
 
 
+@admin_bp.route("/products/<int:product_id>/remove", methods=["POST"])
+@admin_required
+@manager_required
+def remove_product(product_id):
+    p = db.get_or_404(Product, product_id)
+    if p.is_active:
+        flash("Pause the product before deleting it.", "warning")
+        return redirect(url_for("admin.products"))
+    has_linked_history = any(
+        (
+            p.order_items.count(),
+            p.cart_items.count(),
+            p.wish_items.count(),
+            p.reviews.count(),
+        )
+    )
+    if has_linked_history:
+        flash(
+            "This product has linked history, so it was kept offline instead of deleted.",
+            "warning",
+        )
+        return redirect(url_for("admin.products"))
+
+    product_name = p.name
+    get_container().audit_service.log(
+        current_user,
+        "product_deleted",
+        "Product",
+        p.id,
+        before={"name": p.name, "is_active": p.is_active},
+        change_summary=f"Product deleted: {p.name}",
+    )
+    db.session.delete(p)
+    db.session.commit()
+    flash(f"{product_name} deleted.", "success")
+    return redirect(url_for("admin.products"))
+
+
 # ── ORDER MANAGEMENT ─────────────────────────────────────────
 def apply_order_search(query, search):
     if not search:
@@ -2741,11 +2793,18 @@ def _build_product_inventory_cards(variants):
     cards = []
     for product_id, payload in grouped.items():
         product = payload["product"]
+        variant_rows = payload["variants"]
         material_payload = _serialize_product_materials(product)
         cards.append(
             {
                 "product": product,
-                "variants": payload["variants"],
+                "variants": variant_rows,
+                "variant_count": len(variant_rows),
+                "total_stock": sum((variant.stock or 0) for variant in variant_rows),
+                "low_variant_count": sum(
+                    1 for variant in variant_rows if 0 < (variant.stock or 0) <= 5
+                ),
+                "out_variant_count": sum(1 for variant in variant_rows if (variant.stock or 0) == 0),
                 "sales": sales_totals.get(
                     product_id,
                     {period: 0 for period in INVENTORY_SALES_PERIODS},
@@ -2820,6 +2879,9 @@ def _build_raw_material_inventory_cards(materials):
 @admin_required
 @operations_required
 def inventory():
+    inventory_view = (request.args.get("view") or "products").strip().lower()
+    if inventory_view not in {"products", "materials"}:
+        inventory_view = "products"
     get_container().inventory_service.backfill_missing_product_variants()
     variants = (
         scoped_variant_query(ProductVariant.query.join(Product))
@@ -2852,6 +2914,7 @@ def inventory():
         materials=materials,
         product_inventory_cards=product_inventory_cards,
         raw_material_inventory_cards=raw_material_inventory_cards,
+        inventory_view=inventory_view,
         inventory_periods=INVENTORY_SALES_PERIODS,
         inventory_period_labels=INVENTORY_PERIOD_LABELS,
         live_products=live_products,
@@ -4897,6 +4960,75 @@ def material_detail(material_id):
     return render_template("admin/raw_material_detail.html", **context)
 
 
+def raw_material_reference_counts(material_id):
+    return {
+        "recipes": ProductMaterial.query.filter_by(raw_material_id=material_id).count(),
+        "purchases": PurchaseOrderItem.query.filter_by(raw_material_id=material_id).count(),
+        "stock_movements": StockMovement.query.filter_by(raw_material_id=material_id).count(),
+        "batches": MaterialBatch.query.filter_by(raw_material_id=material_id).count(),
+        "documents": MaterialDocument.query.filter_by(raw_material_id=material_id).count(),
+        "vendor_links": VendorProduct.query.filter_by(raw_material_id=material_id).count(),
+        "branch_inventory": BranchInventory.query.filter_by(raw_material_id=material_id).count(),
+        "stock_transfers": StockTransferItem.query.filter_by(raw_material_id=material_id).count(),
+        "branch_purchase_requests": BranchPurchaseRequestItem.query.filter_by(raw_material_id=material_id).count(),
+    }
+
+
+def raw_material_has_current_stock(material):
+    return (
+        Decimal(str(material.stock or 0)) > 0
+        or Decimal(str(material.reserved_quantity or 0)) > 0
+    )
+
+
+@admin_bp.route("/raw-materials/<int:material_id>/delete", methods=["POST"])
+@admin_required
+@manager_required
+def delete_raw_material(material_id):
+    mat = scoped_material_or_404(material_id)
+    reference_counts = raw_material_reference_counts(mat.id)
+    has_references = any(reference_counts.values())
+    has_stock = raw_material_has_current_stock(mat)
+    if has_references or has_stock:
+        before = {
+            "name": mat.name,
+            "is_active": mat.is_active,
+            "stock": str(mat.stock or 0),
+            "references": reference_counts,
+        }
+        mat.is_active = False
+        mat.updated_by = current_user.id
+        get_container().audit_service.log(
+            current_user,
+            "raw_material_deactivated_delete_blocked",
+            "RawMaterial",
+            mat.id,
+            before=before,
+            after={"is_active": mat.is_active},
+            change_summary=f"Raw material kept for history and paused: {mat.name}",
+        )
+        db.session.commit()
+        flash(
+            "Raw material is linked to stock, recipes, purchases, or history, so it was paused instead of deleted.",
+            "warning",
+        )
+        return redirect(url_for("admin.raw_materials"))
+
+    material_name = mat.name
+    get_container().audit_service.log(
+        current_user,
+        "raw_material_deleted",
+        "RawMaterial",
+        mat.id,
+        before={"name": mat.name, "sku": mat.sku, "category": mat.category},
+        change_summary=f"Raw material deleted: {mat.name}",
+    )
+    db.session.delete(mat)
+    db.session.commit()
+    flash(f"{material_name} deleted.", "success")
+    return redirect(url_for("admin.raw_materials"))
+
+
 @admin_bp.route("/raw-materials/add", methods=["POST"])
 @admin_required
 @manager_required
@@ -5781,6 +5913,72 @@ def add_category():
         return redirect(url_for("admin.categories"))
 
     flash("Category added!", "success")
+    return redirect(url_for("admin.categories"))
+
+
+@admin_bp.route("/categories/<int:category_id>/edit", methods=["POST"])
+@admin_required
+@manager_required
+def edit_category(category_id):
+    category = db.get_or_404(Category, category_id)
+    name = request.form.get("name", "").strip()
+    icon = request.form.get("icon", "🎂").strip() or "🎂"
+    if not name:
+        flash("Category name is required.", "danger")
+        return redirect(url_for("admin.categories"))
+    existing = Category.query.filter(
+        func.lower(Category.name) == name.lower(),
+        Category.id != category.id,
+    ).first()
+    if existing:
+        flash("That category already exists.", "warning")
+        return redirect(url_for("admin.categories"))
+
+    before = {"name": category.name, "icon": category.icon}
+    try:
+        category.name = name
+        category.icon = icon
+        apply_category_image(category)
+    except ValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("admin.categories"))
+
+    get_container().audit_service.log(
+        current_user,
+        "category_updated",
+        "Category",
+        category.id,
+        before=before,
+        after={"name": category.name, "icon": category.icon},
+        change_summary=f"Category updated: {category.name}",
+    )
+    db.session.commit()
+    flash("Category updated.", "success")
+    return redirect(url_for("admin.categories"))
+
+
+@admin_bp.route("/categories/<int:category_id>/delete", methods=["POST"])
+@admin_required
+@manager_required
+def delete_category(category_id):
+    category = db.get_or_404(Category, category_id)
+    if category.products.count() > 0:
+        flash("Move products out of this category before deleting it.", "warning")
+        return redirect(url_for("admin.categories"))
+
+    category_name = category.name
+    get_container().audit_service.log(
+        current_user,
+        "category_deleted",
+        "Category",
+        category.id,
+        before={"name": category.name, "icon": category.icon},
+        change_summary=f"Category deleted: {category.name}",
+    )
+    db.session.delete(category)
+    db.session.commit()
+    flash(f"{category_name} deleted.", "success")
     return redirect(url_for("admin.categories"))
 
 
@@ -7246,38 +7444,338 @@ def create_corporate_quote(inquiry_id):
     return redirect(url_for("admin.corporate_inquiry_detail", inquiry_id=inquiry.id))
 
 
+AUDIT_MANAGEMENT_SECTIONS = (
+    ("overview", "Overview"),
+    ("requirements", "Auditor Requirements"),
+    ("documents", "Documents"),
+    ("reports", "Published Reports"),
+    ("accounts", "Auditor Accounts"),
+    ("activity", "Access & Activity"),
+)
+AUDIT_SUPPORTED_REPORTS = (
+    ("profit-and-loss", "Profit & Loss"),
+    ("sales-register", "Sales Register"),
+    ("purchase-register", "Purchase Register"),
+    ("expense-register", "Expense Report"),
+    ("gst-report", "GST Summary"),
+    ("inventory-valuation", "Inventory Valuation"),
+    ("receivables", "Receivables"),
+    ("payables", "Payables"),
+)
+AUDIT_ALLOWED_DOCUMENT_EXTENSIONS = {
+    "csv",
+    "doc",
+    "docx",
+    "jpeg",
+    "jpg",
+    "pdf",
+    "png",
+    "txt",
+    "xls",
+    "xlsx",
+}
+
+
+def _audit_management_section():
+    requested = (request.args.get("section") or "overview").strip().lower()
+    valid = {key for key, _label in AUDIT_MANAGEMENT_SECTIONS}
+    return requested if requested in valid else "overview"
+
+
+def _audit_financial_year_label(today=None):
+    today = today or utcnow().date()
+    start_year = today.year if today.month >= 4 else today.year - 1
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def _audit_financial_years(count=5):
+    current = int(_audit_financial_year_label().split("-", 1)[0])
+    return [f"{current - offset}-{str(current - offset + 1)[-2:]}" for offset in range(count)]
+
+
+def _parse_optional_date(raw_value):
+    raw_value = (raw_value or "").strip()
+    if not raw_value:
+        return None
+    try:
+        return date.fromisoformat(raw_value)
+    except ValueError:
+        return None
+
+
+def _audit_requirement_uid():
+    prefix = f"REQ-{utcnow().year}-"
+    latest = (
+        AuditorRequirement.query.filter(
+            AuditorRequirement.requirement_uid.like(f"{prefix}%")
+        )
+        .order_by(AuditorRequirement.id.desc())
+        .first()
+    )
+    next_number = 1
+    if latest and latest.requirement_uid:
+        try:
+            next_number = int(latest.requirement_uid.rsplit("-", 1)[1]) + 1
+        except (IndexError, ValueError):
+            next_number = (latest.id or 0) + 1
+    return f"{prefix}{next_number:04d}"
+
+
+def _audit_requirement_event(requirement, event_type, message="", document=None):
+    event = AuditorRequirementEvent(
+        requirement=requirement,
+        actor_id=current_user.id,
+        event_type=event_type,
+        message=(message or "").strip() or None,
+        document=document,
+    )
+    db.session.add(event)
+    return event
+
+
+def _audit_document_storage_dir():
+    root = current_app.config.get("AUDIT_DOCUMENT_STORAGE_ROOT")
+    base = Path(root) if root else Path(current_app.instance_path) / "audit_documents"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _validate_audit_upload(file_storage):
+    original = getattr(file_storage, "filename", "") or ""
+    safe_name = secure_filename(original)
+    if not safe_name or "." not in safe_name:
+        raise ValidationError("Choose a valid audit document file.")
+    extension = safe_name.rsplit(".", 1)[1].lower()
+    if extension not in AUDIT_ALLOWED_DOCUMENT_EXTENSIONS:
+        raise ValidationError("Audit document type is not supported.")
+    return safe_name, extension
+
+
+def _save_audit_document_file(file_storage, *, title):
+    safe_name, extension = _validate_audit_upload(file_storage)
+    max_bytes = int(current_app.config.get("MAX_AUDIT_DOCUMENT_BYTES") or 15 * 1024 * 1024)
+    stored_name = f"{secure_filename(title or 'audit-document')}-{uuid4().hex}.{extension}"
+    target = _audit_document_storage_dir() / stored_name
+    file_storage.save(str(target))
+    size_bytes = target.stat().st_size
+    if size_bytes > max_bytes:
+        target.unlink(missing_ok=True)
+        raise ValidationError("Audit document exceeds the maximum allowed size.")
+    return {
+        "storage_reference": stored_name,
+        "original_filename": safe_name,
+        "size_bytes": size_bytes,
+        "mime_type": file_storage.mimetype,
+    }
+
+
+def _audit_document_path(document):
+    safe_reference = secure_filename(document.storage_reference or "")
+    if safe_reference != (document.storage_reference or ""):
+        abort(404)
+    target = _audit_document_storage_dir() / safe_reference
+    if not target.exists():
+        abort(404)
+    return target
+
+
+def _audit_document_upload_from_request(file_storage, *, requirement=None):
+    title = (request.form.get("title") or "").strip()
+    if not title:
+        title = secure_filename(getattr(file_storage, "filename", "") or "Audit Document")
+    category = (request.form.get("category") or "Other").strip()
+    if category not in AUDIT_DOCUMENT_CATEGORIES:
+        category = "Other"
+    status = (request.form.get("status") or "DRAFT").strip().upper()
+    if status not in AUDIT_DOCUMENT_STATUSES:
+        status = "DRAFT"
+    visibility = (request.form.get("visibility") or "INTERNAL").strip().upper()
+    if visibility not in AUDIT_DOCUMENT_VISIBILITIES:
+        visibility = "INTERNAL"
+    financial_year = (
+        request.form.get("financial_year")
+        or (requirement.financial_year if requirement else None)
+        or _audit_financial_year_label()
+    )
+    document_data = _save_audit_document_file(file_storage, title=title)
+    document = AuditDocument(
+        document_uid=f"AUD-DOC-{uuid4().hex[:12].upper()}",
+        financial_year=financial_year,
+        category=category,
+        title=title,
+        visibility=visibility,
+        status=status,
+        uploaded_by=current_user.id,
+        requirement=requirement,
+        period_label=(request.form.get("period_label") or "").strip() or None,
+        document_type=(request.form.get("document_type") or "").strip() or None,
+        description=(request.form.get("description") or "").strip() or None,
+        document_date=_parse_optional_date(request.form.get("document_date")),
+        published_at=utcnow() if status == "PUBLISHED" else None,
+        **document_data,
+    )
+    db.session.add(document)
+    if requirement is not None:
+        if requirement.status in {"OPEN", "NEEDS_REVISION"}:
+            requirement.status = "DOCUMENTS_UPLOADED"
+        _audit_requirement_event(
+            requirement,
+            "document_uploaded",
+            f"Uploaded {document.title}.",
+            document=document,
+        )
+    return document
+
+
+def _audit_requirement_query():
+    query = AuditorRequirement.query.options(
+        selectinload(AuditorRequirement.auditor),
+        selectinload(AuditorRequirement.assignee),
+    )
+    financial_year = request.args.get("financial_year")
+    if financial_year:
+        query = query.filter(AuditorRequirement.financial_year == financial_year)
+    status = (request.args.get("status") or "").strip().upper()
+    if status in AUDIT_REQUIREMENT_STATUSES:
+        query = query.filter(AuditorRequirement.status == status)
+    category = (request.args.get("category") or "").strip()
+    if category in AUDIT_REQUIREMENT_CATEGORIES:
+        query = query.filter(AuditorRequirement.category == category)
+    priority = (request.args.get("priority") or "").strip().upper()
+    if priority in AUDIT_REQUIREMENT_PRIORITIES:
+        query = query.filter(AuditorRequirement.priority == priority)
+    auditor_id = request.args.get("auditor_id", type=int)
+    if auditor_id:
+        query = query.filter(AuditorRequirement.auditor_id == auditor_id)
+    search = (request.args.get("q") or "").strip()
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            or_(
+                AuditorRequirement.requirement_uid.ilike(like),
+                AuditorRequirement.title.ilike(like),
+                AuditorRequirement.description.ilike(like),
+            )
+        )
+    return query
+
+
+def _audit_management_redirect(section="overview", **values):
+    args = {"section": section}
+    if request.form.get("financial_year"):
+        args["financial_year"] = request.form.get("financial_year")
+    args.update(values)
+    return redirect(url_for("admin.audit_management", **args))
+
+
 @admin_bp.route("/audit-management")
 @admin_required
 @finance_required
 def audit_management():
+    section = _audit_management_section()
+    selected_financial_year = request.args.get("financial_year") or _audit_financial_year_label()
     auditors = (
         User.query.filter(User.role == "auditor")
         .order_by(User.is_active.desc(), User.name.asc())
         .all()
     )
+    requirements_query = _audit_requirement_query().filter(
+        AuditorRequirement.financial_year == selected_financial_year
+    )
+    requirements = (
+        requirements_query.order_by(
+            AuditorRequirement.updated_at.desc(), AuditorRequirement.id.desc()
+        )
+        .limit(50)
+        .all()
+    )
     documents = (
-        AuditDocument.query.order_by(AuditDocument.uploaded_at.desc())
-        .limit(20)
+        AuditDocument.query.options(
+            selectinload(AuditDocument.uploader),
+            selectinload(AuditDocument.requirement),
+        )
+        .filter(AuditDocument.financial_year == selected_financial_year)
+        .order_by(AuditDocument.uploaded_at.desc())
+        .limit(50)
         .all()
     )
     downloads = (
-        AuditReportDownload.query.order_by(AuditReportDownload.created_at.desc())
+        AuditReportDownload.query.options(selectinload(AuditReportDownload.user))
+        .order_by(AuditReportDownload.created_at.desc())
         .limit(20)
         .all()
     )
+    activity = (
+        AuditorRequirementEvent.query.options(
+            selectinload(AuditorRequirementEvent.actor),
+            selectinload(AuditorRequirementEvent.requirement),
+            selectinload(AuditorRequirementEvent.document),
+        )
+        .join(AuditorRequirement)
+        .filter(AuditorRequirement.financial_year == selected_financial_year)
+        .order_by(AuditorRequirementEvent.created_at.desc())
+        .limit(30)
+        .all()
+    )
+    status_counts = dict(
+        db.session.query(AuditorRequirement.status, func.count(AuditorRequirement.id))
+        .filter(AuditorRequirement.financial_year == selected_financial_year)
+        .group_by(AuditorRequirement.status)
+        .all()
+    )
+    auditor_open_counts = dict(
+        db.session.query(AuditorRequirement.auditor_id, func.count(AuditorRequirement.id))
+        .filter(
+            AuditorRequirement.financial_year == selected_financial_year,
+            AuditorRequirement.status.in_(
+                ("OPEN", "IN_PROGRESS", "DOCUMENTS_UPLOADED", "NEEDS_REVISION")
+            ),
+        )
+        .group_by(AuditorRequirement.auditor_id)
+        .all()
+    )
     branches = Branch.query.order_by(Branch.name.asc()).all()
-    branch_requests = BranchPurchaseRequest.query.count()
-    active_transfers = StockTransfer.query.filter(
-        StockTransfer.status.in_(["PREPARED", "DISPATCHED", "IN_TRANSIT"])
+    published_documents_count = AuditDocument.query.filter_by(
+        financial_year=selected_financial_year,
+        status="PUBLISHED",
+        visibility="AUDITOR",
     ).count()
+    draft_documents_count = AuditDocument.query.filter(
+        AuditDocument.financial_year == selected_financial_year,
+        AuditDocument.status.in_(("DRAFT", "READY_FOR_AUDITOR")),
+    ).count()
+    open_statuses = {"OPEN", "IN_PROGRESS", "DOCUMENTS_UPLOADED", "NEEDS_REVISION"}
+    overview_cards = [
+        ("Open Requirements", sum(status_counts.get(status, 0) for status in open_statuses), "requirements", "OPEN"),
+        ("Awaiting Response", status_counts.get("OPEN", 0) + status_counts.get("NEEDS_REVISION", 0), "requirements", "NEEDS_REVISION"),
+        ("Submitted", status_counts.get("SUBMITTED_TO_AUDITOR", 0), "requirements", "SUBMITTED_TO_AUDITOR"),
+        ("Resolved", status_counts.get("RESOLVED", 0), "requirements", "RESOLVED"),
+        ("Published Documents", published_documents_count, "documents", None),
+        ("Draft Documents", draft_documents_count, "documents", None),
+    ]
     return render_template(
         "admin/audit_management.html",
+        active_section=section,
+        audit_sections=AUDIT_MANAGEMENT_SECTIONS,
+        selected_financial_year=selected_financial_year,
+        financial_years=_audit_financial_years(),
+        requirement_statuses=AUDIT_REQUIREMENT_STATUSES,
+        requirement_categories=AUDIT_REQUIREMENT_CATEGORIES,
+        requirement_priorities=AUDIT_REQUIREMENT_PRIORITIES,
+        document_categories=AUDIT_DOCUMENT_CATEGORIES,
+        document_statuses=AUDIT_DOCUMENT_STATUSES,
+        document_visibilities=AUDIT_DOCUMENT_VISIBILITIES,
+        supported_reports=AUDIT_SUPPORTED_REPORTS,
+        overview_cards=overview_cards,
+        status_counts=status_counts,
+        auditor_open_counts=auditor_open_counts,
+        published_documents_count=published_documents_count,
         auditors=auditors,
+        requirements=requirements,
         documents=documents,
         downloads=downloads,
+        activity=activity,
         branches=branches,
-        branch_requests=branch_requests,
-        active_transfers=active_transfers,
     )
 
 
@@ -7290,15 +7788,15 @@ def add_auditor_account():
     password = request.form.get("password") or ""
     if not name or not email or not password:
         flash("Auditor name, email, and temporary password are required.", "danger")
-        return redirect(url_for("admin.audit_management"))
+        return redirect(url_for("admin.audit_management", section="accounts"))
     if User.query.filter(func.lower(User.email) == email.lower()).first():
         flash("A user with that email already exists.", "warning")
-        return redirect(url_for("admin.audit_management"))
+        return redirect(url_for("admin.audit_management", section="accounts"))
     password_errors = validate_password(password)
     if password_errors:
         for error in password_errors:
             flash(error, "danger")
-        return redirect(url_for("admin.audit_management"))
+        return redirect(url_for("admin.audit_management", section="accounts"))
 
     auditor = User(
         name=name,
@@ -7322,7 +7820,7 @@ def add_auditor_account():
     )
     db.session.commit()
     flash("Auditor account created.", "success")
-    return redirect(url_for("admin.audit_management"))
+    return redirect(url_for("admin.audit_management", section="accounts"))
 
 
 @admin_bp.route("/audit-management/auditors/<int:user_id>/toggle", methods=["POST"])
@@ -7345,7 +7843,247 @@ def toggle_auditor_account(user_id):
     )
     db.session.commit()
     flash("Auditor access updated.", "success")
-    return redirect(url_for("admin.audit_management"))
+    return redirect(url_for("admin.audit_management", section="accounts"))
+
+
+@admin_bp.route("/audit-management/requirements/<int:requirement_id>")
+@admin_required
+@finance_required
+def audit_requirement_detail(requirement_id):
+    requirement = (
+        AuditorRequirement.query.options(
+            selectinload(AuditorRequirement.auditor),
+            selectinload(AuditorRequirement.assignee),
+            selectinload(AuditorRequirement.documents).selectinload(AuditDocument.uploader),
+            selectinload(AuditorRequirement.events).selectinload(AuditorRequirementEvent.actor),
+            selectinload(AuditorRequirement.events).selectinload(AuditorRequirementEvent.document),
+        )
+        .filter_by(id=requirement_id)
+        .first_or_404()
+    )
+    auditors = User.query.filter_by(role="auditor").order_by(User.name.asc()).all()
+    admins = (
+        User.query.filter(User.role.in_(("admin", "super_admin")))
+        .order_by(User.name.asc())
+        .all()
+    )
+    return render_template(
+        "admin/audit_requirement_detail.html",
+        requirement=requirement,
+        auditors=auditors,
+        admins=admins,
+        requirement_statuses=AUDIT_REQUIREMENT_STATUSES,
+        requirement_categories=AUDIT_REQUIREMENT_CATEGORIES,
+        requirement_priorities=AUDIT_REQUIREMENT_PRIORITIES,
+        document_categories=AUDIT_DOCUMENT_CATEGORIES,
+        document_statuses=AUDIT_DOCUMENT_STATUSES,
+        document_visibilities=AUDIT_DOCUMENT_VISIBILITIES,
+        financial_years=_audit_financial_years(),
+    )
+
+
+@admin_bp.route("/audit-management/requirements/<int:requirement_id>/respond", methods=["POST"])
+@admin_required
+@finance_required
+def audit_requirement_respond(requirement_id):
+    requirement = db.get_or_404(AuditorRequirement, requirement_id)
+    before = {"status": requirement.status, "admin_response": requirement.admin_response}
+    response = (request.form.get("admin_response") or "").strip()
+    if not response:
+        flash("Add a response before saving.", "danger")
+        return redirect(url_for("admin.audit_requirement_detail", requirement_id=requirement.id))
+    requirement.admin_response = response
+    if requirement.status in {"OPEN", "NEEDS_REVISION"}:
+        requirement.status = "IN_PROGRESS"
+    assigned_to = request.form.get("assigned_to", type=int)
+    if assigned_to:
+        requirement.assigned_to = assigned_to
+    _audit_requirement_event(requirement, "admin_response_saved", response)
+    get_container().audit_service.log(
+        current_user,
+        "auditor_requirement_response_saved",
+        "AuditorRequirement",
+        requirement.id,
+        before=before,
+        after={"status": requirement.status, "assigned_to": requirement.assigned_to},
+        change_summary=f"Admin response saved for {requirement.requirement_uid}.",
+    )
+    db.session.commit()
+    flash("Requirement response saved.", "success")
+    return redirect(url_for("admin.audit_requirement_detail", requirement_id=requirement.id))
+
+
+@admin_bp.route("/audit-management/requirements/<int:requirement_id>/submit", methods=["POST"])
+@admin_required
+@finance_required
+def audit_requirement_submit(requirement_id):
+    requirement = db.get_or_404(AuditorRequirement, requirement_id)
+    published_docs = AuditDocument.query.filter_by(
+        requirement_id=requirement.id,
+        status="PUBLISHED",
+        visibility="AUDITOR",
+    ).count()
+    if not requirement.admin_response:
+        flash("Add an admin response before submitting to the auditor.", "danger")
+        return redirect(url_for("admin.audit_requirement_detail", requirement_id=requirement.id))
+    if not published_docs:
+        flash("Publish at least one auditor-visible supporting document before submitting.", "danger")
+        return redirect(url_for("admin.audit_requirement_detail", requirement_id=requirement.id))
+    before = {"status": requirement.status}
+    requirement.status = "SUBMITTED_TO_AUDITOR"
+    requirement.submitted_at = utcnow()
+    _audit_requirement_event(requirement, "submitted_to_auditor", requirement.admin_response)
+    get_container().audit_service.log(
+        current_user,
+        "auditor_requirement_submitted",
+        "AuditorRequirement",
+        requirement.id,
+        before=before,
+        after={"status": requirement.status, "published_documents": published_docs},
+        change_summary=f"Requirement {requirement.requirement_uid} submitted to auditor.",
+    )
+    db.session.commit()
+    flash("Requirement submitted to auditor.", "success")
+    return redirect(url_for("admin.audit_requirement_detail", requirement_id=requirement.id))
+
+
+@admin_bp.route("/audit-management/documents/upload", methods=["POST"])
+@admin_required
+@finance_required
+def upload_audit_document():
+    requirement = None
+    requirement_id = request.form.get("requirement_id", type=int)
+    if requirement_id:
+        requirement = db.get_or_404(AuditorRequirement, requirement_id)
+    files = request.files.getlist("documents") or request.files.getlist("file")
+    files = [file for file in files if file and getattr(file, "filename", "")]
+    if not files:
+        flash("Choose at least one audit document to upload.", "danger")
+        target = (
+            url_for("admin.audit_requirement_detail", requirement_id=requirement.id)
+            if requirement
+            else url_for("admin.audit_management", section="documents")
+        )
+        return redirect(target)
+    uploaded = []
+    try:
+        for file_storage in files:
+            document = _audit_document_upload_from_request(file_storage, requirement=requirement)
+            uploaded.append(document)
+    except ValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        target = (
+            url_for("admin.audit_requirement_detail", requirement_id=requirement.id)
+            if requirement
+            else url_for("admin.audit_management", section="documents")
+        )
+        return redirect(target)
+    db.session.flush()
+    for document in uploaded:
+        get_container().audit_service.log(
+            current_user,
+            "audit_document_uploaded",
+            "AuditDocument",
+            document.id,
+            after={
+                "title": document.title,
+                "status": document.status,
+                "visibility": document.visibility,
+                "requirement_id": document.requirement_id,
+            },
+            change_summary=f"Audit document uploaded: {document.title}.",
+        )
+    db.session.commit()
+    flash(f"{len(uploaded)} audit document{'s' if len(uploaded) != 1 else ''} uploaded.", "success")
+    if requirement:
+        return redirect(url_for("admin.audit_requirement_detail", requirement_id=requirement.id))
+    return redirect(url_for("admin.audit_management", section="documents"))
+
+
+@admin_bp.route("/audit-management/documents/<int:document_id>/publish", methods=["POST"])
+@admin_required
+@finance_required
+def publish_audit_document(document_id):
+    document = db.get_or_404(AuditDocument, document_id)
+    before = {"status": document.status, "visibility": document.visibility}
+    document.status = "PUBLISHED"
+    document.visibility = "AUDITOR"
+    document.published_at = utcnow()
+    if document.requirement:
+        _audit_requirement_event(
+            document.requirement,
+            "document_published",
+            f"Published {document.title} to auditor.",
+            document=document,
+        )
+    get_container().audit_service.log(
+        current_user,
+        "audit_document_published",
+        "AuditDocument",
+        document.id,
+        before=before,
+        after={"status": document.status, "visibility": document.visibility},
+        change_summary=f"Audit document published: {document.title}.",
+    )
+    db.session.commit()
+    flash("Document published to auditor.", "success")
+    if document.requirement_id:
+        return redirect(url_for("admin.audit_requirement_detail", requirement_id=document.requirement_id))
+    return redirect(url_for("admin.audit_management", section="documents"))
+
+
+@admin_bp.route("/audit-management/documents/<int:document_id>/archive", methods=["POST"])
+@admin_required
+@finance_required
+def archive_audit_document(document_id):
+    document = db.get_or_404(AuditDocument, document_id)
+    before = {"status": document.status}
+    document.status = "ARCHIVED"
+    document.archived_at = utcnow()
+    if document.requirement:
+        _audit_requirement_event(
+            document.requirement,
+            "document_archived",
+            f"Archived {document.title}.",
+            document=document,
+        )
+    get_container().audit_service.log(
+        current_user,
+        "audit_document_archived",
+        "AuditDocument",
+        document.id,
+        before=before,
+        after={"status": document.status},
+        change_summary=f"Audit document archived: {document.title}.",
+    )
+    db.session.commit()
+    flash("Document archived.", "success")
+    if document.requirement_id:
+        return redirect(url_for("admin.audit_requirement_detail", requirement_id=document.requirement_id))
+    return redirect(url_for("admin.audit_management", section="documents"))
+
+
+@admin_bp.route("/audit-management/documents/<int:document_id>/download")
+@admin_required
+@finance_required
+def download_audit_document_admin(document_id):
+    document = db.get_or_404(AuditDocument, document_id)
+    path = _audit_document_path(document)
+    get_container().audit_service.log(
+        current_user,
+        "audit_document_admin_download",
+        "AuditDocument",
+        document.id,
+        change_summary=f"Admin downloaded audit document: {document.title}.",
+    )
+    db.session.commit()
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=document.original_filename or path.name,
+        mimetype=document.mime_type,
+    )
 
 
 @admin_bp.route("/portal-preview/audit")
@@ -7596,6 +8334,145 @@ def _finance_date_range():
     return start_date, end_date
 
 
+FINANCE_DASHBOARD_SECTIONS = (
+    ("profit-loss", "Profit & Loss"),
+    ("sales-tax", "Sales Tax"),
+    ("vendor-breakdown", "Vendor Breakdown"),
+    ("financial-health", "Financial Health"),
+    ("recent-transactions", "Recent Transactions"),
+    ("selected-period", "Selected Period"),
+)
+
+
+def _finance_dashboard_section():
+    requested = (request.args.get("section") or "profit-loss").strip().lower()
+    valid = {key for key, _label in FINANCE_DASHBOARD_SECTIONS}
+    return requested if requested in valid else "profit-loss"
+
+
+def _finance_money(value):
+    amount = Decimal(str(value or 0)).quantize(Decimal("0.01"))
+    sign = "-" if amount < 0 else ""
+    rupees, paise = f"{abs(amount):.2f}".split(".")
+    if len(rupees) > 3:
+        head = rupees[:-3]
+        tail = rupees[-3:]
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            groups.insert(0, head)
+        rupees = ",".join(groups + [tail])
+    return f"{sign}₹{rupees}.{paise}"
+
+
+def _finance_percent_change(current, previous):
+    current = Decimal(str(current or 0))
+    previous = Decimal(str(previous or 0))
+    if previous == 0:
+        return None
+    return ((current - previous) / previous * Decimal("100")).quantize(
+        Decimal("0.1")
+    )
+
+
+def _finance_operational_receivables(start, end):
+    total = (
+        db.session.query(func.coalesce(func.sum(Order.total), 0))
+        .filter(
+            Order.placed_at >= start,
+            Order.placed_at < end,
+            Order.status != "CANCELLED",
+            Order.payment_status != "PAID",
+        )
+        .scalar()
+        or 0
+    )
+    return Decimal(str(total)).quantize(Decimal("0.01"))
+
+
+def _finance_operational_payables(start_date, end_date):
+    open_orders = (
+        PurchaseOrder.query.filter(
+            PurchaseOrder.order_date >= start_date,
+            PurchaseOrder.order_date <= end_date,
+            ~PurchaseOrder.status.in_(("cancelled", "received", "closed")),
+        )
+        .all()
+    )
+    total = Decimal("0.00")
+    for order in open_orders:
+        subtotal = Decimal(str(order.subtotal or 0))
+        gst = (
+            subtotal * Decimal(str(order.gst_rate_percent or 0)) / Decimal("100")
+        ).quantize(Decimal("0.01"))
+        total += subtotal + gst
+    return total.quantize(Decimal("0.01"))
+
+
+def _finance_dashboard_period_summary(finance, selected, payload):
+    start = selected["start"]
+    end = selected["end"]
+    start_date = selected["start_date"]
+    end_date = selected["end_date"]
+    purchases = sum(
+        (Decimal(str(row["total_spend"] or 0)) for row in payload["vendor_spend"]),
+        Decimal("0.00"),
+    ).quantize(Decimal("0.01"))
+    receivables = _finance_operational_receivables(start, end)
+    payables = _finance_operational_payables(
+        date.fromisoformat(start_date),
+        date.fromisoformat(end_date),
+    )
+    span = end.date() - start.date()
+    previous_end = start.date() - timedelta(days=1)
+    previous_start = previous_end - span + timedelta(days=1)
+    previous_pnl = finance.profit_and_loss(
+        start_date=previous_start,
+        end_date=previous_end,
+    )
+    previous_gst = finance.gst_summary(start_date=previous_start, end_date=previous_end)
+    previous_purchases = sum(
+        (
+            Decimal(str(row["total_spend"] or 0))
+            for row in finance.vendor_spend_report(
+                start_date=previous_start,
+                end_date=previous_end,
+            )
+        ),
+        Decimal("0.00"),
+    ).quantize(Decimal("0.01"))
+    metrics = [
+        ("Revenue", payload["pnl"]["income"], previous_pnl["income"]),
+        ("Sales", payload["pnl"]["sales_revenue"], previous_pnl["sales_revenue"]),
+        ("Purchases", purchases, previous_purchases),
+        ("Expenses", payload["pnl"]["expenses"], previous_pnl["expenses"]),
+        ("Profit", payload["pnl"]["net_profit"], previous_pnl["net_profit"]),
+        ("GST", payload["gst"]["net_gst_liability"], previous_gst["net_gst_liability"]),
+        ("Receivables", receivables, None),
+        ("Payables", payables, None),
+    ]
+    return {
+        "from": start_date,
+        "to": end_date,
+        "previous_from": previous_start.isoformat(),
+        "previous_to": previous_end.isoformat(),
+        "metrics": [
+            {
+                "label": label,
+                "current": current,
+                "previous": previous,
+                "change": _finance_percent_change(current, previous)
+                if previous is not None
+                else None,
+                "comparison_available": previous is not None,
+            }
+            for label, current, previous in metrics
+        ],
+    }
+
+
 # ── FINANCE ──────────────────────────────────────────────────
 @admin_bp.route("/finance")
 @finance_required
@@ -7603,6 +8480,7 @@ def finance_dashboard():
     finance = get_container().finance_service
     finance.ensure_default_categories()
     period, start_date, end_date = _finance_request_period()
+    active_section = _finance_dashboard_section()
     payload = finance.dashboard_payload(
         period,
         start_date=start_date,
@@ -7619,6 +8497,10 @@ def finance_dashboard():
         pnl=payload["pnl"],
         gst=payload["gst"],
         transactions=transactions,
+        active_finance_section=active_section,
+        finance_sections=FINANCE_DASHBOARD_SECTIONS,
+        finance_money=_finance_money,
+        period_summary=_finance_dashboard_period_summary(finance, selected, payload),
         start_date=selected["start_date"],
         end_date=selected["end_date"],
         period=selected["period"],
@@ -7657,6 +8539,7 @@ def finance_consistency_check():
             period=selected["period"],
             start_date=selected["start_date"],
             end_date=selected["end_date"],
+            section=_finance_dashboard_section(),
         )
     )
 

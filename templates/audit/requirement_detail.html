@@ -1,0 +1,78 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}{{ requirement.requirement_uid }} - {{ bakery_name }}{% endblock %}
+{% block page_title %}{{ requirement.requirement_uid }}{% endblock %}
+{% block breadcrumbs %}<a href="{{ url_for('audit.dashboard') }}">Auditor Portal</a> &gt; <a href="{{ url_for('audit.requirements', financial_year=selected_financial_year) }}">Requirements</a> &gt; {{ requirement.requirement_uid }}{% endblock %}
+{% block content %}
+<section class="audit-grid" style="margin-bottom:14px">
+  <div class="audit-panel"><h3>Status</h3><div class="audit-value">{{ requirement.status.replace('_', ' ').title() }}</div></div>
+  <div class="audit-panel"><h3>Priority</h3><div class="audit-value">{{ requirement.priority.title() }}</div></div>
+  <div class="audit-panel"><h3>Financial Year</h3><div class="audit-value">{{ requirement.financial_year }}</div></div>
+  <div class="audit-panel"><h3>Due Date</h3><div class="audit-value">{{ requirement.due_date or '—' }}</div></div>
+</section>
+
+<div class="audit-grid" style="grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr); margin-bottom:14px">
+  <section class="audit-panel">
+    <h3>Auditor Request</h3>
+    <p>{{ requirement.description }}</p>
+    {% if requirement.latest_auditor_comment %}
+    <h3>Latest Feedback</h3>
+    <p>{{ requirement.latest_auditor_comment }}</p>
+    {% endif %}
+    <h3>Admin Response</h3>
+    <p>{{ requirement.admin_response or 'No admin response submitted yet.' }}</p>
+  </section>
+  <section class="audit-panel">
+    <h3>Review Action</h3>
+    <form method="post" action="{{ url_for('audit.request_revision', requirement_id=requirement.id) }}" class="audit-requirement-form" style="grid-template-columns:1fr">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Revision / Additional Information Comment
+        <textarea name="comment" rows="4"></textarea>
+      </label>
+      <button class="btn btn-outline btn-sm" type="submit">Request Revision</button>
+    </form>
+    <form method="post" action="{{ url_for('audit.resolve_requirement', requirement_id=requirement.id) }}" style="margin-top:10px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-primary btn-sm" type="submit">Mark Resolved</button>
+    </form>
+  </section>
+</div>
+
+<section class="audit-panel" style="margin-bottom:14px">
+  <h3>Supporting Documents</h3>
+  {% if visible_documents %}
+  <div class="audit-table-wrap">
+    <table class="audit-table">
+      <thead><tr><th>Document</th><th>Category</th><th>Period</th><th>Published</th><th>Download</th></tr></thead>
+      <tbody>
+        {% for document in visible_documents %}
+        <tr>
+          <td>{{ document.title }}</td>
+          <td>{{ document.category }}</td>
+          <td>{{ document.period_label or '—' }}</td>
+          <td>{{ document.published_at.strftime('%d %b %Y') if document.published_at else 'Published' }}</td>
+          <td><a class="btn btn-outline btn-sm" href="{{ url_for('audit.download_document', document_uid=document.document_uid) }}">Download</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="audit-empty">No published supporting documents are attached yet.</div>
+  {% endif %}
+</section>
+
+<section class="audit-panel">
+  <h3>Activity</h3>
+  <div class="audit-timeline">
+    {% for event in requirement.events %}
+    <div>
+      <time>{{ event.created_at.strftime('%d %b %Y %H:%M') }}</time>
+      <strong>{{ event.actor.name if event.actor else 'System' }} - {{ event.event_type.replace('_', ' ').title() }}</strong>
+      <p>{{ event.message or 'Requirement updated.' }}</p>
+    </div>
+    {% else %}
+    <div class="audit-empty">No requirement activity yet.</div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

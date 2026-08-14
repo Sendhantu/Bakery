@@ -1,0 +1,56 @@
+{% extends "audit/base_audit.html" %}
+{% block title %}Audit Requirements - {{ bakery_name }}{% endblock %}
+{% block page_title %}Requirements{% endblock %}
+{% block content %}
+<section class="audit-panel" style="margin-bottom:14px">
+  <h3>Create Requirement</h3>
+  <form method="post" class="audit-requirement-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="financial_year" value="{{ selected_financial_year }}">
+    <label>Title <input name="title" required></label>
+    <label>Category <select name="category">{% for category in categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}</select></label>
+    <label>Period <input name="period_label" placeholder="April-June 2026"></label>
+    <label>Priority <select name="priority">{% for priority in priorities %}<option value="{{ priority }}">{{ priority.title() }}</option>{% endfor %}</select></label>
+    <label>Requested Due Date <input type="date" name="due_date"></label>
+    <label class="audit-requirement-form-wide">Description <textarea name="description" rows="3" required></textarea></label>
+    <button class="btn btn-primary btn-sm" type="submit">Create Requirement</button>
+  </form>
+</section>
+
+<form method="get" class="audit-filters">
+  <input type="hidden" name="financial_year" value="{{ selected_financial_year }}">
+  <label>Status
+    <select name="status">
+      <option value="">All statuses</option>
+      {% for status in statuses %}
+      <option value="{{ status }}" {% if request.args.get('status') == status %}selected{% endif %}>{{ status.replace('_', ' ').title() }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="audit-actions"><button class="btn btn-primary btn-sm">Apply</button></div>
+</form>
+
+{% if requirements %}
+<div class="audit-table-wrap">
+  <table class="audit-table">
+    <thead><tr><th>Requirement</th><th>Category</th><th>Requested Date</th><th>Due Date</th><th>Status</th><th>Admin Response</th><th>Documents</th><th>Last Updated</th></tr></thead>
+    <tbody>
+      {% for requirement in requirements %}
+      <tr>
+        <td><a href="{{ url_for('audit.requirement_detail', requirement_id=requirement.id) }}">{{ requirement.requirement_uid }} - {{ requirement.title }}</a></td>
+        <td>{{ requirement.category }}</td>
+        <td>{{ requirement.requested_at.strftime('%d %b %Y') }}</td>
+        <td>{{ requirement.due_date or '—' }}</td>
+        <td><span class="audit-badge {% if requirement.status == 'RESOLVED' %}green{% elif requirement.status == 'NEEDS_REVISION' %}orange{% else %}blue{% endif %}">{{ requirement.status.replace('_', ' ').title() }}</span></td>
+        <td>{{ 'Yes' if requirement.admin_response else 'Pending' }}</td>
+        <td>{{ requirement.documents|selectattr('is_auditor_visible')|list|length }}</td>
+        <td>{{ requirement.updated_at.strftime('%d %b %Y') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="audit-empty">No audit requirements for this financial year.</div>
+{% endif %}
+{% endblock %}

@@ -1,8 +1,11 @@
 from decimal import Decimal
+from io import BytesIO
 
 from models import (
+    AuditDocument,
     AuditLog,
     AuditReportDownload,
+    AuditorRequirement,
     Branch,
     Category,
     Order,
@@ -178,6 +181,179 @@ def test_audit_report_downloads_are_generated_and_logged(app_factory):
             "sales-register",
             "profit-and-loss",
         ]
+
+
+def test_auditor_requirement_document_revision_workflow(app_factory, tmp_path):
+    app = app_factory("admin")
+    app.config["AUDIT_DOCUMENT_STORAGE_ROOT"] = str(tmp_path)
+    client = app.test_client()
+
+    sign_in(client, "auditor@bakery.com", "Auditor123")
+    create_response = client.post(
+        "/audit/requirements",
+        data={
+            "financial_year": "2026-27",
+            "title": "April-June GST Challans",
+            "category": "GST",
+            "period_label": "April-June 2026",
+            "priority": "HIGH",
+            "due_date": "2026-08-31",
+            "description": "Provide GST payment challans for April, May and June.",
+        },
+        follow_redirects=True,
+    )
+    assert create_response.status_code == 200
+
+    with app.app_context():
+        requirement = AuditorRequirement.query.filter_by(
+            title="April-June GST Challans"
+        ).first()
+        assert requirement is not None
+        requirement_id = requirement.id
+        requirement_uid = requirement.requirement_uid
+
+    client.get("/auth/logout")
+    sign_in(client, "admin@bakery.com", "Admin@bakery")
+    admin_list = client.get("/admin/audit-management?section=requirements&financial_year=2026-27")
+    assert admin_list.status_code == 200
+    assert requirement_uid.encode() in admin_list.data
+
+    respond = client.post(
+        f"/admin/audit-management/requirements/{requirement_id}/respond",
+        data={"admin_response": "April and May challans are attached for review."},
+        follow_redirects=True,
+    )
+    assert respond.status_code == 200
+    assert b"April and May challans are attached" in respond.data
+
+    upload = client.post(
+        "/admin/audit-management/documents/upload",
+        data={
+            "requirement_id": str(requirement_id),
+            "title": "GST April 2026 Challan",
+            "category": "GST",
+            "financial_year": "2026-27",
+            "period_label": "April 2026",
+            "visibility": "INTERNAL",
+            "status": "DRAFT",
+            "documents": (BytesIO(b"gst challan"), "gst_april_2026.pdf"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert upload.status_code == 200
+
+    with app.app_context():
+        document = AuditDocument.query.filter_by(title="GST April 2026 Challan").first()
+        assert document is not None
+        assert document.is_auditor_visible is False
+        document_id = document.id
+        document_uid = document.document_uid
+
+    client.get("/auth/logout")
+    sign_in(client, "auditor@bakery.com", "Auditor123")
+    assert client.get(f"/audit/documents/{document_uid}/download").status_code == 404
+
+    client.get("/auth/logout")
+    sign_in(client, "admin@bakery.com", "Admin@bakery")
+    publish = client.post(
+        f"/admin/audit-management/documents/{document_id}/publish",
+        follow_redirects=True,
+    )
+    assert publish.status_code == 200
+    submit = client.post(
+        f"/admin/audit-management/requirements/{requirement_id}/submit",
+        follow_redirects=True,
+    )
+    assert submit.status_code == 200
+    assert b"Submitted To Auditor" in submit.data
+
+    with app.app_context():
+        second_auditor = User(
+            name="Second Auditor",
+            email="second.auditor@example.test",
+            role="auditor",
+            is_active=True,
+        )
+        second_auditor.set_password("Auditor123")
+        db.session.add(second_auditor)
+        db.session.commit()
+
+    client.get("/auth/logout")
+    sign_in(client, "second.auditor@example.test", "Auditor123")
+    other_docs = client.get("/audit/documents?financial_year=2026-27")
+    assert other_docs.status_code == 200
+    assert b"GST April 2026 Challan" not in other_docs.data
+    assert client.get(f"/audit/documents/{document_uid}/download").status_code == 404
+
+    client.get("/auth/logout")
+    sign_in(client, "auditor@bakery.com", "Auditor123")
+    detail = client.get(f"/audit/requirements/{requirement_id}")
+    assert detail.status_code == 200
+    assert b"April and May challans are attached" in detail.data
+    assert b"GST April 2026 Challan" in detail.data
+    download = client.get(f"/audit/documents/{document_uid}/download")
+    assert download.status_code == 200
+    assert download.data == b"gst challan"
+
+    revision = client.post(
+        f"/audit/requirements/{requirement_id}/revision",
+        data={"comment": "June challan is missing. Please upload it."},
+        follow_redirects=True,
+    )
+    assert revision.status_code == 200
+    assert b"June challan is missing" in revision.data
+
+    client.get("/auth/logout")
+    sign_in(client, "admin@bakery.com", "Admin@bakery")
+    admin_detail = client.get(f"/admin/audit-management/requirements/{requirement_id}")
+    assert admin_detail.status_code == 200
+    assert b"NEEDS REVISION" not in admin_detail.data
+    assert b"Needs Revision" in admin_detail.data
+    assert b"June challan is missing" in admin_detail.data
+
+    resubmit_response = client.post(
+        f"/admin/audit-management/requirements/{requirement_id}/respond",
+        data={"admin_response": "June challan has now been added."},
+        follow_redirects=True,
+    )
+    assert resubmit_response.status_code == 200
+    client.post(
+        f"/admin/audit-management/requirements/{requirement_id}/submit",
+        follow_redirects=True,
+    )
+
+    client.get("/auth/logout")
+    sign_in(client, "auditor@bakery.com", "Auditor123")
+    resolved = client.post(
+        f"/audit/requirements/{requirement_id}/resolve",
+        follow_redirects=True,
+    )
+    assert resolved.status_code == 200
+    assert b"Resolved" in resolved.data
+
+    with app.app_context():
+        requirement = db.session.get(AuditorRequirement, requirement_id)
+        assert requirement.status == "RESOLVED"
+        assert len(requirement.events) >= 6
+
+
+def test_admin_audit_management_sections_render(app_factory):
+    app = app_factory("admin")
+    client = app.test_client()
+    sign_in(client, "admin@bakery.com", "Admin@bakery")
+
+    for section in [
+        "overview",
+        "requirements",
+        "documents",
+        "reports",
+        "accounts",
+        "activity",
+    ]:
+        response = client.get(f"/admin/audit-management?section={section}")
+        assert response.status_code == 200, section
+        assert b"Audit Management" in response.data
 
 
 def test_branch_user_only_sees_own_branch_stock_and_orders(app_factory):

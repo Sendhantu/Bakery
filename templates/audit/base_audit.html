@@ -103,6 +103,7 @@
       <div class="audit-nav-group">
         <div class="audit-nav-label">Library</div>
         <ul class="audit-nav">
+          <li><a href="{{ url_for('audit.requirements', financial_year=selected_financial_year) }}" class="{{ 'active' if ep in ['audit.requirements','audit.requirement_detail'] }}">Requirements</a></li>
           <li><a href="{{ url_for('audit.documents', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.documents' }}">Documents</a></li>
           <li><a href="{{ url_for('audit.reports', financial_year=selected_financial_year) }}" class="{{ 'active' if ep == 'audit.reports' }}">Reports</a></li>
         </ul>

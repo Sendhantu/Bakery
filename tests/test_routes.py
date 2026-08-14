@@ -1212,7 +1212,10 @@ def test_raw_materials_page_shows_readable_material_details(admin_client):
     assert b"Search" in response.data
     assert b'id="rm-search"' in response.data
     assert b"Create New Raw Material" in response.data
-    assert b"raw-material-list-row" in response.data
+    assert b"raw-material-table" in response.data
+    assert b"Raw Material" in response.data
+    assert b"Current Stock" in response.data
+    assert b"Actions" in response.data
     assert b"Display Cocoa Powder" in response.data
     assert b"Total Materials" in response.data
     assert b"Inventory Value" in response.data
@@ -1650,13 +1653,17 @@ def test_inventory_page_shows_product_sales_materials_and_vendor_details(admin_c
     assert b"Raw Material Inventory" in response.data
     assert b"Inventory Almond Tart" in response.data
     assert b"Town Center Branch" in response.data
-    assert b"Inventory Almond Flour" in response.data
-    assert b"Almond Vendor Co" in response.data
-    assert b"Last Material Received" in response.data
     assert b"Day" in response.data
     assert b"Week" in response.data
     assert b"Month" in response.data
     assert b"Year" in response.data
+
+    material_response = admin_client.get("/admin/inventory?view=materials")
+    assert material_response.status_code == 200
+    assert b"Raw Material Inventory" in material_response.data
+    assert b"Inventory Almond Flour" in material_response.data
+    assert b"Almond Vendor Co" in material_response.data
+    assert b"Last Material Received" in material_response.data
 
 
 def test_reverse_geocode_api_validates_coordinates(client):

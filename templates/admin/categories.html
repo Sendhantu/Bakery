@@ -55,6 +55,26 @@
       </summary>
 
       <div class="category-products-panel">
+        <div class="category-action-row">
+          <button type="button" class="btn btn-outline btn-sm" data-toggle-target="#category-edit-{{ c.id }}">Edit Category</button>
+          <form method="POST" action="{{ url_for('admin.delete_category', category_id=c.id) }}">
+            <button type="submit" class="btn btn-danger btn-sm" data-confirm="Delete this category? Categories with products must be emptied first.">Delete Category</button>
+          </form>
+        </div>
+
+        <div id="category-edit-{{ c.id }}" class="category-edit-panel hidden">
+          <form method="POST" action="{{ url_for('admin.edit_category', category_id=c.id) }}" enctype="multipart/form-data" class="category-edit-form">
+            <div class="form-group"><label class="form-label">Category Name</label><input class="form-control" name="name" value="{{ c.name }}" required></div>
+            <div class="form-group"><label class="form-label">Icon</label><input class="form-control" name="icon" value="{{ c.icon }}" maxlength="4"></div>
+            <div class="form-group"><label class="form-label">Image from link</label><input class="form-control" type="url" name="image_url" value="{{ c.image_url or '' }}"></div>
+            <div class="form-group"><label class="form-label">Replace image from device</label><input class="form-control" type="file" name="image" accept="image/*"></div>
+            <div class="category-action-row">
+              <button type="submit" class="btn btn-primary btn-sm">Save Category</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-hide-target="#category-edit-{{ c.id }}">Cancel</button>
+            </div>
+          </form>
+        </div>
+
         {% if item.products %}
         <div class="category-products-grid">
           {% for p in item.products %}

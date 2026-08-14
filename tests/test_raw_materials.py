@@ -11,6 +11,7 @@ from models import (
     MaterialDocument,
     PurchaseOrder,
     PurchaseOrderItem,
+    ProductMaterial,
     RawMaterial,
     StockMovement,
     Vendor,
@@ -137,6 +138,112 @@ def test_raw_materials_list_renders_with_summary_cards_and_filters(admin_client)
     assert b"Low Stock Sugar" not in search_response.data
 
 
+def test_raw_materials_list_shows_delete_for_authorized_managers(admin_client):
+    create_admin_user(admin_client.application, "manager-delete@bakery.com", "manager")
+    sign_in(admin_client, "manager-delete@bakery.com", "AdminTier1")
+    with admin_client.application.app_context():
+        material = create_material(
+            db.session,
+            name="Delete Button Flour",
+            stock=Decimal("0"),
+        )
+        material_id = material.id
+
+    response = admin_client.get("/admin/raw-materials")
+    assert response.status_code == 200
+    assert b"Delete Button Flour" in response.data
+    assert f"/admin/raw-materials/{material_id}/delete".encode() in response.data
+    assert b"data-confirm=\"Delete raw material" in response.data
+
+
+def test_staff_cannot_see_or_post_raw_material_delete(admin_client):
+    create_admin_user(admin_client.application, "staff-delete@bakery.com", "staff")
+    sign_in(admin_client, "staff-delete@bakery.com", "AdminTier1")
+    with admin_client.application.app_context():
+        material = create_material(
+            db.session,
+            name="Staff Hidden Delete Flour",
+            stock=Decimal("0"),
+        )
+        material_id = material.id
+
+    response = admin_client.get("/admin/raw-materials")
+    assert response.status_code == 200
+    assert f"/admin/raw-materials/{material_id}/delete".encode() not in response.data
+    delete_response = admin_client.post(
+        f"/admin/raw-materials/{material_id}/delete",
+        follow_redirects=False,
+    )
+    assert delete_response.status_code == 403
+    with admin_client.application.app_context():
+        assert db.session.get(RawMaterial, material_id) is not None
+
+
+def test_unreferenced_zero_stock_raw_material_can_be_deleted(admin_client):
+    create_admin_user(admin_client.application, "manager-hard-delete@bakery.com", "manager")
+    sign_in(admin_client, "manager-hard-delete@bakery.com", "AdminTier1")
+    with admin_client.application.app_context():
+        material = create_material(
+            db.session,
+            name="Unused Delete Flour",
+            stock=Decimal("0"),
+            reorder=Decimal("0"),
+        )
+        material_id = material.id
+
+    response = admin_client.post(
+        f"/admin/raw-materials/{material_id}/delete",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Unused Delete Flour deleted" in response.data
+    with admin_client.application.app_context():
+        assert db.session.get(RawMaterial, material_id) is None
+
+
+def test_referenced_raw_material_is_paused_instead_of_deleted(admin_client):
+    create_admin_user(admin_client.application, "manager-soft-delete@bakery.com", "manager")
+    sign_in(admin_client, "manager-soft-delete@bakery.com", "AdminTier1")
+    with admin_client.application.app_context():
+        from models import Category, Product
+
+        material = create_material(
+            db.session,
+            name="Referenced Delete Flour",
+            stock=Decimal("0"),
+            reorder=Decimal("0"),
+        )
+        category = Category(name="Referenced Raw Material Category", icon="cake")
+        product = Product(
+            name="Referenced Raw Material Product",
+            base_price=Decimal("100"),
+            category=category,
+            is_active=True,
+        )
+        db.session.add_all([category, product])
+        db.session.flush()
+        db.session.add(
+            ProductMaterial(
+                product_id=product.id,
+                raw_material_id=material.id,
+                quantity_required=Decimal("1"),
+            )
+        )
+        db.session.commit()
+        material_id = material.id
+
+    response = admin_client.post(
+        f"/admin/raw-materials/{material_id}/delete",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"paused instead of deleted" in response.data
+    with admin_client.application.app_context():
+        material = db.session.get(RawMaterial, material_id)
+        assert material is not None
+        assert material.is_active is False
+
+
 def test_raw_material_detail_is_read_only_for_staff(admin_client):
     create_admin_user(admin_client.application, "staff@bakery.com", "staff")
     sign_in(admin_client, "staff@bakery.com", "AdminTier1")
@@ -157,6 +264,34 @@ def test_raw_material_detail_is_read_only_for_staff(admin_client):
         follow_redirects=False,
     )
     assert post_response.status_code == 403
+
+
+def test_raw_material_detail_orders_review_history_before_management(admin_client):
+    create_admin_user(admin_client.application, "manager-detail-order@bakery.com", "manager")
+    sign_in(admin_client, "manager-detail-order@bakery.com", "AdminTier1")
+    with admin_client.application.app_context():
+        material = create_material(db.session, name="Ordered Detail Flour")
+        material_id = material.id
+
+    response = admin_client.get(f"/admin/raw-materials/{material_id}")
+    assert response.status_code == 200
+    markers = [
+        b'id="summary"',
+        b'id="details"',
+        b'id="batches"',
+        b'id="purchases"',
+        b'id="movements"',
+        b'id="documents"',
+        b'id="management"',
+    ]
+    positions = [response.data.index(marker) for marker in markers]
+    assert positions == sorted(positions)
+    assert response.data.index(b"Inventory Management") < response.data.index(
+        b"Record Stock Change"
+    )
+    assert response.data.index(b"Documents &amp; Attachments") < response.data.index(
+        b"Inventory Management"
+    )
 
 
 def test_staff_cannot_edit_details_or_toggle(admin_client):

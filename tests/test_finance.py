@@ -36,10 +36,44 @@ def test_finance_dashboard_requires_admin_role(admin_client):
     assert response.status_code == 200
     assert b"Finance Command Center" in response.data
     assert b"finance-custom-range" in response.data
-    assert b"Custom date range" in response.data
     assert b"Record-keeping aid only" in response.data
-    assert b"Sales Performance" in response.data
-    assert b"Financial Health at a Glance" in response.data
+    assert b"Profit &amp; Loss" in response.data
+    assert b"Product-wise P&amp;L" in response.data
+    assert b"Vendor purchase and tax treatment" not in response.data
+    assert b"Selected-period ledger activity" not in response.data
+
+
+def test_finance_dashboard_renders_only_selected_subsection(admin_client):
+    sign_in(admin_client, "admin@bakery.com", "Admin@bakery")
+    response = admin_client.get("/admin/finance?period=month&section=sales-tax")
+    assert response.status_code == 200
+    assert b"GST and statutory tax view" in response.data
+    assert b"Vendor purchase and tax treatment" not in response.data
+    assert b"Product-wise P&amp;L" not in response.data
+    assert b'href="/admin/finance?section=vendor-breakdown&amp;period=month' in response.data
+
+
+def test_finance_dashboard_invalid_section_falls_back_to_profit_loss(admin_client):
+    sign_in(admin_client, "admin@bakery.com", "Admin@bakery")
+    response = admin_client.get("/admin/finance?section=unknown")
+    assert response.status_code == 200
+    assert b"Product-wise P&amp;L" in response.data
+    assert b"GST and statutory tax view" not in response.data
+
+
+def test_finance_dashboard_selected_period_preserves_custom_dates(admin_client):
+    sign_in(admin_client, "admin@bakery.com", "Admin@bakery")
+    response = admin_client.get(
+        "/admin/finance?period=custom&start_date=2026-04-01&end_date=2026-04-30&section=selected-period"
+    )
+    assert response.status_code == 200
+    assert b"Selected Period" in response.data
+    assert b"2026-04-01" in response.data
+    assert b"2026-04-30" in response.data
+    assert (
+        b'href="/admin/finance?section=profit-loss&amp;period=custom&amp;start_date=2026-04-01&amp;end_date=2026-04-30"'
+        in response.data
+    )
 
 
 def test_gst_summary_page_renders_channel_reporting(admin_client):
