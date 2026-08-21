@@ -3,10 +3,23 @@ import secrets
 
 from clock import utcnow
 from flask_login import UserMixin
-from sqlalchemy import func, or_
+from sqlalchemy import event, func, or_
+from sqlalchemy.orm import attributes
 
 from .base import db, bcrypt
 from .loyalty import LoyaltyLedger
+
+
+STAFF_EMPLOYEE_ROLES = frozenset(
+    {
+        "super_admin",
+        "admin",
+        "branch_manager",
+        "branch_staff",
+        "cashier",
+        "kitchen_staff",
+    }
+)
 
 
 class User(UserMixin, db.Model):
@@ -54,7 +67,7 @@ class User(UserMixin, db.Model):
     rbac_enabled = db.Column(db.Boolean, default=False, nullable=False)
     employee_status = db.Column(db.String(30), default="active", nullable=False)
     employment_status = db.Column(db.String(30), default="full_time")
-    employee_id = db.Column(db.String(40), index=True)
+    employee_id = db.Column(db.String(40), unique=True, index=True)
     department = db.Column(db.String(80))
     job_title = db.Column(db.String(120))
     invite_token = db.Column(db.String(64), index=True)
@@ -146,7 +159,7 @@ class User(UserMixin, db.Model):
             return "owner"
         if role == "branch_manager":
             return "manager"
-        if role in {"cashier", "kitchen_staff"}:
+        if role in {"branch_staff", "cashier", "kitchen_staff"}:
             return "staff"
         if role == "admin":
             return (self.admin_tier or "owner").strip().lower() or "owner"
@@ -187,6 +200,22 @@ class User(UserMixin, db.Model):
 
     def __repr__(self):
         return f"<User {self.email}>"
+
+
+@event.listens_for(User, "after_insert")
+def assign_staff_employee_id(_mapper, connection, target):
+    """Give every newly-created staff account a stable ID based on its DB user id."""
+    role = (target.role or "").strip().lower()
+    if role not in STAFF_EMPLOYEE_ROLES or target.employee_id:
+        return
+
+    employee_id = f"SC-STF-{target.id:06d}"
+    connection.execute(
+        User.__table__.update()
+        .where(User.__table__.c.id == target.id)
+        .values(employee_id=employee_id)
+    )
+    attributes.set_committed_value(target, "employee_id", employee_id)
 
 
 class LoginHistory(db.Model):

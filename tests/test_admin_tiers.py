@@ -94,3 +94,29 @@ def test_owner_can_create_manager_admin_account(admin_client):
         assert user is not None
         assert user.role == "admin"
         assert user.admin_tier == "manager"
+        assert user.employee_id == f"SC-STF-{user.id:06d}"
+        assert user.employee_id.encode() in response.data
+
+
+def test_staff_employee_ids_are_unique(admin_client):
+    with admin_client.application.app_context():
+        first = User(
+            name="Kitchen One",
+            email="kitchen.one@bakery.com",
+            role="kitchen_staff",
+            is_active=True,
+        )
+        second = User(
+            name="Kitchen Two",
+            email="kitchen.two@bakery.com",
+            role="kitchen_staff",
+            is_active=True,
+        )
+        first.set_password("KitchenPass1")
+        second.set_password("KitchenPass2")
+        db.session.add_all([first, second])
+        db.session.commit()
+
+        assert first.employee_id == f"SC-STF-{first.id:06d}"
+        assert second.employee_id == f"SC-STF-{second.id:06d}"
+        assert first.employee_id != second.employee_id
