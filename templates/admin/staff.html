@@ -23,6 +23,9 @@
             <tr>
               <td>
                 <strong>{{ staff_user.name }}</strong><br>
+                {% if staff_user.employee_id %}
+                <span class="badge badge-blue" style="margin:0.25rem 0">{{ staff_user.employee_id }}</span><br>
+                {% endif %}
                 <span class="text-muted text-sm">{{ staff_user.email }}</span>
                 {% if staff_user.email_locked %}
                 <br><span class="text-muted text-sm">Email locked</span>
@@ -136,7 +139,7 @@
           <div class="form-group"><label class="form-label">Branch</label><select class="form-control" name="branch_id"><option value="">Main</option>{% for branch in branches %}<option value="{{ branch.id }}">{{ branch.name }}</option>{% endfor %}</select></div>
           <div class="form-group"><label class="form-label">Temporary Password *</label><input class="form-control" name="password" type="password" required minlength="8"></div>
           <div class="form-group"><label class="form-label">Notes</label><textarea class="form-control" name="staff_notes" rows="2" placeholder="Optional internal notes"></textarea></div>
-          <p class="text-sm text-muted">The staff member must change this password on their first login.</p>
+          <p class="text-sm text-muted">The staff member must change this password on their first login. A unique staff ID is assigned automatically.</p>
           <button class="btn btn-primary btn-block" type="submit">Create Team Member</button>
         </form>
       </div>
