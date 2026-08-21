@@ -54,7 +54,7 @@ class User(UserMixin, db.Model):
     rbac_enabled = db.Column(db.Boolean, default=False, nullable=False)
     employee_status = db.Column(db.String(30), default="active", nullable=False)
     employment_status = db.Column(db.String(30), default="full_time")
-    employee_id = db.Column(db.String(40), index=True)
+    employee_id = db.Column(db.String(40), unique=True, index=True)
     department = db.Column(db.String(80))
     job_title = db.Column(db.String(120))
     invite_token = db.Column(db.String(64), index=True)
@@ -146,7 +146,7 @@ class User(UserMixin, db.Model):
             return "owner"
         if role == "branch_manager":
             return "manager"
-        if role in {"cashier", "kitchen_staff"}:
+        if role in {"branch_staff", "cashier", "kitchen_staff"}:
             return "staff"
         if role == "admin":
             return (self.admin_tier or "owner").strip().lower() or "owner"
