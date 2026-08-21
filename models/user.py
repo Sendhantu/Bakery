@@ -3,10 +3,23 @@ import secrets
 
 from clock import utcnow
 from flask_login import UserMixin
-from sqlalchemy import func, or_
+from sqlalchemy import event, func, or_
+from sqlalchemy.orm import attributes
 
 from .base import db, bcrypt
 from .loyalty import LoyaltyLedger
+
+
+STAFF_EMPLOYEE_ROLES = frozenset(
+    {
+        "super_admin",
+        "admin",
+        "branch_manager",
+        "branch_staff",
+        "cashier",
+        "kitchen_staff",
+    }
+)
 
 
 class User(UserMixin, db.Model):
@@ -187,6 +200,22 @@ class User(UserMixin, db.Model):
 
     def __repr__(self):
         return f"<User {self.email}>"
+
+
+@event.listens_for(User, "after_insert")
+def assign_staff_employee_id(_mapper, connection, target):
+    """Give every newly-created staff account a stable ID based on its DB user id."""
+    role = (target.role or "").strip().lower()
+    if role not in STAFF_EMPLOYEE_ROLES or target.employee_id:
+        return
+
+    employee_id = f"SC-STF-{target.id:06d}"
+    connection.execute(
+        User.__table__.update()
+        .where(User.__table__.c.id == target.id)
+        .values(employee_id=employee_id)
+    )
+    attributes.set_committed_value(target, "employee_id", employee_id)
 
 
 class LoginHistory(db.Model):
